@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    function isAdmin() {
+      return getUserRole() == 'admin';
+    }
+
+    function isManager() {
+      return getUserRole() == 'manager';
+    }
+
+    function canEditDogs() {
+      return isAdmin() || isManager();
+    }
+
+    function isSelf(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidRole(role) {
+      return role == 'admin' || role == 'manager' || role == 'staff';
+    }
+
+    function isValidSelfProfilePayload(userId) {
+      return isSelf(userId) &&
+        request.resource.data.uid == request.auth.uid &&
+        (request.auth.token.email == null || request.resource.data.email == request.auth.token.email) &&
+        isValidRole(request.resource.data.role);
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if canEditDogs() || isValidSelfProfilePayload(userId);
+      allow update: if (canEditDogs() &&
+        !(resource.data.role == 'admin' && request.resource.data.role != 'admin')) ||
+        (isSelf(userId) &&
+          request.resource.data.uid == resource.data.uid &&
+          request.resource.data.email == resource.data.email &&
+          request.resource.data.role == resource.data.role);
+      allow delete: if canEditDogs();
+    }
+
+    match /dogs/{dogId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if canEditDogs();
+
+      match /behavioralNotes/{noteId} {
+        allow read, create: if isAuthenticated();
+        allow update, delete: if canEditDogs();
+      }
+
+      match /feedingLogs/{logId} {
+        allow read, create: if isAuthenticated();
+        allow update, delete: if canEditDogs();
+      }
+
+      match /stoolLogs/{logId} {
+        allow read, create: if isAuthenticated();
+        allow update, delete: if canEditDogs();
+      }
+
+      match /dayTripLogs/{logId} {
+        allow read, create: if isAuthenticated();
+        allow update, delete: if canEditDogs();
+      }
+    }
+
+    match /cleaningChecklists/{checklistId} {
+      allow read: if isAuthenticated();
+      allow write: if canEditDogs();
+    }
+
+    match /cleaningCompletions/{completionId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /playgroupSessions/{sessionId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if canEditDogs();
+    }
+
+    // Supports collectionGroup('dayTripLogs') queries used by dashboard/day trips pages.
+    match /{path=**}/dayTripLogs/{logId} {
+      allow read: if isAuthenticated();
+    }
+  }
+}

@@ -1,0 +1,590 @@
+@import url('https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Nunito:wght@400;600;700;800&family=Permanent+Marker&family=Special+Elite&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+	color-scheme: light;
+
+	/* Core fonts */
+	--font-ui: 'Nunito', 'Avenir Next', 'Trebuchet MS', sans-serif;
+	--font-marker: 'Kalam', 'Segoe Print', 'Bradley Hand', cursive;
+	--font-permanent: 'Permanent Marker', 'Arial Black', sans-serif;
+	--font-printed: 'Special Elite', 'Courier New', monospace;
+	--font-typewriter: 'Special Elite', 'Courier New', monospace;
+
+	/* Whiteboard surface */
+	--board-white: #f4f6f8;
+	--board-sheen: #fafbfc;
+	--paper: #fffefa;
+	--paper-strong: #ffffff;
+	--board: #e8ecf0;
+	--board-deep: #d5dce4;
+
+	/* Ink & marker colors */
+	--ink-main: #1e2530;
+	--ink-soft: #3e5068;
+	--marker-black: #1a1f28;
+	--marker-blue: #1a6bb5;
+	--marker-blue-light: #4a9de0;
+	--marker-green: #1b7d50;
+	--marker-green-light: #3bae7a;
+	--marker-red: #c4342f;
+	--marker-red-light: #e06660;
+	--marker-orange: #c06a1f;
+	--marker-purple: #7b4baf;
+
+	/* Dry erase colors (slightly faded/chalky) */
+	--erase-blue: #2d80c4;
+	--erase-green: #289964;
+	--erase-red: #d64b45;
+	--erase-orange: #d48132;
+	--erase-purple: #8f5cc0;
+
+	/* Sticky note colors */
+	--sticky-yellow: #ffe66d;
+	--sticky-blue: #7dd3fc;
+	--sticky-pink: #f9a8d4;
+	--sticky-green: #86efac;
+	--sticky-orange: #fdba74;
+	--sticky-lilac: #c4b5fd;
+
+	/* Washi tape colors (semi-transparent) */
+	--washi-pink: rgba(244, 164, 188, 0.52);
+	--washi-blue: rgba(147, 197, 235, 0.48);
+	--washi-green: rgba(134, 215, 164, 0.45);
+	--washi-yellow: rgba(248, 225, 120, 0.5);
+	--washi-red: rgba(231, 141, 130, 0.42);
+	--washi-purple: rgba(186, 160, 222, 0.45);
+
+	/* Craft materials */
+	--kraft-paper: #c2a67c;
+	--kraft-light: #ddc9a3;
+	--cardstock-cream: #fdf5e6;
+	--masking-tape: rgba(255, 243, 200, 0.82);
+
+}
+
+html {
+	font-size: 18px;
+}
+
+/* ─── Animations ─── */
+
+@keyframes driftIn {
+	0% {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	100% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes subtlePulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.85;
+	}
+}
+
+/* ─── Base ─── */
+
+body {
+	@apply text-ink-900 antialiased;
+	background: var(--board-white);
+	background-image:
+		linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(244, 246, 248, 0.2) 40%, rgba(255, 255, 255, 0.3) 100%),
+		repeating-linear-gradient(
+			0deg,
+			transparent 0,
+			transparent 39px,
+			rgba(200, 210, 220, 0.07) 39px,
+			rgba(200, 210, 220, 0.07) 40px
+		);
+	color: var(--ink-main);
+	font-family: var(--font-ui);
+	line-height: 1.45;
+	min-height: 100vh;
+}
+
+#app {
+	min-height: 100vh;
+}
+
+h1,
+h2,
+h3 {
+	font-family: var(--font-permanent);
+	color: var(--marker-black);
+}
+
+main {
+	animation: driftIn 220ms ease-out;
+}
+
+/* ─── Marker text classes ─── */
+
+.whiteboard-hand {
+	font-family: var(--font-marker);
+	letter-spacing: 0.02em;
+}
+
+.permanent-marker {
+	font-family: var(--font-permanent);
+}
+
+.typewriter {
+	font-family: var(--font-typewriter);
+	letter-spacing: 0.03em;
+}
+
+/* Dry erase marker colors with slight "chalk" effect */
+.erase-marker-blue,
+.erase-marker-green,
+.erase-marker-red,
+.erase-marker-orange,
+.erase-marker-purple {
+	font-family: var(--font-marker);
+	font-weight: 900;
+	letter-spacing: 0.015em;
+	text-shadow:
+		0.62px 0 currentColor,
+		-0.62px 0 currentColor,
+		0 0.62px currentColor,
+		0 -0.4px currentColor,
+		0.34px 0.34px 0 currentColor;
+	-webkit-text-stroke: 0.2px currentColor;
+	paint-order: stroke fill;
+}
+
+.erase-marker-blue {
+	color: var(--erase-blue);
+}
+
+.erase-marker-green {
+	color: var(--erase-green);
+}
+
+.erase-marker-red {
+	color: var(--erase-red);
+}
+
+.erase-marker-orange {
+	color: var(--erase-orange);
+}
+
+.erase-marker-purple {
+	color: var(--erase-purple);
+}
+
+/* Permanent marker colors - bolder, darker */
+.marker-black {
+	color: var(--marker-black);
+	text-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.2);
+}
+
+.marker-blue {
+	color: var(--marker-blue);
+	text-shadow: 0 0.5px 0 rgba(26, 107, 181, 0.2);
+}
+
+.marker-green {
+	color: var(--marker-green);
+	text-shadow: 0 0.5px 0 rgba(27, 125, 80, 0.2);
+}
+
+.marker-red {
+	color: var(--marker-red);
+}
+
+.marker-orange {
+	color: var(--marker-orange);
+}
+
+.marker-purple {
+	color: var(--marker-purple);
+}
+
+/* ─── Printed paper effect ─── */
+
+.printed-paper {
+	background: var(--paper);
+	border: 1.5px solid #d0d8e0;
+	border-radius: 0.25rem;
+	box-shadow:
+		0 2px 4px rgba(0, 0, 0, 0.08),
+		0 10px 18px rgba(0, 0, 0, 0.09);
+	position: relative;
+}
+
+.printed-paper::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background: repeating-linear-gradient(
+		0deg,
+		transparent 0,
+		transparent 23px,
+		rgba(200, 210, 220, 0.08) 23px,
+		rgba(200, 210, 220, 0.08) 24px
+	);
+	pointer-events: none;
+}
+
+/* ─── Index card effect ─── */
+
+.index-card {
+	background: #fffdf7;
+	border: 1.5px solid #c8c0b0;
+	border-top: 3px solid var(--marker-blue);
+	border-radius: 0.35rem;
+	box-shadow:
+		0 2px 4px rgba(0, 0, 0, 0.08),
+		0 10px 18px rgba(0, 0, 0, 0.09);
+	position: relative;
+}
+
+.index-card::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	border-radius: inherit;
+	background: repeating-linear-gradient(
+		0deg,
+		transparent 0,
+		transparent 19px,
+		rgba(170, 190, 210, 0.12) 19px,
+		rgba(170, 190, 210, 0.12) 20px
+	);
+	pointer-events: none;
+}
+
+/* ─── Label maker (DYMO) style ─── */
+
+.label-maker {
+	display: inline-flex;
+	align-items: center;
+	font-family: var(--font-typewriter);
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: #ffffff;
+	background: #2a3240;
+	padding: 0.22rem 0.6rem;
+	border-radius: 0.14rem;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.12),
+		0 1px 2px rgba(0, 0, 0, 0.2);
+	line-height: 1.1;
+}
+
+.label-maker-blue {
+	background: #1e5a8e;
+}
+
+.label-maker-green {
+	background: #1a6d44;
+}
+
+.label-maker-red {
+	background: #a32e2a;
+}
+
+.label-maker-orange {
+	background: #a0591a;
+}
+
+.label-maker-purple {
+	background: #5c3588;
+}
+
+/* ─── Washi tape strips ─── */
+
+.washi-tape {
+	position: relative;
+}
+
+.washi-tape::before {
+	content: '';
+	position: absolute;
+	top: -0.5rem;
+	left: 50%;
+	transform: translateX(-50%) rotate(-2deg);
+	width: 3.4rem;
+	height: 0.9rem;
+	background: var(--washi-pink);
+	border-radius: 0.08rem;
+	z-index: 2;
+	box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.06);
+}
+
+.washi-tape-blue::before {
+	background: var(--washi-blue);
+	transform: translateX(-50%) rotate(1deg);
+}
+
+.washi-tape-green::before {
+	background: var(--washi-green);
+	transform: translateX(-50%) rotate(-1.5deg);
+}
+
+.washi-tape-yellow::before {
+	background: var(--washi-yellow);
+	transform: translateX(-50%) rotate(0.5deg);
+}
+
+.washi-tape-purple::before {
+	background: var(--washi-purple);
+	transform: translateX(-50%) rotate(-1deg);
+}
+
+/* Corner tape pieces */
+.tape-corner-tl::before {
+	content: '';
+	position: absolute;
+	top: -0.3rem;
+	left: -0.3rem;
+	width: 2rem;
+	height: 0.72rem;
+	background: var(--masking-tape);
+	transform: rotate(-42deg);
+	z-index: 2;
+	border-radius: 0.06rem;
+	box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.04);
+}
+
+.tape-corner-tr::after {
+	content: '';
+	position: absolute;
+	top: -0.3rem;
+	right: -0.3rem;
+	width: 2rem;
+	height: 0.72rem;
+	background: var(--masking-tape);
+	transform: rotate(42deg);
+	z-index: 2;
+	border-radius: 0.06rem;
+	box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.04);
+}
+
+/* ─── Pushpin style ─── */
+
+.pushpin {
+	position: relative;
+}
+
+.pushpin::before {
+	content: '';
+	position: absolute;
+	top: -0.28rem;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 0.64rem;
+	height: 0.64rem;
+	border-radius: 999px;
+	background: radial-gradient(circle at 35% 35%, #ff7878 0%, #d42d2d 70%);
+	border: 1px solid rgba(0, 0, 0, 0.25);
+	box-shadow:
+		0 1px 3px rgba(0, 0, 0, 0.2),
+		inset 0 1px 0 rgba(255, 255, 255, 0.35);
+	z-index: 3;
+}
+
+.pushpin-blue::before {
+	background: radial-gradient(circle at 35% 35%, #68a8ff 0%, #2563eb 70%);
+}
+
+.pushpin-green::before {
+	background: radial-gradient(circle at 35% 35%, #6ee7a0 0%, #16a34a 70%);
+}
+
+.pushpin-yellow::before {
+	background: radial-gradient(circle at 35% 35%, #fde047 0%, #ca8a04 70%);
+}
+
+/* ─── Marker underline effect ─── */
+
+.marker-underline {
+	position: relative;
+	display: inline;
+}
+
+.marker-underline::after {
+	content: '';
+	position: absolute;
+	left: -0.1em;
+	right: -0.1em;
+	bottom: -0.12em;
+	height: 0.22em;
+	background: rgba(26, 107, 181, 0.18);
+	border-radius: 0.1em;
+	transform: rotate(-0.3deg);
+}
+
+.marker-underline-green::after {
+	background: rgba(27, 125, 80, 0.18);
+}
+
+.marker-underline-red::after {
+	background: rgba(196, 52, 47, 0.18);
+}
+
+.marker-underline-yellow::after {
+	background: rgba(234, 179, 8, 0.22);
+}
+
+/* ─── Highlighter effect ─── */
+
+.highlighter-yellow {
+	background: linear-gradient(180deg, transparent 55%, rgba(255, 230, 109, 0.38) 55%, rgba(255, 230, 109, 0.38) 90%, transparent 90%);
+	padding: 0 0.12em;
+}
+
+.highlighter-green {
+	background: linear-gradient(180deg, transparent 55%, rgba(134, 239, 172, 0.35) 55%, rgba(134, 239, 172, 0.35) 90%, transparent 90%);
+	padding: 0 0.12em;
+}
+
+.highlighter-blue {
+	background: linear-gradient(180deg, transparent 55%, rgba(147, 197, 253, 0.35) 55%, rgba(147, 197, 253, 0.35) 90%, transparent 90%);
+	padding: 0 0.12em;
+}
+
+.highlighter-pink {
+	background: linear-gradient(180deg, transparent 55%, rgba(249, 168, 212, 0.35) 55%, rgba(249, 168, 212, 0.35) 90%, transparent 90%);
+	padding: 0 0.12em;
+}
+
+/* ─── Craft card styles ─── */
+
+.craft-card {
+	background: var(--paper);
+	border: 1.5px solid #c8cfd8;
+	border-radius: 0.4rem;
+	box-shadow:
+		0 2px 5px rgba(0, 0, 0, 0.08),
+		0 10px 20px rgba(0, 0, 0, 0.1);
+	position: relative;
+	overflow: visible;
+}
+
+/* ─── Whiteboard section divider ─── */
+
+.board-divider {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.2rem 0;
+}
+
+.board-divider::after {
+	content: '';
+	flex: 1;
+	height: 2px;
+	background: linear-gradient(90deg, var(--marker-black) 0%, rgba(30, 37, 48, 0.15) 100%);
+	border-radius: 1px;
+}
+
+/* ─── Sticker/stamp decorations ─── */
+
+.dog-stamp {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.7rem;
+	opacity: 0.6;
+}
+
+/* ─── Checkbox styled as marker check ─── */
+
+input[type='checkbox'] {
+	accent-color: var(--marker-green);
+}
+
+/* ─── Shared pill / status badge ─── */
+
+.pill {
+	display: inline-flex;
+	align-items: center;
+	border: 1.5px solid transparent;
+	border-radius: 0.2rem;
+	padding: 0.18rem 0.44rem;
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.pill-green  { background: #eaf9ee; border-color: #b9dbbf; color: #266740; }
+.pill-yellow { background: #fff8dd; border-color: #e7d187; color: #6d5210; }
+.pill-red    { background: #fff1ee; border-color: #e8beb8; color: #8c3e39; }
+.pill-blue   { background: #e8f5ff; border-color: #95bee1; color: #275982; }
+.pill-orange { background: #fff6dc; border-color: #e8c47a; color: #7a5000; }
+.pill-purple { background: #f3eeff; border-color: #c4aaee; color: #5b3b9a; }
+.pill-gray   { background: #f0f2f5; border-color: #c2c9d4; color: #4a5568; }
+.pill-foster { background: #fff3e0; border-color: #d4aa72; color: #7a4e10; }
+
+/* ─── Shared button base ─── */
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 1.9rem;
+	border: 1.5px solid var(--marker-black);
+	border-radius: 0.22rem;
+	padding: 0.25rem 0.58rem;
+	background: #ffffff;
+	font-family: var(--font-typewriter);
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--marker-black);
+	cursor: pointer;
+}
+
+.btn:disabled { opacity: 0.52; cursor: not-allowed; }
+.btn-fill { background: var(--marker-black); color: #ffffff; }
+.btn-danger { border-color: var(--marker-red); color: var(--marker-red); }
+.btn-danger:hover { background: #fff1ee; }
+
+/* ─── Mobile-first responsive helpers ─── */
+
+@media (max-width: 640px) {
+	.label-maker {
+		font-size: 0.68rem;
+		padding: 0.22rem 0.56rem;
+		letter-spacing: 0.13em;
+	}
+
+	.washi-tape::before {
+		width: 2.8rem;
+		height: 0.72rem;
+	}
+
+}
+
+@media (min-width: 768px) {
+	html {
+		font-size: 17px;
+	}
+}
+
+@media (min-width: 1180px) {
+	html {
+		font-size: 16px;
+	}
+}

@@ -1,0 +1,153 @@
+import { differenceInDays, differenceInMonths, differenceInYears, format, getDay, isSameDay, startOfDay } from 'date-fns';
+import type { DateValue, DayTripStatus, IsolationStatus } from '$lib/types';
+
+const MIN_DAYS_AFTER_SURGERY_FOR_BATH = 10;
+
+export function toDate(value: DateValue | string | null | undefined): Date | null {
+	if (!value) return null;
+	if (value instanceof Date) return value;
+	if (typeof value === 'string') return new Date(value);
+	if (typeof (value as { toDate?: () => Date }).toDate === 'function') {
+		return (value as { toDate: () => Date }).toDate();
+	}
+	return null;
+}
+
+export function toDateString(value: DateValue | string | null | undefined) {
+	const date = toDate(value);
+	return date ? date.toISOString() : null;
+}
+
+export function formatDate(value: DateValue | string | null | undefined, fallback = '—') {
+	const date = toDate(value);
+	return date ? format(date, 'MMM d, yyyy') : fallback;
+}
+
+export function formatDateTime(value: DateValue | string | null | undefined, fallback = '—') {
+	const date = toDate(value);
+	return date ? format(date, 'MMM d, yyyy h:mm a') : fallback;
+}
+
+export function normalizeDay(value: DateValue | string | null | undefined) {
+	const date = toDate(value);
+	return date ? startOfDay(date) : null;
+}
+
+export function daysSince(value: DateValue | string | null | undefined, now = new Date()) {
+	const date = toDate(value);
+	if (!date) return null;
+	return Math.max(0, differenceInDays(startOfDay(now), startOfDay(date)));
+}
+
+export function ageInYears(value: DateValue | string | null | undefined, now = new Date()) {
+	const date = toDate(value);
+	if (!date) return null;
+	const days = differenceInDays(startOfDay(now), startOfDay(date));
+	return Math.max(0, Math.floor(days / 365));
+}
+
+export function formatAge(value: DateValue | string | null | undefined, now = new Date()) {
+	const date = toDate(value);
+	if (!date) return '—';
+	const start = startOfDay(date);
+	const end = startOfDay(now);
+	const years = Math.max(0, differenceInYears(end, start));
+	if (years < 1) {
+		const months = Math.max(0, differenceInMonths(end, start));
+		return `${months} mos`;
+	}
+	return `${years} yrs`;
+}
+
+export function isMondayOrThursday(value: DateValue | string | null | undefined) {
+	const date = toDate(value);
+	if (!date) return false;
+	const day = getDay(date);
+	return day === 1 || day === 4;
+}
+
+export function isSameCalendarDay(a: DateValue | string | null | undefined, b: DateValue | string | null | undefined) {
+	const dateA = toDate(a);
+	const dateB = toDate(b);
+	if (!dateA || !dateB) return false;
+	return isSameDay(dateA, dateB);
+}
+
+export function isSurgeryToday(surgeryDate: DateValue | string | null | undefined, today = new Date()) {
+	if (!surgeryDate) return false;
+	return isSameCalendarDay(surgeryDate, today) && isMondayOrThursday(today);
+}
+
+export function bathEligible(surgeryDate: DateValue | string | null | undefined, today = new Date()) {
+	if (!surgeryDate) return true;
+	const date = toDate(surgeryDate);
+	if (!date) return true;
+	const days = differenceInDays(startOfDay(today), startOfDay(date));
+	if (days < 0) return true;
+	return days >= MIN_DAYS_AFTER_SURGERY_FOR_BATH;
+}
+
+export interface DayTripEligibility {
+	eligible: boolean;
+	status: DayTripStatus;
+	reasons: string[];
+}
+
+export function checkDayTripEligibility(
+	intakeDate: DateValue | string | null | undefined,
+	isVaccinated: boolean,
+	isFixed: boolean,
+	dayTripStatus: DayTripStatus,
+	isolationStatus: IsolationStatus,
+	dayTripNotes: string | null,
+	today = new Date()
+): DayTripEligibility {
+	const reasons: string[] = [];
+	const intake = toDate(intakeDate);
+	const hasIntake = intake !== null && !Number.isNaN(intake.getTime());
+	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
+	const hasBehaviorReason = trimmedTripNotes.length > 0;
+	const behaviorBlocked = dayTripStatus === 'ineligible' && isolationStatus === 'none';
+
+	if (isolationStatus === 'sick') {
+		reasons.push('In isolation: Sick');
+	} else if (isolationStatus === 'bite_quarantine') {
+		reasons.push('In isolation: Bite quarantine');
+	}
+
+	if (!hasIntake) {
+		reasons.push('Must have intake date');
+	}
+
+	if (!isVaccinated) {
+		reasons.push('Must be vaccinated');
+	}
+
+	if (!isFixed) {
+		reasons.push('Must be spayed/neutered');
+	}
+
+	if (behaviorBlocked) {
+		reasons.push(hasBehaviorReason ? `Behavior check: ${trimmedTripNotes}` : 'Behavior check is on. Add why.');
+	}
+
+	if (dayTripStatus === 'difficult' && isolationStatus === 'none') {
+		reasons.push(hasBehaviorReason ? `Difficult: ${trimmedTripNotes}` : 'Difficult dog - adults only');
+	}
+
+	const hasBlockingReason = reasons.some((reason) => !reason.startsWith('Difficult:') && reason !== 'Difficult dog - adults only');
+	const eligible = !hasBlockingReason;
+
+	let status: DayTripStatus = 'ineligible';
+	if (isolationStatus !== 'none') {
+		status = 'ineligible';
+	} else if (behaviorBlocked) {
+		status = 'ineligible';
+	} else if (dayTripStatus === 'difficult') {
+		status = 'difficult';
+	} else if (hasIntake && isVaccinated && isFixed) {
+		status = 'eligible';
+	}
+
+	return { eligible, status, reasons };
+}
