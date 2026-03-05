@@ -291,6 +291,8 @@
 	function specialFeedingReasons(dog: Dog) {
 		const reasons: string[] = [];
 		if (isOwnFood(dog)) reasons.push('Own Food');
+		if (dog.hasOwnFood && dog.transitionToHills === true) reasons.push('Transition to Hills');
+		if (dog.hasOwnFood && dog.transitionToHills === false) reasons.push('No Hills Transition');
 		if (isPuppyFood(dog)) reasons.push('Puppy Food');
 		if (hasSupplements(dog)) reasons.push('Supplements');
 		if (hasSpecialDiet(dog)) reasons.push('Special Diet');
@@ -868,10 +870,8 @@
 
 	.feeding-map-sheet,
 	.feeding-reference {
-		border: 2px solid var(--marker-black);
-		border-radius: 0.24rem;
 		background: #ffffff;
-		padding: 0.72rem;
+		padding: 0;
 		box-shadow: none;
 	}
 
@@ -1004,7 +1004,6 @@
 		margin-top: 0.62rem;
 		background: #fbfdff;
 		border-radius: 0.7rem;
-		border: 1px solid #c9d6e5;
 	}
 
 	.feeding-kennel-cell {

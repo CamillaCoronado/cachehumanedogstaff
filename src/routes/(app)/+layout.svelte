@@ -35,7 +35,7 @@
 		previousTabIndex = resolveTabIndex(window.location.pathname);
 	});
 
-	$: if ($authReady && !$authUser && firebaseEnabled) {
+	$: if ($authReady && !$authUser) {
 		goto('/login');
 	}
 
@@ -94,7 +94,7 @@
 
 </script>
 
-{#if !$authReady || (firebaseEnabled && !$authUser)}
+{#if !$authReady || !$authUser}
 		<div class="shelter-shell">
 			<div class="mx-auto flex min-h-screen w-full max-w-6xl items-center justify-center px-6">
 				<div class="loading-note">
@@ -111,11 +111,11 @@
 		</div>
 {:else}
 	<div class="shelter-shell pb-8">
-		<div class="mx-auto w-full max-w-6xl px-3 pt-4 sm:px-6 sm:pt-5">
+		<div class="mx-auto w-full max-w-6xl pt-4 sm:px-6 sm:pt-5">
 			<!-- Whiteboard frame -->
 			<div class="whiteboard-frame">
 				<!-- Aluminum tray at bottom of whiteboard -->
-				<div class="whiteboard-surface">
+				<div class={`whiteboard-surface ${isDashboardPage ? 'whiteboard-surface-dashboard' : ''}`}>
 
 					{#if !isDashboardPage}
 						<!-- Header strip - permanent marker on whiteboard -->
@@ -225,6 +225,9 @@
 	.shelter-shell {
 		min-height: 100vh;
 		background: linear-gradient(180deg, #dde4ec 0%, #d0d8e1 34%, #c6ced8 100%);
+		width: 100%;
+		max-width: 100vw;
+		overflow-x: clip;
 	}
 
 	.loading-note {
@@ -255,6 +258,8 @@
 	.whiteboard-frame {
 		position: relative;
 		border-radius: 0.35rem;
+		width: 100%;
+		max-width: 100vw;
 	}
 
 	.whiteboard-surface {
@@ -264,6 +269,8 @@
 		background:
 			linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(247, 250, 253, 0.92) 100%),
 			#f5f7f9;
+		width: 100%;
+		max-width: 100vw;
 	}
 
 	.whiteboard-surface::before {
@@ -612,11 +619,15 @@
 		margin-top: 0.56rem;
 		display: grid;
 		gap: 0.8rem;
+		width: 100%;
+		max-width: 100vw;
 	}
 
 	.page-stage {
 		min-height: 15rem;
 		perspective: 1400px;
+		width: 100%;
+		max-width: 100vw;
 	}
 
 	.page-paper {
@@ -625,6 +636,17 @@
 		border-radius: 0.34rem;
 		padding: 0.74rem 0.62rem;
 		background: var(--paper);
+		width: 100%;
+		max-width: 100vw;
+		min-width: 0;
+		overflow-x: clip;
+	}
+
+	.page-paper > :global(*) {
+		width: 100%;
+		max-width: min(100%, 100vw);
+		min-width: 0;
+		box-sizing: border-box;
 	}
 
 	.page-paper.page-paper-dashboard {
@@ -777,7 +799,7 @@
 		}
 
 		.page-paper {
-			padding: 0.62rem 0.54rem;
+			padding: 0.62rem 0;
 		}
 
 		.lead-text {
@@ -790,6 +812,10 @@
 	}
 
 	@media (max-width: 959px) {
+		.whiteboard-surface.whiteboard-surface-dashboard {
+			padding-top: 3.25rem;
+		}
+
 		.header-lead {
 			display: none;
 		}

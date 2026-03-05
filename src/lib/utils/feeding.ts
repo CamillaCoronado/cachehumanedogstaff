@@ -134,6 +134,7 @@ export function isPuppyFood(dog: Dog): boolean {
 }
 
 export function isOwnFood(dog: Dog): boolean {
+	if (dog.hasOwnFood === true) return true;
 	const merged = `${(dog.foodType ?? '').trim().toLowerCase()} ${(dog.dietaryNotes ?? '').trim().toLowerCase()}`;
 	return includesAny(merged, ['own food', 'from home', 'home food', 'brought', 'personal food']);
 }
@@ -150,12 +151,17 @@ export function foodTypeTone(dog: Dog): 'own' | 'puppy' | 'normal' | 'special' {
 }
 
 export function foodTypeInstruction(dog: Dog): string {
-	if (isOwnFood(dog)) return 'Own Food';
+	if (isOwnFood(dog)) {
+		if (dog.transitionToHills === true) return 'Own Food -> Transition to Hills';
+		if (dog.transitionToHills === false) return 'Own Food (No Hills Transition)';
+		return 'Own Food';
+	}
 	if (isPuppyFood(dog)) return 'Puppy Food';
 	if (isNormalFood(dog)) return 'Normal Food';
 	return dog.foodType?.trim() || 'Unknown Food';
 }
 
 export function foodTypeLabel(dog: Dog): string {
+	if (isOwnFood(dog)) return 'Own Food';
 	return dog.foodType?.trim() || 'Unknown';
 }

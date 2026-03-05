@@ -34,6 +34,9 @@ export interface Dog {
 	foodType: string;
 	foodAmount: string;
 	dietaryNotes: string;
+	photoUrl?: string | null;
+	hasOwnFood?: boolean;
+	transitionToHills?: boolean | null;
 	origin: string;
 	markings?: string;
 	hiddenComments?: string;

@@ -31,6 +31,9 @@ interface StoredDog {
 	foodType: string;
 	foodAmount: string;
 	dietaryNotes: string;
+	photoUrl?: string | null;
+	hasOwnFood?: boolean;
+	transitionToHills?: boolean | null;
 	origin?: string;
 	markings?: string;
 	hiddenComments?: string;
@@ -142,6 +145,9 @@ function serializeDog(dog: Dog): StoredDog {
 		foodType: dog.foodType,
 		foodAmount: dog.foodAmount,
 		dietaryNotes: dog.dietaryNotes,
+		photoUrl: dog.photoUrl ?? null,
+		hasOwnFood: dog.hasOwnFood ?? false,
+		transitionToHills: dog.transitionToHills ?? null,
 		origin: dog.origin,
 		markings: dog.markings ?? '',
 		hiddenComments: dog.hiddenComments ?? '',
@@ -210,6 +216,9 @@ function deserializeDog(stored: StoredDog): Dog {
 		foodType: stored.foodType,
 		foodAmount: stored.foodAmount,
 		dietaryNotes: stored.dietaryNotes,
+		photoUrl: typeof stored.photoUrl === 'string' ? stored.photoUrl : null,
+		hasOwnFood: stored.hasOwnFood ?? false,
+		transitionToHills: typeof stored.transitionToHills === 'boolean' ? stored.transitionToHills : null,
 		origin: stored.origin ?? '',
 		markings: stored.markings ?? '',
 		hiddenComments: stored.hiddenComments ?? '',

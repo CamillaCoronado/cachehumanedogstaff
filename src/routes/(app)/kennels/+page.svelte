@@ -439,7 +439,7 @@
 				</div>
 
 				<div class="rounded-3xl border border-ink-200 bg-white p-4 shadow-card">
-					<div class="flex items-center justify-between">
+					<div class="flex flex-wrap items-center justify-between gap-2">
 						<p class="text-xs uppercase tracking-[0.2em] text-ink-500">Unassigned dogs</p>
 						<span class="text-xs font-semibold text-ink-600">{unassigned.length}</span>
 					</div>
@@ -474,7 +474,7 @@
 				</div>
 
 				<div class="rounded-3xl border border-ink-200 bg-white p-3 shadow-card md:hidden">
-					<div class="flex items-center justify-between">
+					<div class="flex flex-wrap items-center justify-between gap-2">
 						<p class="text-xs uppercase tracking-[0.2em] text-ink-500">Dogs</p>
 						<span class="text-xs font-semibold text-ink-600">{activeDogs.length}</span>
 					</div>
@@ -538,10 +538,6 @@
 		border-bottom: 4px solid var(--marker-black);
 	}
 
-	.kennels-body {
-		padding: 0.72rem;
-	}
-
 	.kennel-title {
 		margin: 0.3rem 0 0;
 		font-family: var(--font-printed);
@@ -599,7 +595,6 @@
 	.map-sheet {
 		border-radius: 0.9rem;
 		background: #ffffff;
-		padding: 0.75rem;
 		box-shadow: 0 6px 10px rgba(40, 53, 67, 0.08);
 	}
 

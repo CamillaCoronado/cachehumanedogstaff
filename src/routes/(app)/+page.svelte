@@ -555,6 +555,8 @@
 	.marker-dashboard {
 		position: relative;
 		width: 100%;
+		max-width: 100vw;
+		min-width: 0;
 		--ink-red-soft: #b8423c;
 		--ink-purple-soft: #7656a8;
 		--ink-blue-soft: #2f79b6;
@@ -575,6 +577,9 @@
 		border: 4px solid var(--marker-black);
 		background: rgba(255, 255, 255, 0.88);
 		overflow: visible;
+		width: 100%;
+		max-width: 100%;
+		min-width: 0;
 	}
 
 	.title-strip {
@@ -584,6 +589,7 @@
 		gap: 0.9rem;
 		padding: 0.85rem 0.8rem 0.8rem;
 		border-bottom: 4px solid var(--marker-black);
+		min-width: 0;
 	}
 
 	.board-title {
@@ -602,6 +608,7 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 0.35rem;
 		width: clamp(7.6rem, 39vw, 9.4rem);
+		flex-shrink: 0;
 	}
 
 	.shift-magnet {
@@ -958,6 +965,28 @@
 			right: 0.85rem;
 			width: 15rem;
 			margin: 0;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.title-strip {
+			gap: 0.48rem;
+			padding: 0.74rem 0.62rem 0.7rem;
+		}
+
+		.board-title {
+			font-size: clamp(1.8rem, 8vw, 2.45rem);
+			letter-spacing: 0.05em;
+		}
+
+		.magnet-group {
+			width: clamp(6.6rem, 35vw, 8.2rem);
+			gap: 0.24rem;
+		}
+
+		.shift-magnet {
+			min-height: 2.15rem;
+			font-size: 0.98rem;
 		}
 	}
 </style>

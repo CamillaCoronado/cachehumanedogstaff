@@ -310,25 +310,35 @@
 
 		{#if !editMode}
 			<div class="kennel-scene">
-				<article class="kennel-sheet">
-				<div class="kennel-clip" aria-hidden="true"></div>
-				<div class="kennel-sheet-inner">
-					<ul class="kennel-rules typewriter">
-						<li>Please do not open kennel doors or reach into kennels.</li>
-						<li>Dogs do not display their full personality in kennels.</li>
-						<li>Ask a staff member for assistance meeting adoptable dogs.</li>
-					</ul>
+					<article class="kennel-sheet">
+					<div class="kennel-clip" aria-hidden="true"></div>
+					<div class="kennel-sheet-inner">
+						<div class="kennel-adoption-banner">
+							<div class={`whiteboard-status-tag ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
+							<p class={`whiteboard-alert typewriter ${adoptionToneClass}`}>{adoptionNotice}</p>
+						</div>
 
 					<div class="kennel-sheet-main">
 						<div class="kennel-photo">
 							<div class="kennel-photo-frame">
-								<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
+								{#if dog.photoUrl}
+									<img
+										class="kennel-photo-image"
+										src={dog.photoUrl}
+										alt={`Photo of ${dog.name}`}
+										loading="lazy"
+									/>
+								{:else}
+									<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
+								{/if}
 							</div>
-							<p class="kennel-photo-label typewriter">Photo pending upload</p>
+							<p class="kennel-photo-label typewriter">
+								{dog.photoUrl ? 'Photo on file' : canEdit ? 'Photo pending upload (use Edit Dog)' : 'Photo pending upload'}
+							</p>
 						</div>
 
 						<div class="kennel-facts typewriter">
-							<p class="kennel-facts-title">{dog.name} - {dog.id}</p>
+							<p class="kennel-facts-title">{dog.name}</p>
 								<p><span>Original Entry:</span> {formatDate(dog.originalIntakeDate)}</p>
 								<p><span>Current Entry:</span> {formatDate(dog.intakeDate)}</p>
 								<p><span>Time at Shelter:</span> {shelterTimeLabel(dog.intakeDate)}</p>
@@ -344,6 +354,13 @@
 							<p><span>Kennel:</span> {dog.outdoorKennelAssignment || 'Unassigned'}</p>
 							<p><span>Status:</span> {dog.status === 'active' ? 'Active' : 'Adopted'}</p>
 							<p><span>Food:</span> {dog.foodType} ({dog.foodAmount || 'TBD'})</p>
+							<p><span>Own Food:</span> {dog.hasOwnFood ? 'Yes' : 'No'}</p>
+							{#if dog.hasOwnFood}
+								<p>
+									<span>Transition to Hills:</span>
+									{dog.transitionToHills === true ? 'Yes' : dog.transitionToHills === false ? 'No' : 'Not set'}
+								</p>
+							{/if}
 							<p><span>Microchipped:</span> {dog.isMicrochipped ? 'Yes' : 'No'}</p>
 						</div>
 					</div>
@@ -365,8 +382,6 @@
 				</article>
 
 				<aside class="kennel-whiteboard">
-				<div class={`whiteboard-status-tag ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
-				<p class={`whiteboard-alert typewriter ${adoptionToneClass}`}>{adoptionNotice}</p>
 				{#if whiteboardNote}
 					<p class={`whiteboard-note ${whiteboardNoteToneClass}`}>{whiteboardNote}</p>
 				{/if}
@@ -481,7 +496,7 @@
 
 		<div class="grid gap-4 lg:grid-cols-2">
 			<div class="rounded-3xl bg-white p-6 shadow-card">
-				<div class="flex items-center justify-between">
+				<div class="flex flex-wrap items-center justify-between gap-2">
 					<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Behavioral Notes</h3>
 					<button class="text-xs font-semibold text-brand-600" on:click={handleNote}>Add Note</button>
 				</div>
@@ -505,11 +520,19 @@
 			</div>
 			<div class="space-y-4">
 				<div class="rounded-3xl bg-white p-6 shadow-card">
-					<div class="flex items-center justify-between">
+					<div class="flex flex-wrap items-center justify-between gap-2">
 						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Feeding History</h3>
-						<div class="flex gap-2 text-xs">
-							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={fromDate} />
-							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={toDateFilter} />
+						<div class="flex w-full flex-wrap gap-2 text-xs sm:w-auto">
+							<input
+								type="date"
+								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
+								bind:value={fromDate}
+							/>
+							<input
+								type="date"
+								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
+								bind:value={toDateFilter}
+							/>
 						</div>
 					</div>
 					<div class="mt-4 overflow-x-auto">
@@ -542,11 +565,19 @@
 					</div>
 				</div>
 				<div class="rounded-3xl bg-white p-6 shadow-card">
-					<div class="flex items-center justify-between">
+					<div class="flex flex-wrap items-center justify-between gap-2">
 						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Stool Logs</h3>
-						<div class="flex gap-2 text-xs">
-							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={stoolFromDate} />
-							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={stoolToDateFilter} />
+						<div class="flex w-full flex-wrap gap-2 text-xs sm:w-auto">
+							<input
+								type="date"
+								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
+								bind:value={stoolFromDate}
+							/>
+							<input
+								type="date"
+								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
+								bind:value={stoolToDateFilter}
+							/>
 						</div>
 					</div>
 					<div class="mt-4 overflow-x-auto">
@@ -603,6 +634,8 @@
 	.dog-detail-board {
 		display: grid;
 		gap: 0.88rem;
+		max-width: 100%;
+		min-width: 0;
 	}
 
 	.dog-detail-title {
@@ -714,6 +747,8 @@
 	.kennel-whiteboard {
 		position: relative;
 		z-index: 1;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.kennel-sheet {
@@ -742,22 +777,17 @@
 		gap: 0.68rem;
 	}
 
-	.kennel-rules {
-		margin: 0;
-		padding-left: 1rem;
-		font-size: 0.62rem;
-		line-height: 1.28;
-		color: #4b5d76;
-	}
-
-	.kennel-rules li {
-		margin-bottom: 0.16rem;
+	.kennel-adoption-banner {
+		display: grid;
+		gap: 0.4rem;
+		justify-items: start;
 	}
 
 	.kennel-sheet-main {
 		display: grid;
 		gap: 0.68rem;
 		align-items: start;
+		min-width: 0;
 	}
 
 	.kennel-photo {
@@ -785,6 +815,14 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		overflow: hidden;
+	}
+
+	.kennel-photo-image {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
 	}
 
 	.kennel-photo-label {
@@ -806,10 +844,12 @@
 		font-family: var(--font-printed);
 		font-size: 0.76rem;
 		color: #1c2b43;
+		overflow-wrap: anywhere;
 	}
 
 	.kennel-facts p {
 		margin: 0.08rem 0;
+		overflow-wrap: anywhere;
 	}
 
 	.kennel-facts span {
@@ -929,7 +969,7 @@
 
 	.whiteboard-facts div {
 		display: grid;
-		grid-template-columns: 7.3rem 1fr;
+		grid-template-columns: minmax(0, 7.3rem) minmax(0, 1fr);
 		gap: 0.36rem;
 		border-top: 1px dashed #c5ceda;
 		padding-top: 0.28rem;
@@ -944,6 +984,8 @@
 
 	.whiteboard-facts dd {
 		margin: 0;
+		min-width: 0;
+		overflow-wrap: anywhere;
 	}
 
 	.whiteboard-trip {

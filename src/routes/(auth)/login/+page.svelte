@@ -39,7 +39,6 @@
 	<div class="login-heading">
 		<span class="label-maker label-maker-blue">Cache Humane Society</span>
 		<h1 class="login-title">Staff Sign-In Board</h1>
-		<p class="login-sub whiteboard-hand erase-marker-blue">Sign in with your Google account to manage shelter operations.</p>
 	</div>
 
 	{#if !firebaseEnabled}
@@ -55,7 +54,6 @@
 			{#if errorMessage}
 				<p class="login-status login-error">{errorMessage}</p>
 			{/if}
-			<p class="login-status login-info">Email/password login is disabled. Google sign-in only.</p>
 		</div>
 	{/if}
 

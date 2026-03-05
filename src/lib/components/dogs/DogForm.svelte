@@ -13,6 +13,7 @@
 	} from '$lib/types';
 	import { isMondayOrThursday, formatDate, toDate } from '$lib/utils/dates';
 	import { estimateFoodAmountPerMeal } from '$lib/utils/feeding';
+	import { deleteDogPhotoByUrl, uploadDogPhotoDataUrl } from '$lib/firebase/storage';
 
 	export let value: Dog;
 	export let disabled = false;
@@ -21,6 +22,11 @@
 	let surgeryError = '';
 	let suggestedFoodAmount = '';
 	let lastAutoFoodAmount = '';
+	let photoUploadError = '';
+	let photoUploading = false;
+	const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+	const MAX_PHOTO_DATA_URL_LENGTH = 900_000;
+	const MAX_PHOTO_SIDE = 1200;
 
 	const foodTypes = ['Normal', 'No Chicken or Fish', 'Puppy Food'];
 	const sexOptions: { value: DogSex; label: string }[] = [
@@ -103,10 +109,124 @@
 		dispatch('change', { value, valid: !surgeryError });
 	}
 
+	function handleOwnFoodChange(checked: boolean) {
+		value = {
+			...value,
+			hasOwnFood: checked,
+			transitionToHills: checked ? (value.transitionToHills ?? null) : null
+		} as Dog;
+		dispatch('change', { value, valid: !surgeryError });
+	}
+
+	function handleTransitionToHillsSelect(newValue: string) {
+		const transitionToHills = newValue === 'yes' ? true : newValue === 'no' ? false : null;
+		value = { ...value, transitionToHills } as Dog;
+		dispatch('change', { value, valid: !surgeryError });
+	}
+
 	function handleSelect(field: keyof Dog, newValue: string) {
 		const next = { ...value, [field]: newValue } as Dog;
 		value = field === 'foodType' ? maybeAutofillFoodAmount(value, next) : next;
 		dispatch('change', { value, valid: !surgeryError });
+	}
+
+	async function handlePhotoUpload(event: Event) {
+		const input = event.currentTarget as HTMLInputElement | null;
+		const file = input?.files?.[0];
+		photoUploadError = '';
+
+		if (!file) return;
+		if (!file.type.startsWith('image/')) {
+			photoUploadError = 'Please choose an image file.';
+			if (input) input.value = '';
+			return;
+		}
+		if (file.size > MAX_PHOTO_BYTES) {
+			photoUploadError = 'Photo is too large. Use an image under 8MB.';
+			if (input) input.value = '';
+			return;
+		}
+
+		try {
+			photoUploading = true;
+			const source = await readFileAsDataUrl(file);
+			const optimized = await optimizePhoto(source, file.type);
+			if (optimized.length > MAX_PHOTO_DATA_URL_LENGTH) {
+				photoUploadError = 'Photo is still too large after compression. Try a smaller image.';
+				return;
+			}
+			const previousPhotoUrl = value.photoUrl;
+			const uploadedUrl = await uploadDogPhotoDataUrl(optimized, {
+				dogId: value.id && value.id !== 'draft' ? value.id : null,
+				mimeType: file.type
+			});
+			value = { ...value, photoUrl: uploadedUrl } as Dog;
+			dispatch('change', { value, valid: !surgeryError });
+			if (previousPhotoUrl && previousPhotoUrl !== uploadedUrl) {
+				await deleteDogPhotoByUrl(previousPhotoUrl);
+			}
+		} catch (error) {
+			console.error(error);
+			photoUploadError = 'Unable to upload photo to Firebase Storage.';
+		} finally {
+			photoUploading = false;
+			if (input) input.value = '';
+		}
+	}
+
+	async function clearPhoto() {
+		photoUploadError = '';
+		const previousPhotoUrl = value.photoUrl;
+		if (!previousPhotoUrl) return;
+		try {
+			photoUploading = true;
+			await deleteDogPhotoByUrl(previousPhotoUrl);
+		} catch (error) {
+			console.error(error);
+		} finally {
+			photoUploading = false;
+		}
+		value = { ...value, photoUrl: null } as Dog;
+		dispatch('change', { value, valid: !surgeryError });
+	}
+
+	function readFileAsDataUrl(file: File) {
+		return new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => {
+				if (typeof reader.result === 'string') resolve(reader.result);
+				else reject(new Error('Could not read image file.'));
+			};
+			reader.onerror = () => reject(reader.error ?? new Error('Could not read image file.'));
+			reader.readAsDataURL(file);
+		});
+	}
+
+	function loadImage(dataUrl: string) {
+		return new Promise<HTMLImageElement>((resolve, reject) => {
+			const image = new Image();
+			image.onload = () => resolve(image);
+			image.onerror = () => reject(new Error('Could not load image.'));
+			image.src = dataUrl;
+		});
+	}
+
+	async function optimizePhoto(dataUrl: string, mimeType: string) {
+		const image = await loadImage(dataUrl);
+		const longestSide = Math.max(image.width || 1, image.height || 1);
+		const scale = Math.min(1, MAX_PHOTO_SIDE / longestSide);
+		const width = Math.max(1, Math.round((image.width || 1) * scale));
+		const height = Math.max(1, Math.round((image.height || 1) * scale));
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		const context = canvas.getContext('2d');
+		if (!context) throw new Error('Could not process image.');
+		context.drawImage(image, 0, 0, width, height);
+		const outputType = mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
+		return outputType === 'image/png'
+			? canvas.toDataURL(outputType)
+			: canvas.toDataURL(outputType, 0.82);
 	}
 
 	function handleBehaviorBlockToggle(checked: boolean) {
@@ -265,6 +385,52 @@
 			<p class="form-hint">Chart suggestion: {suggestedFoodAmount} per meal.</p>
 		{/if}
 	</div>
+	<div class="form-field md:col-span-2">
+		<label class="form-label typewriter">Photo</label>
+		<div class="form-photo-shell">
+			<div class="form-photo-preview-wrap">
+				{#if value.photoUrl}
+					<img
+						class="form-photo-preview"
+						src={value.photoUrl}
+						alt={`Photo of ${value.name || 'dog'}`}
+						loading="lazy"
+					/>
+				{:else}
+					<div class="form-photo-placeholder typewriter">No photo uploaded</div>
+				{/if}
+			</div>
+				<div class="form-photo-actions">
+					<input
+						type="file"
+						accept="image/*"
+						class="form-input form-file-input"
+						disabled={disabled || photoUploading}
+						on:change={handlePhotoUpload}
+					/>
+					{#if value.photoUrl}
+						<button
+							type="button"
+							class="form-choice-btn"
+							disabled={disabled || photoUploading}
+							on:click={clearPhoto}
+						>
+							Remove Photo
+						</button>
+					{/if}
+				</div>
+			</div>
+			<p class="form-hint">
+				{#if photoUploading}
+					Uploading to Firebase...
+				{:else}
+					Upload from your phone or computer. Saved to Firebase with this dog profile.
+				{/if}
+			</p>
+			{#if photoUploadError}
+				<p class="form-error">{photoUploadError}</p>
+			{/if}
+		</div>
 	<div class="form-section md:col-span-2">
 		<h4 class="form-section-title permanent-marker">Shelter Entry History</h4>
 		<div class="grid gap-4 md:grid-cols-2">
@@ -370,6 +536,35 @@
 			bind:value={value.dietaryNotes}
 			on:input={(event) => handleInput('dietaryNotes', event.currentTarget.value)}
 		></textarea>
+	</div>
+	<div class="form-field">
+		<label class="form-label typewriter">Has Own Food</label>
+		<label class="flex items-center gap-2 cursor-pointer">
+			<input
+				type="checkbox"
+				class="form-checkbox"
+				disabled={disabled}
+				checked={value.hasOwnFood ?? false}
+				on:change={(event) => handleOwnFoodChange(event.currentTarget.checked)}
+			/>
+			<span class="text-sm" style="color: var(--marker-black);">Dog came with personal food</span>
+		</label>
+	</div>
+	<div class="form-field">
+		<label class="form-label typewriter">Transition to Hills</label>
+		<select
+			class="form-input"
+			disabled={disabled || !(value.hasOwnFood ?? false)}
+			value={value.transitionToHills === true ? 'yes' : value.transitionToHills === false ? 'no' : ''}
+			on:change={(event) => handleTransitionToHillsSelect(event.currentTarget.value)}
+		>
+			<option value="">Select plan</option>
+			<option value="yes">Yes, transition to Hills</option>
+			<option value="no">No, keep own food</option>
+		</select>
+		{#if !(value.hasOwnFood ?? false)}
+			<p class="form-hint">Only applies when dog has own food.</p>
+		{/if}
 	</div>
 	<div class="form-section md:col-span-2">
 		<h4 class="form-section-title permanent-marker">Meet and Greet Profile</h4>
@@ -587,63 +782,63 @@
 
 	<div class="form-section md:col-span-2">
 		<h4 class="form-section-title permanent-marker">Medical Status</h4>
-		<div class="grid gap-4 md:grid-cols-2">
-			<div class="flex items-center gap-4">
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						class="form-checkbox"
+			<div class="grid gap-4 md:grid-cols-2">
+				<div class="form-inline-row">
+					<label class="flex items-center gap-2 cursor-pointer min-w-0">
+						<input
+							type="checkbox"
+							class="form-checkbox"
 						disabled={disabled}
 						checked={value.isMicrochipped}
 						on:change={(event) => handleCheckbox('isMicrochipped', event.currentTarget.checked)}
-					/>
-					<span class="text-sm" style="color: var(--marker-black);">Microchipped</span>
-				</label>
-			</div>
-			<div class="flex items-center gap-4">
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						class="form-checkbox"
+						/>
+						<span class="text-sm" style="color: var(--marker-black);">Microchipped</span>
+					</label>
+				</div>
+				<div class="form-inline-row">
+					<label class="flex items-center gap-2 cursor-pointer min-w-0">
+						<input
+							type="checkbox"
+							class="form-checkbox"
 						disabled={disabled}
 						checked={value.isVaccinated}
 						on:change={(event) => handleCheckbox('isVaccinated', event.currentTarget.checked)}
 					/>
 					<span class="text-sm" style="color: var(--marker-black);">Vaccinated</span>
 				</label>
-				{#if value.isVaccinated}
-					<input
-						type="date"
-						class="form-input flex-1"
-						disabled={disabled}
-						placeholder="Date"
-						value={toDate(value.vaccinatedDate)?.toISOString().slice(0, 10) ?? ''}
-						on:change={(event) => handleDateChange('vaccinatedDate', event.currentTarget.value)}
-					/>
-				{/if}
-			</div>
-			<div class="flex items-center gap-4">
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						class="form-checkbox"
+					{#if value.isVaccinated}
+						<input
+							type="date"
+							class="form-input form-inline-date"
+							disabled={disabled}
+							placeholder="Date"
+							value={toDate(value.vaccinatedDate)?.toISOString().slice(0, 10) ?? ''}
+							on:change={(event) => handleDateChange('vaccinatedDate', event.currentTarget.value)}
+						/>
+					{/if}
+				</div>
+				<div class="form-inline-row">
+					<label class="flex items-center gap-2 cursor-pointer min-w-0">
+						<input
+							type="checkbox"
+							class="form-checkbox"
 						disabled={disabled}
 						checked={value.isFixed}
 						on:change={(event) => handleCheckbox('isFixed', event.currentTarget.checked)}
 					/>
 					<span class="text-sm" style="color: var(--marker-black);">Spayed/Neutered</span>
 				</label>
-				{#if value.isFixed}
-					<input
-						type="date"
-						class="form-input flex-1"
-						disabled={disabled}
-						placeholder="Date"
-						value={toDate(value.fixedDate)?.toISOString().slice(0, 10) ?? ''}
-						on:change={(event) => handleDateChange('fixedDate', event.currentTarget.value)}
-					/>
-				{/if}
-			</div>
+					{#if value.isFixed}
+						<input
+							type="date"
+							class="form-input form-inline-date"
+							disabled={disabled}
+							placeholder="Date"
+							value={toDate(value.fixedDate)?.toISOString().slice(0, 10) ?? ''}
+							on:change={(event) => handleDateChange('fixedDate', event.currentTarget.value)}
+						/>
+					{/if}
+				</div>
 			<div class="form-field">
 				<label class="form-label typewriter">Microchip Date</label>
 				<input
@@ -686,14 +881,14 @@
 				</button>
 			{/each}
 		</div>
-		<div class="flex items-center gap-4 mt-3">
-			<label class="form-hint">Start Date:</label>
-			<input
-				type="date"
-				class="form-input"
-				disabled={disabled}
-				value={toDate(value.isolationStartDate)?.toISOString().slice(0, 10) ?? ''}
-				on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
+			<div class="form-inline-row mt-3">
+				<label class="form-hint">Start Date:</label>
+				<input
+					type="date"
+					class="form-input form-inline-date"
+					disabled={disabled}
+					value={toDate(value.isolationStartDate)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
 			/>
 		</div>
 	</div>
@@ -842,6 +1037,8 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.form-label {
@@ -911,6 +1108,68 @@
 		flex-direction: column;
 		gap: 0.6rem;
 		padding-top: 0.5rem;
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	.form-inline-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	.form-inline-date {
+		flex: 1 1 10rem;
+		min-width: 0;
+	}
+
+	.form-photo-shell {
+		display: grid;
+		gap: 0.6rem;
+	}
+
+	.form-photo-preview-wrap {
+		display: flex;
+		justify-content: flex-start;
+	}
+
+	.form-photo-preview {
+		width: min(14rem, 100%);
+		aspect-ratio: 3 / 4;
+		object-fit: cover;
+		border: 1.5px solid #c0c8d2;
+		border-radius: 0.28rem;
+		background: #edf2f7;
+	}
+
+	.form-photo-placeholder {
+		width: min(14rem, 100%);
+		aspect-ratio: 3 / 4;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 1.5px dashed #bcc6d3;
+		border-radius: 0.28rem;
+		font-size: 0.7rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #6d7f97;
+		background: #f7f9fc;
+		text-align: center;
+		padding: 0.6rem;
+	}
+
+	.form-photo-actions {
+		display: grid;
+		gap: 0.5rem;
+		max-width: min(22rem, 100%);
+	}
+
+	.form-file-input {
+		padding: 0.45rem 0.55rem;
 	}
 
 	.form-section-title {
@@ -989,5 +1248,12 @@
 
 	.entry-history-add {
 		width: fit-content;
+	}
+
+	@media (max-width: 640px) {
+		.form-inline-date {
+			flex-basis: 100%;
+			width: 100%;
+		}
 	}
 </style>

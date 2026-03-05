@@ -68,6 +68,9 @@
 
 html {
 	font-size: 18px;
+	width: 100%;
+	max-width: 100vw;
+	overflow-x: hidden;
 }
 
 /* ─── Animations ─── */
@@ -111,10 +114,16 @@ body {
 	font-family: var(--font-ui);
 	line-height: 1.45;
 	min-height: 100vh;
+	width: 100%;
+	max-width: 100vw;
+	overflow-x: hidden;
 }
 
 #app {
 	min-height: 100vh;
+	width: 100%;
+	max-width: 100vw;
+	overflow-x: hidden;
 }
 
 h1,
