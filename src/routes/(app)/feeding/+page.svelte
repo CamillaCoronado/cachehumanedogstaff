@@ -122,19 +122,33 @@
 	topRow.forEach((cell, index) => {
 		mobilePlacement.set(cell.runKey ?? String(cell.runId), { col: 4, row: index + 1 });
 	});
-	mobilePlacement.set('35', { col: 2, row: 1 });
+	mobilePlacement.set('35', { col: 3, row: 1 });
 	mobilePlacement.set('puppy', { col: 4, row: topRow.length + 1 });
 	mobilePlacement.set('rock', { col: 3, row: topRow.length + 1 });
 
 	assignMobileColumn(
 		[17, 18, 19, 20, 21, 22, 23, 24],
 		2,
-		2,
+		1,
 		{ '19': 2, '20': 2, '21': 2, '22': 2, '23': 2, '24': 2 },
 		20
 	);
 
+	// Keep reference map aligned: shift only the 21-24 bank down.
+	for (const key of ['21', '22', '23', '24']) {
+		const placement = mobilePlacement.get(key);
+		if (!placement) continue;
+		mobilePlacement.set(key, { ...placement, row: placement.row + 1 });
+	}
+
 	assignMobileColumn([25, 26, 27, 28, 29, 30, 31, 32, 33, 34], 1, 1, { '31': 2, '32': 2, '33': 2, '34': 2 }, 30);
+
+	// Keep reference map aligned with the kennel page mobile layout.
+	for (const key of ['31', '32', '33', '34']) {
+		const placement = mobilePlacement.get(key);
+		if (!placement) continue;
+		mobilePlacement.set(key, { ...placement, row: placement.row + 1 });
+	}
 
 	const kennelCells: KennelCell[] = [
 		...topRow,
@@ -179,15 +193,17 @@
 	});
 
 	$: activeDogs = dogs.filter((dog) => dog.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
-	$: kennelAssignments = getAssignments(activeDogs);
-	$: unassignedDogs = activeDogs.filter((dog) => !getDogRun(dog));
-	$: assignedCount = activeDogs.length - unassignedDogs.length;
-	$: fedMap = getFedMap(activeDogs, feedingLogs, selectedDay, mealTime);
+	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster);
+	$: shelterDogs = activeDogs.filter((dog) => !dog.inFoster);
+	$: kennelAssignments = getAssignments(shelterDogs);
+	$: unassignedDogs = shelterDogs.filter((dog) => !getDogRun(dog));
+	$: assignedCount = shelterDogs.length - unassignedDogs.length;
+	$: fedMap = getFedMap(shelterDogs, feedingLogs, selectedDay, mealTime);
 	$: fedCount = Object.values(fedMap).filter(Boolean).length;
-	$: abnormalCount = getAbnormalCount(activeDogs, stoolLogs, selectedDay);
-	$: displayDogs = [...activeDogs].sort((a, b) => compareByWalkPath(a, b, walkPath));
+	$: abnormalCount = getAbnormalCount(shelterDogs, stoolLogs, selectedDay);
+	$: displayDogs = [...shelterDogs].sort((a, b) => compareByWalkPath(a, b, walkPath));
 	$: specialFeedDogs = displayDogs.filter((dog) => isSpecialFeeding(dog));
-	$: feedingHistoryEntries = getFeedingHistoryEntries(activeDogs, feedingLogs).slice(0, HISTORY_LIMIT);
+	$: feedingHistoryEntries = getFeedingHistoryEntries(shelterDogs, feedingLogs).slice(0, HISTORY_LIMIT);
 
 	function getDogRun(dog: Dog): RunId | null {
 		const raw = dog.outdoorKennelAssignment?.toString().trim() ?? '';
@@ -399,6 +415,10 @@
 	}
 
 	async function logFeeding(dog: Dog, amount: AmountEaten) {
+		if (dog.inFoster) {
+			toast.error('Dogs in foster are not on the feeding schedule.');
+			return;
+		}
 		if (fedMap[dog.id]) return;
 		if (isSurgeryBlocked(dog)) {
 			toast.error('Surgery today — do not feed.');
@@ -434,7 +454,7 @@
 		if (markingAll) return;
 		markingAll = true;
 		try {
-			const targets = activeDogs.filter((dog) => !fedMap[dog.id] && !isSurgeryBlocked(dog));
+			const targets = shelterDogs.filter((dog) => !fedMap[dog.id] && !isSurgeryBlocked(dog));
 			await Promise.all(
 				targets.map((dog) =>
 					addFeedingLog(
@@ -495,7 +515,7 @@
 			<div class="feeding-header">
 			<div class="feeding-title">
 				<p class="feeding-summary whiteboard-hand erase-marker-blue">
-					{fedCount}/{activeDogs.length} dogs fed • {abnormalCount} abnormal stools logged
+					{fedCount}/{shelterDogs.length} dogs fed • {abnormalCount} abnormal stools logged
 				</p>
 			</div>
 			<div class="feeding-controls">
@@ -562,7 +582,9 @@
 				{#if loading}
 					<p class="feeding-status whiteboard-hand">Loading dogs...</p>
 				{:else if displayDogs.length === 0}
-					<p class="feeding-status whiteboard-hand">No dogs to show.</p>
+					<p class="feeding-status whiteboard-hand">
+						{fosterDogs.length > 0 ? 'No in-shelter dogs to feed right now.' : 'No dogs to show.'}
+					</p>
 				{:else}
 					<div class="feeding-dog-list">
 						{#each displayDogs as dog, index}
@@ -643,6 +665,9 @@
 					<div class="feeding-section-stats">
 						<span class="hero-chip">{assignedCount} assigned</span>
 						<span class="hero-chip">{unassignedDogs.length} unassigned</span>
+						{#if fosterDogs.length > 0}
+							<span class="hero-chip">{fosterDogs.length} in foster</span>
+						{/if}
 					</div>
 				</div>
 

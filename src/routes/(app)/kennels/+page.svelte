@@ -181,13 +181,59 @@
 		}
 	];
 
-	// Mobile mirrors desktop map structure, transposed into columns for narrow screens.
-	const mobileColByDesktopRow: Record<number, number> = {
-		1: 1,
-		2: 2,
-		4: 3,
-		6: 4
-	};
+	const mobilePlacement = new Map<string, { col: number; row: number; rowSpan?: number }>();
+
+	function assignMobileColumn(
+		runIds: RunId[],
+		col: number,
+		startRow: number,
+		rowSpans: Record<string, number>,
+		gapAfter?: RunId
+	) {
+		let row = startRow;
+		for (const runId of runIds) {
+			const key = typeof runId === 'number' ? String(runId) : runId;
+			const span = rowSpans[key] ?? 1;
+			mobilePlacement.set(key, { col, row, rowSpan: span });
+			row += span;
+			if (gapAfter && runId === gapAfter) {
+				row += 1;
+			}
+		}
+	}
+
+	// Match desktop layout on mobile by transposing into four columns,
+	// keeping the 1-15 line on the right side.
+	topRow.forEach((cell, index) => {
+		mobilePlacement.set(cell.runKey ?? String(cell.runId), { col: 4, row: index + 1 });
+	});
+	mobilePlacement.set('35', { col: 3, row: 1 });
+	mobilePlacement.set('puppy', { col: 4, row: topRow.length + 1 });
+	mobilePlacement.set('rock', { col: 3, row: topRow.length + 1 });
+
+	assignMobileColumn(
+		[17, 18, 19, 20, 21, 22, 23, 24],
+		2,
+		1,
+		{ '19': 2, '20': 2, '21': 2, '22': 2, '23': 2, '24': 2 },
+		20
+	);
+
+	// Shift only the 21-24 bank down for visual alignment on mobile.
+	for (const key of ['21', '22', '23', '24']) {
+		const placement = mobilePlacement.get(key);
+		if (!placement) continue;
+		mobilePlacement.set(key, { ...placement, row: placement.row + 1 });
+	}
+
+	assignMobileColumn([25, 26, 27, 28, 29, 30, 31, 32, 33, 34], 1, 1, { '31': 2, '32': 2, '33': 2, '34': 2 }, 30);
+
+	// Slight downward offset keeps the 31-34 bank visually aligned on mobile.
+	for (const key of ['31', '32', '33', '34']) {
+		const placement = mobilePlacement.get(key);
+		if (!placement) continue;
+		mobilePlacement.set(key, { ...placement, row: placement.row + 1 });
+	}
 
 	const kennelCells: KennelCell[] = [
 		...topRow,
@@ -198,12 +244,13 @@
 		...bottomRight,
 		...specialCells
 	].map((cell) => {
-		const mobileRowSpan = ('colSpan' in cell ? cell.colSpan : undefined) ?? 1;
+		const key = cell.runKey ?? String(cell.runId ?? '');
+		const placement = mobilePlacement.get(key);
 		return {
 			...cell,
-			mobileCol: mobileColByDesktopRow[cell.row] ?? 4,
-			mobileRow: cell.col,
-			mobileRowSpan
+			mobileCol: placement?.col ?? 4,
+			mobileRow: placement?.row ?? 1,
+			mobileRowSpan: placement?.rowSpan ?? 1
 		};
 	});
 
@@ -237,9 +284,13 @@
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
 	$: activeDogs = dogs.filter((dog) => dog.status === 'active');
-	$: assignments = getAssignments(activeDogs);
-	$: unassigned = activeDogs.filter((dog) => !getDogRun(dog));
-	$: selectedDog = selectedDogId ? dogs.find((dog) => dog.id === selectedDogId) ?? null : null;
+	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster);
+	$: kennelEligibleDogs = activeDogs.filter((dog) => !dog.inFoster);
+	$: assignments = getAssignments(kennelEligibleDogs);
+	$: unassigned = kennelEligibleDogs.filter((dog) => !getDogRun(dog));
+	$: selectedDog = selectedDogId
+		? kennelEligibleDogs.find((dog) => dog.id === selectedDogId) ?? null
+		: null;
 
 	function getDogRun(dog: Dog): RunId | null {
 		const raw = dog.outdoorKennelAssignment?.toString().trim() ?? '';
@@ -322,6 +373,10 @@
 
 	async function assignDog(dog: Dog, runId: RunId | null) {
 		if (!canEdit) return;
+		if (dog.inFoster && runId !== null) {
+			toast.error('Dogs in foster cannot be assigned to a kennel.');
+			return;
+		}
 		const currentRun = getDogRun(dog);
 		if (currentRun === runId) return;
 
@@ -382,8 +437,11 @@
 		<div class="kennel-hero">
 			<div class="flex flex-wrap items-start justify-between gap-4">
 				<div class="flex flex-wrap gap-2">
-					<span class="hero-chip">{activeDogs.length} active</span>
+					<span class="hero-chip">{kennelEligibleDogs.length} in shelter</span>
 					<span class="hero-chip">{unassigned.length} unassigned</span>
+					{#if fosterDogs.length > 0}
+						<span class="hero-chip hero-chip-muted">{fosterDogs.length} in foster</span>
+					{/if}
 					{#if !canEdit}
 						<span class="hero-chip hero-chip-muted">Read only</span>
 					{/if}
@@ -445,6 +503,8 @@
 					</div>
 					{#if loading}
 						<p class="mt-3 text-sm text-ink-500">Loading dogs...</p>
+					{:else if kennelEligibleDogs.length === 0}
+						<p class="mt-3 text-sm text-ink-500">All active dogs are currently in foster.</p>
 					{:else if unassigned.length === 0}
 						<p class="mt-3 text-sm text-ink-500">All active dogs have a run assigned.</p>
 					{:else}
@@ -476,7 +536,7 @@
 				<div class="rounded-3xl border border-ink-200 bg-white p-3 shadow-card md:hidden">
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<p class="text-xs uppercase tracking-[0.2em] text-ink-500">Dogs</p>
-						<span class="text-xs font-semibold text-ink-600">{activeDogs.length}</span>
+						<span class="text-xs font-semibold text-ink-600">{kennelEligibleDogs.length}</span>
 					</div>
 					{#if selectedDog}
 						<div class="mt-2 rounded-2xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700">
@@ -485,9 +545,11 @@
 					{/if}
 					{#if loading}
 						<p class="mt-2 text-sm text-ink-500">Loading dogs...</p>
+					{:else if kennelEligibleDogs.length === 0}
+						<p class="mt-2 text-sm text-ink-500">No in-shelter dogs available for assignment.</p>
 					{:else}
 						<div class="mt-2 kennel-mobile-list">
-							{#each activeDogs as dog}
+							{#each kennelEligibleDogs as dog}
 								<div
 									class={`kennel-mobile-row ${selectedDogId === dog.id ? 'kennel-mobile-row-selected' : ''}`}
 									role="button"

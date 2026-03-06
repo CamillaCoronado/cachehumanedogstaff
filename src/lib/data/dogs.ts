@@ -126,6 +126,20 @@ interface LogMap<T> {
 	[dogId: string]: T[];
 }
 
+function normalizeKennelAssignment(value: string | null | undefined) {
+	return value?.trim() ?? '';
+}
+
+function applyFosterHousingRules(dog: Dog): Dog {
+	if (!dog.inFoster) {
+		const trimmed = normalizeKennelAssignment(dog.outdoorKennelAssignment);
+		if (trimmed === dog.outdoorKennelAssignment) return dog;
+		return { ...dog, outdoorKennelAssignment: trimmed };
+	}
+	if (!dog.outdoorKennelAssignment) return dog;
+	return { ...dog, outdoorKennelAssignment: '' };
+}
+
 function serializeDog(dog: Dog): StoredDog {
 	const serializedIntakeDate = toDateString(dog.intakeDate) ?? new Date().toISOString();
 	const serializedOriginalEntry = toDateString(dog.originalIntakeDate) ?? serializedIntakeDate;
@@ -164,7 +178,7 @@ function serializeDog(dog: Dog): StoredDog {
 		crateTrained: dog.crateTrained ?? 'unknown',
 		idealHome: dog.idealHome,
 		energyLevel: dog.energyLevel,
-		outdoorKennelAssignment: dog.outdoorKennelAssignment,
+		outdoorKennelAssignment: normalizeKennelAssignment(dog.inFoster ? '' : dog.outdoorKennelAssignment),
 		microchipDate: toDateString(dog.microchipDate),
 		healthProblems: dog.healthProblems ?? '',
 		lastBathDate: toDateString(dog.lastBathDate),
@@ -199,7 +213,7 @@ function deserializeDog(stored: StoredDog): Dog {
 			? 'eligible'
 			: (stored.dayTripStatus ?? 'eligible');
 
-	return {
+	const dog: Dog = {
 		id: stored.id,
 		name: stored.name,
 		breed: stored.breed ?? '',
@@ -258,6 +272,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		createdAt: toDate(stored.createdAt) ?? new Date(),
 		updatedAt: toDate(stored.updatedAt) ?? new Date()
 	};
+	return applyFosterHousingRules(dog);
 }
 
 function serializeDateArray(values: Dog['reentryDates'] | undefined): string[] {
@@ -457,24 +472,24 @@ export async function createDog(data: Omit<Dog, 'id' | 'createdAt' | 'updatedAt'
 	const ref = dogsCollectionRef();
 	if (ref) {
 		const now = new Date();
-		const dog: Dog = {
+		const dog: Dog = applyFosterHousingRules({
 			...data,
 			id: createId('dog'),
 			createdAt: now,
 			updatedAt: now
-		};
+		});
 		await setDoc(doc(ref, dog.id), serializeDog(dog));
 		return dog;
 	}
 
 	const stored = readJson<StoredDog[]>(DOGS_KEY, []);
 	const now = new Date();
-	const dog: Dog = {
+	const dog: Dog = applyFosterHousingRules({
 		...data,
 		id: createId('dog'),
 		createdAt: now,
 		updatedAt: now
-	};
+	});
 	stored.push(serializeDog(dog));
 	writeJson(DOGS_KEY, stored);
 	return dog;
@@ -485,11 +500,11 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 	if (ref) {
 		const current = await getDog(id);
 		if (!current) return null;
-		const merged: Dog = {
+		const merged: Dog = applyFosterHousingRules({
 			...current,
 			...updates,
 			updatedAt: new Date()
-		};
+		});
 		await setDoc(ref, serializeDog(merged));
 		return merged;
 	}
@@ -498,11 +513,11 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 	const now = new Date();
 	const next = stored.map((dog) => {
 		if (dog.id !== id) return dog;
-		const merged: Dog = {
+		const merged: Dog = applyFosterHousingRules({
 			...deserializeDog(dog),
 			...updates,
 			updatedAt: now
-		};
+		});
 		return serializeDog(merged);
 	});
 	writeJson(DOGS_KEY, next);
