@@ -276,9 +276,34 @@
 	let hoveredRun: RunId | null = null;
 	let hoveredUnassigned = false;
 	let selectedDogId: string | null = null;
+	let touchPointerId: number | null = null;
+	let touchDraggingId: string | null = null;
+	let touchDragName = '';
+	let touchDragX = 0;
+	let touchDragY = 0;
 
-	onMount(async () => {
-		await refreshDogs();
+	onMount(() => {
+		void refreshDogs();
+
+		const handlePointerMove = (event: PointerEvent) => {
+			handleTouchPointerMove(event);
+		};
+		const handlePointerUp = (event: PointerEvent) => {
+			void handleTouchPointerUp(event);
+		};
+		const handlePointerCancel = (event: PointerEvent) => {
+			handleTouchPointerCancel(event);
+		};
+
+		window.addEventListener('pointermove', handlePointerMove, { passive: false });
+		window.addEventListener('pointerup', handlePointerUp);
+		window.addEventListener('pointercancel', handlePointerCancel);
+
+		return () => {
+			window.removeEventListener('pointermove', handlePointerMove);
+			window.removeEventListener('pointerup', handlePointerUp);
+			window.removeEventListener('pointercancel', handlePointerCancel);
+		};
 	});
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
@@ -356,6 +381,72 @@
 		draggingId = null;
 		hoveredRun = null;
 		hoveredUnassigned = false;
+	}
+
+	function parseRunId(raw: string | undefined): RunId | null {
+		if (!raw) return null;
+		if (raw === 'puppy' || raw === 'rock') return raw;
+		const parsed = Number(raw);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+
+	function resolveTouchDropTarget(clientX: number, clientY: number): RunId | null | undefined {
+		const element = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+		if (!element) return undefined;
+		const unassignedTarget = element.closest<HTMLElement>('[data-drop-unassigned="true"]');
+		if (unassignedTarget) return null;
+		const runTarget = element.closest<HTMLElement>('[data-drop-run]');
+		const runId = parseRunId(runTarget?.dataset.dropRun);
+		return runId ?? undefined;
+	}
+
+	function updateTouchHover(clientX: number, clientY: number) {
+		const target = resolveTouchDropTarget(clientX, clientY);
+		hoveredRun = target === null || target === undefined ? null : target;
+		hoveredUnassigned = target === null;
+		return target;
+	}
+
+	function resetTouchDragState() {
+		touchPointerId = null;
+		touchDraggingId = null;
+		touchDragName = '';
+		hoveredRun = null;
+		hoveredUnassigned = false;
+	}
+
+	function handleTouchDragStart(event: PointerEvent, dog: Dog) {
+		if (!canEdit || event.pointerType !== 'touch') return;
+		touchPointerId = event.pointerId;
+		touchDraggingId = dog.id;
+		touchDragName = dog.name;
+		touchDragX = event.clientX;
+		touchDragY = event.clientY;
+		updateTouchHover(event.clientX, event.clientY);
+		event.preventDefault();
+	}
+
+	function handleTouchPointerMove(event: PointerEvent) {
+		if (touchPointerId === null || event.pointerId !== touchPointerId) return;
+		touchDragX = event.clientX;
+		touchDragY = event.clientY;
+		updateTouchHover(event.clientX, event.clientY);
+		event.preventDefault();
+	}
+
+	async function handleTouchPointerUp(event: PointerEvent) {
+		if (touchPointerId === null || event.pointerId !== touchPointerId) return;
+		const target = updateTouchHover(event.clientX, event.clientY);
+		const dogId = touchDraggingId;
+		const dog = dogId ? dogs.find((item) => item.id === dogId) : null;
+		resetTouchDragState();
+		if (!dog || target === undefined) return;
+		await assignDog(dog, target);
+	}
+
+	function handleTouchPointerCancel(event: PointerEvent) {
+		if (touchPointerId === null || event.pointerId !== touchPointerId) return;
+		resetTouchDragState();
 	}
 
 	function toggleSelect(dog: Dog) {
@@ -457,6 +548,7 @@
 								class={`kennel-cell ${cell.isSpecial ? 'kennel-special' : ''} ${
 									hoveredRun === cell.runId ? 'kennel-cell-active' : ''
 								}`}
+								data-drop-run={cell.runId !== null ? runIdToKey(cell.runId) : undefined}
 								style={`grid-column: ${cell.col}${cell.colSpan ? ` / span ${cell.colSpan}` : ''}; grid-row: ${cell.row}; --m-col: ${cell.mobileCol}; --m-row: ${cell.mobileRow}; --m-row-span: ${cell.mobileRowSpan ?? 1};`}
 								on:dragover|preventDefault={() => cell.runId !== null && (hoveredRun = cell.runId)}
 								on:dragenter|preventDefault={() => cell.runId !== null && (hoveredRun = cell.runId)}
@@ -479,6 +571,7 @@
 														draggable={canEdit}
 														on:dragstart={(event) => handleDragStart(event, slotDog)}
 														on:dragend={handleDragEnd}
+														on:pointerdown={(event) => handleTouchDragStart(event, slotDog)}
 														on:click|stopPropagation={() => toggleSelect(slotDog)}
 													>
 														<span>{slotDog.name}</span>
@@ -515,6 +608,7 @@
 									draggable={canEdit}
 									on:dragstart={(event) => handleDragStart(event, dog)}
 									on:dragend={handleDragEnd}
+									on:pointerdown={(event) => handleTouchDragStart(event, dog)}
 								>
 									<span>{dog.name}</span>
 								</div>
@@ -523,6 +617,7 @@
 					{/if}
 					<div
 						class={`kennel-dropzone ${hoveredUnassigned ? 'kennel-dropzone-active' : ''}`}
+						data-drop-unassigned="true"
 						on:dragover|preventDefault={() => (hoveredUnassigned = true)}
 						on:dragenter|preventDefault={() => (hoveredUnassigned = true)}
 						on:dragleave={() => (hoveredUnassigned = false)}
@@ -581,6 +676,16 @@
 		</div>
 	</div>
 </section>
+
+{#if touchDraggingId}
+	<div
+		class="kennel-touch-ghost"
+		style={`left: ${touchDragX}px; top: ${touchDragY}px;`}
+		aria-hidden="true"
+	>
+		{touchDragName}
+	</div>
+{/if}
 
 <style>
 	.kennels-board {
@@ -853,6 +958,21 @@
 		background: #eaf4ff;
 	}
 
+	.kennel-touch-ghost {
+		position: fixed;
+		z-index: 90;
+		transform: translate(-50%, -50%);
+		pointer-events: none;
+		padding: 0.24rem 0.56rem;
+		border-radius: 0.52rem;
+		background: #e9f7ee;
+		border: 1px solid #bddcc7;
+		color: #2a6248;
+		font-size: 0.92rem;
+		font-weight: 700;
+		box-shadow: 0 10px 18px rgba(18, 36, 57, 0.2);
+	}
+
 	@media (min-width: 768px) {
 		.kennels-body {
 			padding: 0.82rem 0.8rem;
@@ -873,6 +993,12 @@
 			grid-template-columns: repeat(4, minmax(0, 1fr));
 			grid-template-rows: repeat(var(--mobile-rows), var(--kennel-row));
 			row-gap: 0;
+		}
+
+		.kennel-dog-draggable {
+			touch-action: none;
+			user-select: none;
+			-webkit-user-select: none;
 		}
 
 		.kennel-cell {
