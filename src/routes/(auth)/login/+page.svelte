@@ -4,6 +4,7 @@
 	import { authReady, authUser, initAuthListener } from '$lib/stores/auth';
 	import { signInWithGoogle } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
+	import { getAuthErrorMessage } from '$lib/firebase/errors';
 
 	let loading = false;
 	let errorMessage = '';
@@ -25,7 +26,8 @@
 				await goto('/');
 			}
 		} catch (error) {
-			errorMessage = error instanceof Error ? error.message : 'Unable to sign in.';
+			const hostname = typeof window === 'undefined' ? 'this domain' : window.location.hostname;
+			errorMessage = getAuthErrorMessage(error, hostname);
 		} finally {
 			loading = false;
 		}

@@ -1,5 +1,5 @@
 import { createId } from '$lib/utils/storage';
-import { storage } from '$lib/firebase/config';
+import { auth, storage } from '$lib/firebase/config';
 import { deleteObject, getDownloadURL, ref, uploadString } from 'firebase/storage';
 
 const DOG_PHOTO_ROOT = 'dog-photos';
@@ -15,6 +15,11 @@ export async function uploadDogPhotoDataUrl(
 	options?: { dogId?: string | null; mimeType?: string }
 ) {
 	if (!storage) throw new Error('Firebase Storage is not available.');
+	if (!auth?.currentUser) {
+		const error = new Error('You must be signed in before uploading photos.');
+		(error as Error & { code: string }).code = 'storage/unauthenticated';
+		throw error;
+	}
 	const dogId = options?.dogId?.trim() || 'unassigned';
 	const extension = mimeToExtension(options?.mimeType ?? 'image/jpeg');
 	const fileId = createId('photo');

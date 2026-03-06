@@ -22,6 +22,7 @@
 	type SuggestionFields = {
 		name: string;
 		breed: string;
+		color: string;
 		sex: DogSex;
 		origin: string;
 		dateOfBirth: string;
@@ -252,10 +253,11 @@
 			showAllFields: false,
 			confidence: normalizeConfidence(item.confidence),
 			reason: safeReason,
-			fields: {
-				name,
-				breed: cleanText(item.fields?.breed),
-				sex: normalizeSex(item.fields?.sex),
+				fields: {
+					name,
+					breed: cleanText(item.fields?.breed),
+					color: cleanText(item.fields?.color),
+					sex: normalizeSex(item.fields?.sex),
 				origin: cleanText(item.fields?.origin),
 				dateOfBirth: normalizeDateText(item.fields?.dateOfBirth),
 				originalIntakeDate: normalizeDateText(item.fields?.originalIntakeDate),
@@ -465,13 +467,15 @@
 	}
 
 	function shouldSurfaceCreateField(fields: SuggestionFields, field: keyof SuggestionFields) {
-		switch (field) {
-			case 'name':
-				return Boolean(cleanText(fields.name));
-			case 'breed':
-				return Boolean(cleanText(fields.breed));
-			case 'sex':
-				return fields.sex !== 'unknown';
+			switch (field) {
+				case 'name':
+					return Boolean(cleanText(fields.name));
+				case 'breed':
+					return Boolean(cleanText(fields.breed));
+				case 'color':
+					return Boolean(cleanText(fields.color));
+				case 'sex':
+					return fields.sex !== 'unknown';
 			case 'weightLbs':
 				return fields.weightLbs !== null;
 			case 'origin':
@@ -520,13 +524,15 @@
 
 	function shouldSurfaceUpdateField(suggestion: EditableSuggestion, field: keyof SuggestionFields) {
 		const patch = suggestionUpdatePatches[suggestion.id] ?? {};
-		switch (field) {
-			case 'name':
-				return patchHasField(patch, 'name');
-			case 'breed':
-				return patchHasField(patch, 'breed');
-			case 'sex':
-				return patchHasField(patch, 'sex');
+			switch (field) {
+				case 'name':
+					return patchHasField(patch, 'name');
+				case 'breed':
+					return patchHasField(patch, 'breed');
+				case 'color':
+					return patchHasField(patch, 'markings');
+				case 'sex':
+					return patchHasField(patch, 'sex');
 			case 'weightLbs':
 				return patchHasField(patch, 'weightLbs');
 			case 'origin':
@@ -823,6 +829,14 @@
 		return prev[b.length] ?? maxDistance + 1;
 	}
 
+	function composeMarkingsValue(color: string, markings: string) {
+		const colorText = cleanText(color);
+		const markingsText = cleanText(markings);
+		if (colorText && markingsText) return `Color: ${colorText}. ${markingsText}`;
+		if (colorText) return `Color: ${colorText}`;
+		return markingsText;
+	}
+
 	function buildCreatePayload(fields: SuggestionFields): Omit<Dog, 'id' | 'createdAt' | 'updatedAt'> {
 		const now = new Date();
 		const dateOfBirth = parseIsoDate(fields.dateOfBirth) ?? now;
@@ -866,7 +880,7 @@
 			hasOwnFood: false,
 			transitionToHills: null,
 			origin: cleanText(fields.origin),
-			markings: cleanText(fields.markings),
+			markings: composeMarkingsValue(fields.color, fields.markings),
 			hiddenComments: cleanText(fields.hiddenComments),
 			description: cleanText(fields.description),
 			warningNotes: cleanText(fields.warningNotes),
@@ -950,8 +964,9 @@
 		}
 
 		const markings = cleanText(fields.markings);
-		if (markings && (!currentDog || markings !== cleanText(currentDog.markings))) {
-			patch.markings = markings;
+		const composedMarkings = composeMarkingsValue(fields.color, markings);
+		if (composedMarkings && (!currentDog || composedMarkings !== cleanText(currentDog.markings))) {
+			patch.markings = composedMarkings;
 		}
 
 		const hiddenComments = cleanText(fields.hiddenComments);
@@ -1441,6 +1456,17 @@
 												updateSuggestion(suggestion.id, (current) => ({
 													...current,
 													fields: { ...current.fields, breed: event.currentTarget.value }
+												}))}
+										/>
+									</label>
+									<label class="suggestion-field" class:is-hidden={!shouldSurfaceField(suggestion, 'color')}>
+										<span>Color</span>
+										<input
+											value={suggestion.fields.color}
+											on:input={(event) =>
+												updateSuggestion(suggestion.id, (current) => ({
+													...current,
+													fields: { ...current.fields, color: event.currentTarget.value }
 												}))}
 										/>
 									</label>
@@ -2081,6 +2107,10 @@
 	.intake-board {
 		border: 4px solid var(--marker-black);
 		background: rgba(255, 255, 255, 0.9);
+		max-width: 100%;
+		min-width: 0;
+		overflow-x: clip;
+		box-sizing: border-box;
 	}
 
 	.intake-header {
@@ -2111,6 +2141,7 @@
 	.intake-grid {
 		display: grid;
 		gap: 0;
+		min-width: 0;
 	}
 
 	.intake-upload,
@@ -2118,6 +2149,8 @@
 		border-top: 4px solid var(--marker-black);
 		padding: 0.82rem;
 		background: #ffffff;
+		min-width: 0;
+		box-sizing: border-box;
 	}
 
 	.intake-upload h3,
@@ -2249,6 +2282,7 @@
 		letter-spacing: 0.07em;
 		text-transform: uppercase;
 		color: #3f5774;
+		overflow-wrap: anywhere;
 	}
 
 	.intake-empty {
@@ -2266,6 +2300,7 @@
 		max-height: 34rem;
 		overflow: auto;
 		padding-right: 0.22rem;
+		min-width: 0;
 	}
 
 	.suggestion-card {
@@ -2274,13 +2309,15 @@
 		padding: 0.5rem;
 		display: grid;
 		gap: 0.42rem;
+		min-width: 0;
 	}
 
 	.suggestion-top {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: end;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		align-items: stretch;
 		gap: 0.35rem;
+		min-width: 0;
 	}
 
 	.suggestion-checkbox {
@@ -2297,7 +2334,8 @@
 	.suggestion-field {
 		display: grid;
 		gap: 0.16rem;
-		min-width: 8.5rem;
+		min-width: 0;
+		width: 100%;
 	}
 
 	.suggestion-field span {
@@ -2325,6 +2363,7 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: #2d5d42;
+		overflow-wrap: anywhere;
 	}
 
 	.suggestion-core-missing {
@@ -2338,11 +2377,13 @@
 		background: #f7fbff;
 		font-size: 0.66rem;
 		color: #45607f;
+		overflow-wrap: anywhere;
 	}
 
 	.suggestion-grid {
 		display: grid;
 		gap: 0.34rem;
+		min-width: 0;
 	}
 
 	.suggestion-wide {
@@ -2432,6 +2473,13 @@
 
 		.suggestion-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (min-width: 680px) {
+		.suggestion-top {
+			grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+			align-items: end;
 		}
 	}
 </style>

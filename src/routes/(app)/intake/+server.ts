@@ -19,6 +19,8 @@ type IntakeSuggestion = {
 	reason: string;
 	fields: {
 		name: string;
+		breed: string;
+		color: string;
 		sex: DogSex;
 		origin: string;
 		dateOfBirth: string;
@@ -153,18 +155,20 @@ async function analyzeWithOpenAI(imageDataUrl: string, apiKey: string, model: st
 You are helping an animal shelter intake team parse a kennel-board photo and propose records/actions.
 
 Return JSON only with this shape:
-{
-  "notes": string[],
-  "suggestions": [
-    {
+	{
+	  "notes": string[],
+	  "suggestions": [
+	    {
       "action": "create" | "update" | "ignore",
       "matchName": string,
       "confidence": "high" | "medium" | "low",
-      "reason": string,
-      "fields": {
-        "name": string,
-        "sex": "male" | "female" | "unknown",
-        "origin": string,
+	      "reason": string,
+	      "fields": {
+	        "name": string,
+	        "breed": string,
+	        "color": string,
+	        "sex": "male" | "female" | "unknown",
+	        "origin": string,
         "dateOfBirth": string,
         "originalIntakeDate": string,
         "currentIntakeDate": string,
@@ -211,11 +215,12 @@ Rules:
 - Treat "Altered" as equivalent to fixed/spayed-neutered. Map altered date to "fixedDate".
 - If a microchip number is present, set "microchippedStatus" to "yes".
 - Use location text only to infer "inFosterStatus" ("yes" for foster, "no" for shelter/on-site).
-- Parse date of birth when visible (labels like "Date of Birth", "DOB", or "Birthday").
-- Parse sex when visible (labels like "Sex", or phrases like "Male Dog"/"Female Dog").
-- If weight is visible (e.g., "56lb"), populate "weightLbs" as a number.
-- Be conservative: if unsure, lower confidence and/or use "ignore".
-`;
+	- Parse date of birth when visible (labels like "Date of Birth", "DOB", or "Birthday").
+	- Parse sex when visible (labels like "Sex", or phrases like "Male Dog"/"Female Dog").
+	- Parse breed and color when visible (labels like "Breed", "Color", or "Coat Color").
+	- If weight is visible (e.g., "56lb"), populate "weightLbs" as a number.
+	- Be conservative: if unsure, lower confidence and/or use "ignore".
+	`;
 
 	const openAiResponse = await fetch('https://api.openai.com/v1/responses', {
 		method: 'POST',
@@ -286,6 +291,8 @@ function normalizeSuggestion(input: unknown): IntakeSuggestion | null {
 		reason: cleanText(raw.reason) || 'No reason provided.',
 		fields: {
 			name: cleanText(rawFields.name),
+			breed: cleanText(rawFields.breed),
+			color: cleanText(rawFields.color),
 			sex: normalizeSex(rawFields.sex),
 			origin: cleanText(rawFields.origin),
 			dateOfBirth: normalizeDateString(cleanText(rawFields.dateOfBirth)),
@@ -527,28 +534,29 @@ function buildSuggestionsFromManualText(text: string, existingDogs: ExistingDog[
 			const changedBySuffix = entry.lastChangedBy ? ` by ${entry.lastChangedBy}` : '';
 			summaryBits.push(`last changed ${entry.lastChangedDate}${changedBySuffix}`);
 		}
-		const parsedNotes = [defaults.dietaryNotes, summaryBits.join(', ')].filter(Boolean).join(' | ');
-		const parsedEnteredDate = entry.enteredShelterDate || defaults.originalIntakeDate;
+			const parsedNotes = [defaults.dietaryNotes, summaryBits.join(', ')].filter(Boolean).join(' | ');
+			const parsedEnteredDate = entry.enteredShelterDate || defaults.originalIntakeDate;
 
 			suggestions.push({
 				action: match ? 'update' : 'create',
 				matchName: match?.name ?? '',
-			confidence: 'high',
-			reason: match
-				? 'Name matched existing roster via pasted text; prepared update.'
-				: 'Parsed from pasted roster text.',
+				confidence: 'high',
+				reason: match
+					? 'Name matched existing roster via pasted text; prepared update.'
+					: 'Parsed from pasted roster text.',
 				fields: {
 					...defaults,
 					name: entry.name,
+					breed: cleanText(entry.breed) || defaults.breed,
 					sex: normalizeSex(entry.sex),
 					origin: defaults.origin,
 					originalIntakeDate: parsedEnteredDate,
 					currentIntakeDate: parsedEnteredDate || defaults.currentIntakeDate,
-				reentryDates: [],
-				dietaryNotes: parsedNotes
-			}
-		});
-	}
+					reentryDates: [],
+					dietaryNotes: parsedNotes
+				}
+			});
+		}
 
 	if (matchedExisting > 0) {
 		notes.push(`Matched ${matchedExisting} existing dog(s); those were marked ignore.`);
@@ -1506,9 +1514,11 @@ function mergeFieldDefaults(
 	}
 
 	return {
-			name: '',
-			sex: overrides.sex === 'unknown' ? base.sex : overrides.sex,
-			origin: overrides.origin || base.origin,
+		name: '',
+		breed: overrides.breed || base.breed,
+		color: overrides.color || base.color,
+		sex: overrides.sex === 'unknown' ? base.sex : overrides.sex,
+		origin: overrides.origin || base.origin,
 		dateOfBirth: overrides.dateOfBirth || base.dateOfBirth,
 		originalIntakeDate,
 		currentIntakeDate,
@@ -1556,6 +1566,8 @@ function mergeFieldDefaults(
 
 function extractDefaultFields(text: string): IntakeSuggestion['fields'] {
 	const dateOfBirth = parseDateOfBirthFromText(text);
+	const breed = parseBreedFromText(text);
+	const color = parseColorFromText(text);
 	const sex = parseSexFromText(text);
 	const originalIntakeDate = parseOriginalIntakeDateFromText(text);
 	const currentIntakeDate = parseCurrentIntakeDateFromText(text, originalIntakeDate);
@@ -1616,10 +1628,12 @@ function extractDefaultFields(text: string): IntakeSuggestion['fields'] {
 	const inFosterStatus = parseInFosterStatusFromText(text, locationValue);
 
 	return {
-			name: '',
-			sex,
-			origin,
-			dateOfBirth,
+		name: '',
+		breed,
+		color,
+		sex,
+		origin,
+		dateOfBirth,
 		originalIntakeDate,
 		currentIntakeDate,
 		reentryDates,
@@ -1667,6 +1681,19 @@ function parseSexFromText(text: string): DogSex {
 	if (/\bfemale\s+dog\b/i.test(text)) return 'female';
 
 	return 'unknown';
+}
+
+function parseBreedFromText(text: string): string {
+	const explicit = parseLabeledFieldFromText(text, ['breed', 'primary\\s*breed', 'secondary\\s*breed']);
+	if (explicit) return explicit;
+
+	return cleanText(
+		extractByRegex(text, /\b(?:male|female)\s+([A-Za-z][A-Za-z/()' .-]{1,80})\s+dog\b/i)
+	);
+}
+
+function parseColorFromText(text: string): string {
+	return parseLabeledFieldFromText(text, ['color', 'coat\\s*color', 'primary\\s*color']);
 }
 
 function parseOriginalIntakeDateFromText(text: string): string {

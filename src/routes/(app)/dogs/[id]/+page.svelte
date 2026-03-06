@@ -31,7 +31,7 @@
 		checkDayTripEligibility
 	} from '$lib/utils/dates';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
-	import { energyLabel, compatibilityLabel, pottyLabel, sexLabel, dayTripLabel } from '$lib/utils/labels';
+	import { energyLabel, compatibilityLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 	let dog: Dog | null = null;
 	let loading = true;
@@ -58,6 +58,14 @@
 	$: dayTripEligibility = dog
 		? checkDayTripEligibility(dog.intakeDate, dog.isVaccinated, dog.isFixed, dog.dayTripStatus, dog.isolationStatus, dog.dayTripNotes, today)
 		: { eligible: false, status: 'ineligible' as const, reasons: [] };
+	$: dayTripBadgeClass =
+		dayTripEligibility.status === 'eligible'
+			? 'whiteboard-trip-pill-green'
+			: dayTripEligibility.status === 'difficult'
+				? 'whiteboard-trip-pill-yellow'
+				: 'whiteboard-trip-pill-red';
+	$: dayTripBadgeText =
+		dayTripEligibility.status === 'ineligible' ? 'Ineligible for day trips' : 'Eligible for day trips';
 	$: daysSinceLastTrip = dog?.lastDayTripDate ? daysSince(dog.lastDayTripDate, today) : null;
 	$: currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 	$: nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -284,29 +292,64 @@
 	<p class="dog-detail-status whiteboard-hand">Dog not found.</p>
 {:else}
 	<section class="dog-detail-board">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div>
-				<span class="label-maker label-maker-blue">Dog Detail</span>
-				<h2 class="dog-detail-title">{dog.name}</h2>
-			</div>
-			{#if canEdit}
-				<div class="flex gap-2">
-					<button
-						class="rounded-full border border-ink-200 px-4 py-2 text-xs"
-						on:click={() => (editMode = !editMode)}
-					>
-						{editMode ? 'Cancel Edit' : 'Edit Dog'}
-					</button>
-					<button
-						class="rounded-full bg-brand-600 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white"
-						on:click={saveDog}
-						disabled={!editMode || saving}
-					>
-						{saving ? 'Saving…' : 'Save Changes'}
-					</button>
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div class="dog-detail-head">
+					<div class="dog-detail-kicker-row">
+						<a class="dog-detail-back typewriter" href="/dogs" aria-label="Back to dogs list">
+							<svg class="dog-detail-back-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="m15 5-7 7 7 7" />
+								<path d="M8 12h10" />
+							</svg>
+							<span>Back</span>
+						</a>
+						<span class="label-maker label-maker-blue">Dog Detail</span>
+					</div>
+					<h2 class="dog-detail-title">{dog.name}</h2>
 				</div>
-			{/if}
-		</div>
+				{#if canEdit}
+					<div class="dog-detail-actions">
+						<button
+							class={`icon-action ${editMode ? 'icon-action-cancel' : 'icon-action-edit'}`}
+							on:click={() => (editMode = !editMode)}
+							aria-label={editMode ? 'Cancel edit' : 'Edit dog'}
+							title={editMode ? 'Cancel edit' : 'Edit dog'}
+						>
+							{#if editMode}
+								<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M9 6 4 11l5 5" />
+									<path d="M4 11h10a4 4 0 1 1 0 8h-2" />
+									<path d="M18.5 4.5l.3.8.8.3-.8.3-.3.8-.3-.8-.8-.3.8-.3.3-.8z" fill="currentColor" stroke="none" />
+								</svg>
+							{:else}
+								<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M4 20l4.2-1 9.2-9.2a2.2 2.2 0 1 0-3.1-3.1L5.1 15.9 4 20z" />
+									<path d="m13.4 7.6 3 3" />
+									<path d="M19.2 2.8l.4 1 .9.4-.9.4-.4 1-.4-1-.9-.4.9-.4.4-1z" fill="currentColor" stroke="none" />
+								</svg>
+							{/if}
+						</button>
+						<button
+							class="icon-action icon-action-save"
+							on:click={saveDog}
+							disabled={!editMode || saving}
+							aria-label={saving ? 'Saving changes' : 'Save changes'}
+							title={saving ? 'Saving changes' : 'Save changes'}
+						>
+							{#if saving}
+								<svg class="icon-svg icon-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+									<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2" opacity="0.28" />
+									<path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+								</svg>
+							{:else}
+								<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M12 20.2s-6.4-4.1-8.4-7c-2-2.8-.9-6.6 2.2-7.2 2-.4 3.3.7 4.2 1.9.9-1.2 2.2-2.3 4.2-1.9 3.1.6 4.2 4.4 2.2 7.2-2 2.9-8.4 7-8.4 7z" />
+									<path d="m9.2 11.8 2 2 3.7-3.7" />
+								</svg>
+							{/if}
+						</button>
+					</div>
+				{/if}
+			</div>
 
 		{#if !editMode}
 			<div class="kennel-scene">
@@ -316,10 +359,13 @@
 						<div class="kennel-adoption-banner">
 							<div class={`whiteboard-status-tag ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
 							<p class={`whiteboard-alert typewriter ${adoptionToneClass}`}>{adoptionNotice}</p>
+							<div class="whiteboard-trip whiteboard-trip-inline typewriter">
+								<p class={`whiteboard-trip-pill ${dayTripBadgeClass}`}>{dayTripBadgeText}</p>
+							</div>
 						</div>
 
-					<div class="kennel-sheet-main">
-						<div class="kennel-photo">
+						<div class="kennel-sheet-main">
+							<div class="kennel-photo">
 							<div class="kennel-photo-frame">
 								{#if dog.photoUrl}
 									<img
@@ -335,44 +381,43 @@
 							<p class="kennel-photo-label typewriter">
 								{dog.photoUrl ? 'Photo on file' : canEdit ? 'Photo pending upload (use Edit Dog)' : 'Photo pending upload'}
 							</p>
-						</div>
+							</div>
 
-						<div class="kennel-facts typewriter">
-							<p class="kennel-facts-title">{dog.name}</p>
-								<p><span>Original Entry:</span> {formatDate(dog.originalIntakeDate)}</p>
-								<p><span>Current Entry:</span> {formatDate(dog.intakeDate)}</p>
-								<p><span>Time at Shelter:</span> {shelterTimeLabel(dog.intakeDate)}</p>
-								<p><span>Re-entries:</span> {dog.reentryDates.length}</p>
-							<p><span>Came From:</span> {dog.origin || 'Unknown'}</p>
-							<p><span>Breed:</span> {dog.breed || 'Unknown'}</p>
-							<p><span>Estimated Birthday:</span> {formatDate(dog.dateOfBirth)}</p>
-							<p><span>Age:</span> {formatAge(dog.dateOfBirth, today)}</p>
-							<p><span>Color:</span> Unknown</p>
-							<p><span>Sex:</span> {sexLabel(dog.sex)}</p>
-							<p><span>Weight:</span> {dog.weightLbs ? `${dog.weightLbs} lbs` : 'Unknown'}</p>
-							<p><span>Energy:</span> {energyLabel(dog.energyLevel)}</p>
-							<p><span>Kennel:</span> {dog.outdoorKennelAssignment || 'Unassigned'}</p>
-							<p><span>Status:</span> {dog.status === 'active' ? 'Active' : 'Adopted'}</p>
-							<p><span>Food:</span> {dog.foodType} ({dog.foodAmount || 'TBD'})</p>
-							<p><span>Own Food:</span> {dog.hasOwnFood ? 'Yes' : 'No'}</p>
+							<div class="kennel-facts typewriter">
+									<p><span>Original Entry:</span> <strong class="detail-value">{formatDate(dog.originalIntakeDate)}</strong></p>
+									<p><span>Current Entry:</span> <strong class="detail-value">{formatDate(dog.intakeDate)}</strong></p>
+									<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate)}</strong></p>
+								<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
+							<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
+							<p><span>Breed:</span> <strong class="detail-value">{dog.breed || 'Unknown'}</strong></p>
+							<p><span>Estimated Birthday:</span> <strong class="detail-value">{formatDate(dog.dateOfBirth)}</strong></p>
+							<p><span>Age:</span> <strong class="detail-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
+							<p><span>Color:</span> <strong class="detail-value">Unknown</strong></p>
+							<p><span>Sex:</span> <strong class="detail-value">{sexLabel(dog.sex)}</strong></p>
+							<p><span>Weight:</span> <strong class="detail-value">{dog.weightLbs ? `${dog.weightLbs} lbs` : 'Unknown'}</strong></p>
+							<p><span>Energy:</span> <strong class="detail-value">{energyLabel(dog.energyLevel)}</strong></p>
+							<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
+							<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : 'Adopted'}</strong></p>
+							<p><span>Food:</span> <strong class="detail-value">{dog.foodType} ({dog.foodAmount || 'TBD'})</strong></p>
+							<p><span>Own Food:</span> <strong class="detail-value">{dog.hasOwnFood ? 'Yes' : 'No'}</strong></p>
 							{#if dog.hasOwnFood}
 								<p>
 									<span>Transition to Hills:</span>
-									{dog.transitionToHills === true ? 'Yes' : dog.transitionToHills === false ? 'No' : 'Not set'}
+									<strong class="detail-value">{dog.transitionToHills === true ? 'Yes' : dog.transitionToHills === false ? 'No' : 'Not set'}</strong>
 								</p>
 							{/if}
-							<p><span>Microchipped:</span> {dog.isMicrochipped ? 'Yes' : 'No'}</p>
+							<p><span>Microchipped:</span> <strong class="detail-value">{dog.isMicrochipped ? 'Yes' : 'No'}</strong></p>
 						</div>
 					</div>
 
 					<div class="kennel-sheet-description typewriter">
 						<p class="kennel-sheet-description-title">Description</p>
 						<p>{dog.dietaryNotes || dog.dayTripNotes || 'No additional profile notes logged yet.'}</p>
-						<p>Good with Dogs: {compatibilityLabel(dog.goodWithDogs)}</p>
-						<p>Good with Cats: {compatibilityLabel(dog.goodWithCats)}</p>
-						<p>Good with Kids: {compatibilityLabel(dog.goodWithKids)}</p>
-						<p>Housetrained: {pottyLabel(dog.pottyTrained)}</p>
-						<p>Best Home Fit: {dog.idealHome || 'Not yet documented'}</p>
+						<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
+						<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
+						<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
+						<p><span>Housetrained:</span> <strong class="detail-value">{pottyLabel(dog.pottyTrained)}</strong></p>
+						<p><span>Best Home Fit:</span> <strong class="detail-value">{dog.idealHome || 'Not yet documented'}</strong></p>
 					</div>
 
 					<p class="kennel-sheet-footer typewriter">
@@ -452,20 +497,7 @@
 					</div>
 				</dl>
 
-				<div class="whiteboard-trip typewriter">
-					<p>Day trip status: {dayTripLabel(dayTripEligibility.status)}</p>
-					{#if dayTripEligibility.eligible}
-						<p class="whiteboard-ok">Eligible for day trips.</p>
-					{:else}
-						<ul>
-							{#each dayTripEligibility.reasons as reason}
-								<li>{reason}</li>
-							{/each}
-						</ul>
-					{/if}
-				</div>
-
-				<div class="whiteboard-actions">
+					<div class="whiteboard-actions">
 					<button
 						class="w-full rounded-full border border-ink-200 px-4 py-2 text-xs"
 						on:click={handleLogBath}
@@ -640,9 +672,109 @@
 
 	.dog-detail-title {
 		margin-top: 0.42rem;
-		font-size: 1.5rem;
-		line-height: 1.08;
+		font-size: clamp(2.2rem, 9vw, 3.8rem);
+		line-height: 0.95;
 		color: var(--marker-black);
+	}
+
+	.dog-detail-head {
+		min-width: 0;
+	}
+
+	.dog-detail-kicker-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.44rem;
+	}
+
+	.dog-detail-back {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.22rem;
+		margin-bottom: 0;
+		font-size: 0.8rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #4f6178;
+		text-decoration: none;
+	}
+
+	.dog-detail-back:hover {
+		color: #2f4f78;
+	}
+
+	.dog-detail-back-icon {
+		width: 1rem;
+		height: 1rem;
+	}
+
+	.dog-detail-actions {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.42rem;
+	}
+
+	.dog-detail-board :global(button.icon-action) {
+		all: unset;
+		min-height: 0;
+		width: 2.2rem;
+		height: 2.2rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		user-select: none;
+		transition:
+			transform 130ms ease,
+			color 130ms ease,
+			opacity 130ms ease;
+	}
+
+	.dog-detail-board :global(button.icon-action:focus-visible) {
+		outline: 2px solid #89a8cb;
+		outline-offset: 2px;
+		border-radius: 0.3rem;
+	}
+
+	.dog-detail-board :global(button.icon-action:hover:not(:disabled)) {
+		transform: translateY(-1px) scale(1.08);
+	}
+
+	.dog-detail-board :global(button.icon-action:disabled) {
+		cursor: not-allowed;
+		opacity: 0.38;
+		transform: none;
+	}
+
+	.icon-svg {
+		width: 2rem;
+		height: 2rem;
+	}
+
+	.icon-spin {
+		animation: icon-spin 0.9s linear infinite;
+	}
+
+	.icon-action-edit {
+		color: #476f9f;
+	}
+
+	.icon-action-cancel {
+		color: #8f5f7b;
+	}
+
+	.icon-action-save {
+		color: #3b8a66;
+	}
+
+	@keyframes icon-spin {
+		from {
+			transform: rotate(0deg);
+		}
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.dog-detail-board :global(.rounded-3xl) {
@@ -706,8 +838,8 @@
 	.kennel-scene {
 		position: relative;
 		display: grid;
-		gap: 0.88rem;
-		padding: 0.8rem;
+		gap: 0.5rem;
+		padding: 0.5rem;
 		border: 1.5px solid #b9c1cc;
 		border-radius: 0.42rem;
 		overflow: hidden;
@@ -839,14 +971,6 @@
 		color: #26344a;
 	}
 
-	.kennel-facts-title {
-		margin: 0 0 0.18rem;
-		font-family: var(--font-printed);
-		font-size: 0.76rem;
-		color: #1c2b43;
-		overflow-wrap: anywhere;
-	}
-
 	.kennel-facts p {
 		margin: 0.08rem 0;
 		overflow-wrap: anywhere;
@@ -856,6 +980,14 @@
 		display: inline-block;
 		min-width: 8.2rem;
 		color: #53637b;
+	}
+
+	.detail-value {
+		font-family: var(--font-ui);
+		font-size: 0.95em;
+		font-weight: 800;
+		letter-spacing: 0;
+		color: #1f2f46;
 	}
 
 	.kennel-sheet-description {
@@ -917,12 +1049,12 @@
 
 	.whiteboard-alert {
 		margin: 0;
-		padding: 0.44rem;
+		padding: 0.62rem 0.72rem;
 		border: 1px solid #c3ccdb;
 		background: #edf2f8;
 		text-align: center;
-		font-size: 0.9rem;
-		line-height: 1.08;
+		font-size: 1.25rem;
+		line-height: 1.16;
 		font-family: var(--font-printed);
 		color: #3f506b;
 	}
@@ -942,7 +1074,7 @@
 	.whiteboard-note {
 		margin: 0.12rem 0 0.26rem;
 		text-align: center;
-		font-size: 2rem;
+		font-size: 2.6rem;
 		line-height: 0.96;
 		transform: rotate(-3deg);
 	}
@@ -995,21 +1127,41 @@
 		color: #2f3d52;
 	}
 
+	.whiteboard-trip-inline {
+		width: 100%;
+		border-top: none;
+		padding-top: 0;
+	}
+
 	.whiteboard-trip p {
 		margin: 0.08rem 0;
 	}
 
-	.whiteboard-trip ul {
-		margin: 0.18rem 0 0 0.95rem;
+	.whiteboard-trip-pill {
+		margin: 0;
 		padding: 0;
+		border: none;
+		border-radius: 0;
+		background: transparent;
+		font-family: var(--font-permanent);
+		font-size: 1.22rem;
+		line-height: 1.05;
+		letter-spacing: 0.03em;
+		font-weight: 700;
+		text-transform: uppercase;
+		display: inline-block;
 	}
 
-	.whiteboard-trip li {
-		margin-bottom: 0.1rem;
+	.whiteboard-trip-pill-green {
+		color: #166534;
 	}
 
-	.whiteboard-ok {
-		color: #1f6d47;
+	.whiteboard-trip-pill-yellow {
+		color: #c2410c;
+	}
+
+	.whiteboard-trip-pill-red {
+		color: #b91c1c;
 	}
 
 	.whiteboard-actions {
@@ -1051,10 +1203,6 @@
 	}
 
 	@media (min-width: 900px) {
-		.dog-detail-title {
-			font-size: 1.74rem;
-		}
-
 		.kennel-scene {
 			grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
 		}
@@ -1067,17 +1215,61 @@
 	}
 
 	@media (max-width: 640px) {
+		.kennel-facts {
+			font-size: 1.07rem;
+			line-height: 1.44;
+		}
+
 		.kennel-facts span {
 			min-width: 6.8rem;
 		}
 
+		.kennel-sheet-description {
+			font-size: 1.03rem;
+			line-height: 1.38;
+		}
+
+		.kennel-sheet-description-title {
+			font-size: 1.17rem;
+		}
+
+		.kennel-sheet-footer {
+			font-size: 0.93rem;
+			line-height: 1.35;
+		}
+
 		.whiteboard-note {
-			font-size: 1.66rem;
+			font-size: 2.2rem;
+		}
+
+		.whiteboard-alert {
+			font-size: 1.24rem;
+			padding: 0.62rem 0.7rem;
+		}
+
+		.whiteboard-facts {
+			font-size: 0.99rem;
+			gap: 0.4rem;
+		}
+
+		.whiteboard-facts dt {
+			font-size: 0.84rem;
+			letter-spacing: 0.06em;
+		}
+
+		.whiteboard-trip {
+			font-size: 0.99rem;
+			line-height: 1.4;
+		}
+
+		.whiteboard-trip-pill {
+			font-size: 1.56rem;
+			padding: 0;
 		}
 
 		.whiteboard-facts div {
 			grid-template-columns: 1fr;
-			gap: 0.12rem;
+			gap: 0.18rem;
 		}
 	}
 </style>

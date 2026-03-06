@@ -5,12 +5,23 @@ import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 import { env } from '$env/dynamic/public';
 
+function normalizeHostLikeValue(value: string) {
+	return value.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+}
+
+function normalizeStorageBucket(value: string) {
+	return normalizeHostLikeValue(value).replace(/^gs:\/\//, '');
+}
+
 const firebaseConfig = {
 	apiKey: env.PUBLIC_FIREBASE_API_KEY ?? 'AIzaSyBYBJpvxuZ1XZjym7cu_nWG2SR-e-lmAZM',
-	authDomain: env.PUBLIC_FIREBASE_AUTH_DOMAIN ?? 'cachehumane-dogmanagement.firebaseapp.com',
+	authDomain: normalizeHostLikeValue(
+		env.PUBLIC_FIREBASE_AUTH_DOMAIN ?? 'cachehumane-dogmanagement.firebaseapp.com'
+	),
 	projectId: env.PUBLIC_FIREBASE_PROJECT_ID ?? 'cachehumane-dogmanagement',
-	storageBucket:
-		env.PUBLIC_FIREBASE_STORAGE_BUCKET ?? 'cachehumane-dogmanagement.firebasestorage.app',
+	storageBucket: normalizeStorageBucket(
+		env.PUBLIC_FIREBASE_STORAGE_BUCKET ?? 'cachehumane-dogmanagement.firebasestorage.app'
+	),
 	messagingSenderId: env.PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? '914757695461',
 	appId: env.PUBLIC_FIREBASE_APP_ID ?? '1:914757695461:web:54e5af021b78413133210c'
 };

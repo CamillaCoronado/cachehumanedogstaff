@@ -14,6 +14,7 @@
 	import { isMondayOrThursday, formatDate, toDate } from '$lib/utils/dates';
 	import { estimateFoodAmountPerMeal } from '$lib/utils/feeding';
 	import { deleteDogPhotoByUrl, uploadDogPhotoDataUrl } from '$lib/firebase/storage';
+	import { getStorageUploadErrorMessage } from '$lib/firebase/errors';
 
 	export let value: Dog;
 	export let disabled = false;
@@ -167,7 +168,7 @@
 			}
 		} catch (error) {
 			console.error(error);
-			photoUploadError = 'Unable to upload photo to Firebase Storage.';
+			photoUploadError = getStorageUploadErrorMessage(error);
 		} finally {
 			photoUploading = false;
 			if (input) input.value = '';

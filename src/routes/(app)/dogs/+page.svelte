@@ -33,7 +33,7 @@
 	let loading = true;
 	let search = '';
 	let showArchived = false;
-	let sortKey: 'name' | 'days' | 'age' = 'name';
+	let sortKey: 'name' | 'days' | 'age' | 'weight' = 'days';
 	let sortDir: 'asc' | 'desc' = 'asc';
 	let showAddModal = false;
 	let draftDog: Dog;
@@ -54,17 +54,25 @@
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
 		const direction = sortDir === 'asc' ? 1 : -1;
-		if (sortKey === 'name') {
-			return a.name.localeCompare(b.name) * direction;
-		}
 		if (sortKey === 'days') {
 			const daysA = daysSince(a.intakeDate, today) ?? 0;
 			const daysB = daysSince(b.intakeDate, today) ?? 0;
 			return (daysA - daysB) * direction;
 		}
-		const ageA = daysSince(a.dateOfBirth, today) ?? 0;
-		const ageB = daysSince(b.dateOfBirth, today) ?? 0;
-		return (ageA - ageB) * direction;
+		if (sortKey === 'age') {
+			const ageA = daysSince(a.dateOfBirth, today) ?? 0;
+			const ageB = daysSince(b.dateOfBirth, today) ?? 0;
+			return (ageA - ageB) * direction;
+		}
+		if (sortKey === 'weight') {
+			const weightA = typeof a.weightLbs === 'number' ? a.weightLbs : null;
+			const weightB = typeof b.weightLbs === 'number' ? b.weightLbs : null;
+			if (weightA === null && weightB === null) return a.name.localeCompare(b.name);
+			if (weightA === null) return 1;
+			if (weightB === null) return -1;
+			return (weightA - weightB) * direction;
+		}
+		return a.name.localeCompare(b.name) * direction;
 	});
 
 	function setSort(key: typeof sortKey) {
@@ -478,27 +486,33 @@
 			<details class="dogs-filters-drawer">
 				<summary class="dogs-filters-summary typewriter">filters and sort</summary>
 				<div class="dogs-filters-body">
-					<div class="dogs-sort-group" role="group" aria-label="Sort dogs">
-						<span class="control-label typewriter">sort</span>
-						<button
-							class={`sort-chip ${sortKey === 'name' ? 'sort-chip-active' : ''}`}
-							on:click={() => setSort('name')}
-						>
-							name {sortArrow('name')}
-						</button>
-						<button
-							class={`sort-chip ${sortKey === 'days' ? 'sort-chip-active' : ''}`}
-							on:click={() => setSort('days')}
-						>
-							days {sortArrow('days')}
-						</button>
-						<button
-							class={`sort-chip ${sortKey === 'age' ? 'sort-chip-active' : ''}`}
-							on:click={() => setSort('age')}
-						>
-							age {sortArrow('age')}
-						</button>
-					</div>
+						<div class="dogs-sort-group" role="group" aria-label="Sort dogs">
+							<span class="control-label typewriter">sort</span>
+							<button
+								class={`sort-chip ${sortKey === 'days' ? 'sort-chip-active' : ''}`}
+								on:click={() => setSort('days')}
+							>
+								shelter time {sortArrow('days')}
+							</button>
+							<button
+								class={`sort-chip ${sortKey === 'age' ? 'sort-chip-active' : ''}`}
+								on:click={() => setSort('age')}
+							>
+								age {sortArrow('age')}
+							</button>
+							<button
+								class={`sort-chip ${sortKey === 'weight' ? 'sort-chip-active' : ''}`}
+								on:click={() => setSort('weight')}
+							>
+								small to big {sortArrow('weight')}
+							</button>
+							<button
+								class={`sort-chip ${sortKey === 'name' ? 'sort-chip-active' : ''}`}
+								on:click={() => setSort('name')}
+							>
+								name {sortArrow('name')}
+							</button>
+						</div>
 					<label class="archived-toggle typewriter">
 						<input type="checkbox" bind:checked={showArchived} />
 						show archived
@@ -1101,8 +1115,8 @@
 		margin: 0;
 		font-size: 0.72rem;
 		line-height: 1.24;
-		font-weight: 700;
-		color: #1f3045;
+		font-weight: 900;
+		color: #152334;
 	}
 
 	.meet-home {
@@ -1118,8 +1132,8 @@
 	.meet-home-value {
 		font-size: 0.72rem;
 		line-height: 1.28;
-		font-weight: 700;
-		color: #1e2f44;
+		font-weight: 900;
+		color: #152334;
 	}
 
 	.fact-row {
