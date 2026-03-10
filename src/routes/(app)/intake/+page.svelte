@@ -910,6 +910,7 @@
 			isVaccinated,
 			vaccinatedDate: isVaccinated ? vaccinatedDate : null,
 			dayTripStatus: 'eligible',
+			dayTripIneligibleReason: null,
 			dayTripNotes: null,
 			inFoster,
 			isolationStatus: 'none',

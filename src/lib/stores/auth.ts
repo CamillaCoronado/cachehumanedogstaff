@@ -2,7 +2,7 @@ import { writable } from 'svelte/store';
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '$lib/firebase/config';
-import { createUserProfile, getUserProfile, hasAnyUserProfiles } from '$lib/firebase/firestore';
+import { createUserProfile, getUserProfile } from '$lib/firebase/firestore';
 import type { UserProfile } from '$lib/types';
 
 export const authUser = writable<User | null>(null);
@@ -26,13 +26,11 @@ export function initAuthListener() {
 			try {
 				let profile = await getUserProfile(user.uid);
 				if (!profile) {
-					const anyProfilesExist = await hasAnyUserProfiles();
-					const role = anyProfilesExist ? 'staff' : 'admin';
 					await createUserProfile({
 						uid: user.uid,
 						email: user.email ?? '',
 						displayName: user.displayName ?? user.email ?? 'Staff Member',
-						role
+						role: 'staff'
 					});
 					profile = await getUserProfile(user.uid);
 				}

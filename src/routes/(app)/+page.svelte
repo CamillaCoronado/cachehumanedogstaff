@@ -75,8 +75,8 @@
 		.filter(
 			(dog) =>
 				dog.dayTripStatus === 'difficult' ||
-				dog.dayTripStatus === 'ineligible' ||
-				Boolean(dog.dayTripNotes?.trim())
+				(dog.dayTripStatus === 'ineligible' &&
+					(dog.dayTripIneligibleReason ?? 'behavior') === 'behavior')
 		)
 		.slice(0, 4);
 

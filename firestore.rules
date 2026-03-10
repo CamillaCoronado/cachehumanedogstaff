@@ -24,6 +24,10 @@ service cloud.firestore {
       return isAdmin() || isManager();
     }
 
+    function canManageUsers() {
+      return isAdmin();
+    }
+
     function isSelf(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
@@ -36,19 +40,19 @@ service cloud.firestore {
       return isSelf(userId) &&
         request.resource.data.uid == request.auth.uid &&
         (request.auth.token.email == null || request.resource.data.email == request.auth.token.email) &&
-        isValidRole(request.resource.data.role);
+        request.resource.data.role == 'staff';
     }
 
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if canEditDogs() || isValidSelfProfilePayload(userId);
-      allow update: if (canEditDogs() &&
+      allow create: if canManageUsers() || isValidSelfProfilePayload(userId);
+      allow update: if (canManageUsers() &&
         !(resource.data.role == 'admin' && request.resource.data.role != 'admin')) ||
         (isSelf(userId) &&
           request.resource.data.uid == resource.data.uid &&
           request.resource.data.email == resource.data.email &&
           request.resource.data.role == resource.data.role);
-      allow delete: if canEditDogs();
+      allow delete: if canManageUsers();
     }
 
     match /dogs/{dogId} {

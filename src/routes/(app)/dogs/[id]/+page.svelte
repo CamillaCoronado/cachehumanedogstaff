@@ -30,6 +30,7 @@
 		toDate,
 		checkDayTripEligibility
 	} from '$lib/utils/dates';
+	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import { energyLabel, compatibilityLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
@@ -56,7 +57,16 @@
 	$: bathIsEligible = dog ? bathEligible(dog.surgeryDate, today) : true;
 	$: feedToday = dog ? !isSurgeryToday(dog.surgeryDate, today) : true;
 	$: dayTripEligibility = dog
-		? checkDayTripEligibility(dog.intakeDate, dog.isVaccinated, dog.isFixed, dog.dayTripStatus, dog.isolationStatus, dog.dayTripNotes, today)
+		? checkDayTripEligibility(
+				dog.intakeDate,
+				dog.isVaccinated,
+				dog.isFixed,
+				dog.dayTripStatus,
+				dog.isolationStatus,
+				dog.dayTripIneligibleReason,
+				dog.dayTripNotes,
+				today
+			)
 		: { eligible: false, status: 'ineligible' as const, reasons: [] };
 	$: dayTripBadgeClass =
 		dayTripEligibility.status === 'eligible'
@@ -79,17 +89,38 @@
 			return startedAt ? startedAt >= currentMonthStart && startedAt < nextMonthStart : false;
 		})
 		.reduce((sum, log) => sum + dayTripHours(log), 0);
+	$: ineligibleReason = dog?.dayTripIneligibleReason ?? 'behavior';
+	$: isBehaviorIneligible =
+		Boolean(dog) &&
+		dog.dayTripStatus === 'ineligible' &&
+		dog.isolationStatus === 'none' &&
+		ineligibleReason === 'behavior';
+	$: isMedicalIneligible =
+		Boolean(dog) &&
+		dog.dayTripStatus === 'ineligible' &&
+		dog.isolationStatus === 'none' &&
+		ineligibleReason === 'medical';
+	$: isOtherIneligible =
+		Boolean(dog) &&
+		dog.dayTripStatus === 'ineligible' &&
+		dog.isolationStatus === 'none' &&
+		ineligibleReason === 'other';
+	$: dayTripReasonNote = dog?.dayTripNotes?.trim() ?? '';
+	$: difficultWhiteboardNote = dayTripReasonNote ? `Adults only: ${dayTripReasonNote}` : 'Adults only';
 	$: activeTrip = dayTripLogs.find((log) => !log.endedAt) ?? null;
+	$: adoptionAvailability = dog ? getAdoptionAvailability(dog) : null;
 	$: adoptionNotice = dog
-		? dog.status === 'adopted'
+		? adoptionAvailability?.state === 'not_available'
 			? 'No longer available for adoption'
-			: dog.isolationStatus !== 'none'
-				? 'Temporarily unavailable for adoption'
-				: 'Available for adoption'
+			: adoptionAvailability?.state === 'medical_hold'
+				? `Not available for adoption: needs ${adoptionAvailability.missingMedicalRequirements.join(', ')}`
+				: adoptionAvailability?.state === 'isolation_hold'
+					? 'Temporarily unavailable for adoption'
+					: 'Available for adoption'
 		: 'Unavailable';
-	$: adoptionToneClass = adoptionNotice === 'Available for adoption' ? 'whiteboard-alert-ok' : 'whiteboard-alert-warn';
+	$: adoptionToneClass = adoptionAvailability?.state === 'available' ? 'whiteboard-alert-ok' : 'whiteboard-alert-warn';
 	$: whiteboardStatusTagClass = dog
-		? dog.dayTripStatus === 'ineligible'
+		? dog.isolationStatus !== 'none' || dog.dayTripStatus === 'ineligible'
 			? 'whiteboard-tag-red'
 			: dog.dayTripStatus === 'difficult'
 				? 'whiteboard-tag-yellow'
@@ -100,19 +131,27 @@
 			? 'Day Trip'
 			: dog.isolationStatus !== 'none'
 				? 'Isolation'
-				: dog.dayTripStatus === 'ineligible'
+				: isBehaviorIneligible
 					? 'Staff Only'
-					: dog.dayTripStatus === 'difficult'
-						? 'Adults only'
-						: ''
+					: isMedicalIneligible
+						? dayTripReasonNote
+							? `Medical hold: ${dayTripReasonNote}`
+							: 'Medical hold'
+						: isOtherIneligible
+							? dayTripReasonNote
+								? `Day trip hold: ${dayTripReasonNote}`
+								: 'Day trip hold'
+						: dog.dayTripStatus === 'difficult'
+							? difficultWhiteboardNote
+							: ''
 		: '';
 	$: whiteboardNoteToneClass =
-		whiteboardNote === 'Staff Only' || whiteboardNote === 'Isolation'
-			? 'whiteboard-note-red'
-			: whiteboardNote === 'Adults only'
-				? 'whiteboard-note-yellow'
-				: whiteboardNote === 'Day Trip'
-					? 'whiteboard-note-blue'
+		whiteboardNote === 'Day Trip'
+			? 'whiteboard-note-blue'
+			: dog && !dog.isOutOnDayTrip && (dog.isolationStatus !== 'none' || dog.dayTripStatus === 'ineligible')
+				? 'whiteboard-note-red'
+				: dog && !dog.isOutOnDayTrip && dog.dayTripStatus === 'difficult'
+					? 'whiteboard-note-yellow'
 					: '';
 
 	onMount(async () => {

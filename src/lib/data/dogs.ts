@@ -1,5 +1,6 @@
 import type {
 	BehavioralNote,
+	DayTripIneligibleReason,
 	DayTripLog,
 	Dog,
 	FeedingLog,
@@ -66,6 +67,7 @@ interface StoredDog {
 	isVaccinated: boolean;
 	vaccinatedDate: string | null;
 	dayTripStatus: 'ineligible' | 'difficult' | 'eligible';
+	dayTripIneligibleReason?: DayTripIneligibleReason | null;
 	dayTripNotes: string | null;
 	inFoster: boolean;
 	isolationStatus: 'none' | 'sick' | 'bite_quarantine';
@@ -140,6 +142,10 @@ function applyFosterHousingRules(dog: Dog): Dog {
 	return { ...dog, outdoorKennelAssignment: '' };
 }
 
+function normalizeDayTripIneligibleReason(value: unknown): DayTripIneligibleReason | null {
+	return value === 'behavior' || value === 'medical' || value === 'other' ? value : null;
+}
+
 function serializeDog(dog: Dog): StoredDog {
 	const serializedIntakeDate = toDateString(dog.intakeDate) ?? new Date().toISOString();
 	const serializedOriginalEntry = toDateString(dog.originalIntakeDate) ?? serializedIntakeDate;
@@ -193,6 +199,7 @@ function serializeDog(dog: Dog): StoredDog {
 		isVaccinated: dog.isVaccinated,
 		vaccinatedDate: toDateString(dog.vaccinatedDate),
 		dayTripStatus: dog.dayTripStatus,
+		dayTripIneligibleReason: dog.dayTripIneligibleReason ?? null,
 		dayTripNotes: dog.dayTripNotes,
 		inFoster: dog.inFoster ?? false,
 		isolationStatus: dog.isolationStatus,
@@ -208,10 +215,17 @@ function deserializeDog(stored: StoredDog): Dog {
 	const originalIntakeDate = toDate(stored.originalIntakeDate) ?? intakeDate;
 	const reentryDates = deserializeDateArray(stored.reentryDates);
 	const normalizedDayTripNotes = (stored.dayTripNotes ?? '').trim();
+	const normalizedDayTripIneligibleReason = normalizeDayTripIneligibleReason(stored.dayTripIneligibleReason);
 	const normalizedDayTripStatus =
-		(stored.dayTripStatus ?? 'eligible') === 'ineligible' && normalizedDayTripNotes.length === 0
+		(stored.dayTripStatus ?? 'eligible') === 'ineligible' &&
+			normalizedDayTripNotes.length === 0 &&
+			normalizedDayTripIneligibleReason === null
 			? 'eligible'
 			: (stored.dayTripStatus ?? 'eligible');
+	const dayTripIneligibleReason =
+		normalizedDayTripStatus === 'ineligible' && (stored.isolationStatus ?? 'none') === 'none'
+			? (normalizedDayTripIneligibleReason ?? 'behavior')
+			: null;
 
 	const dog: Dog = {
 		id: stored.id,
@@ -264,6 +278,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		isVaccinated: stored.isVaccinated ?? false,
 		vaccinatedDate: stored.vaccinatedDate ? toDate(stored.vaccinatedDate) : null,
 		dayTripStatus: normalizedDayTripStatus,
+		dayTripIneligibleReason,
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
 		inFoster: stored.inFoster ?? false,
 		isolationStatus: stored.isolationStatus ?? 'none',

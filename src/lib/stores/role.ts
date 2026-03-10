@@ -6,7 +6,7 @@ const STORAGE_KEY = 'shelter.role';
 
 const storedRole = browser ? (localStorage.getItem(STORAGE_KEY) as UserRole | null) : null;
 
-export const localRole = writable<UserRole>(storedRole ?? 'manager');
+export const localRole = writable<UserRole>(storedRole ?? 'staff');
 
 if (browser) {
 	localRole.subscribe((value) => {

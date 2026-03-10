@@ -102,6 +102,7 @@
 			dog.isFixed,
 			dog.dayTripStatus,
 			dog.isolationStatus,
+			dog.dayTripIneligibleReason,
 			dog.dayTripNotes,
 			new Date()
 		);

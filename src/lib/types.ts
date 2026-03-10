@@ -14,6 +14,7 @@ export interface UserProfile {
 
 export type DogStatus = 'active' | 'adopted';
 export type DayTripStatus = 'ineligible' | 'difficult' | 'eligible';
+export type DayTripIneligibleReason = 'behavior' | 'medical' | 'other';
 export type IsolationStatus = 'none' | 'sick' | 'bite_quarantine';
 export type Compatibility = 'yes' | 'no' | 'unknown';
 export type PottyTrainedStatus = 'yes' | 'no' | 'working_on_it' | 'unknown';
@@ -70,6 +71,7 @@ export interface Dog {
 	isVaccinated: boolean;
 	vaccinatedDate: DateValue | null;
 	dayTripStatus: DayTripStatus;
+	dayTripIneligibleReason?: DayTripIneligibleReason | null;
 	dayTripNotes: string | null;
 	inFoster: boolean;
 	isolationStatus: IsolationStatus;

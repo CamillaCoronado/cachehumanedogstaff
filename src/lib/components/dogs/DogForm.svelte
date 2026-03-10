@@ -3,6 +3,7 @@
 	import type {
 		Compatibility,
 		DateValue,
+		DayTripIneligibleReason,
 		DayTripStatus,
 		Dog,
 		DogSex,
@@ -57,6 +58,11 @@
 		{ value: 'eligible', label: 'Eligible', description: 'Anyone can take on day trips' },
 		{ value: 'difficult', label: 'Difficult', description: 'Adults only' }
 	];
+	const ineligibleReasons: { value: DayTripIneligibleReason; label: string }[] = [
+		{ value: 'behavior', label: 'Behavior' },
+		{ value: 'medical', label: 'Medical' },
+		{ value: 'other', label: 'Other' }
+	];
 	const statusOptions: { value: DogStatus; label: string }[] = [
 		{ value: 'active', label: 'Active' },
 		{ value: 'adopted', label: 'Adopted' }
@@ -68,8 +74,11 @@
 	];
 
 	$: isInIsolation = value.isolationStatus !== 'none';
-	$: isBehaviorBlocked = value.dayTripStatus === 'ineligible';
-	$: needsReason = value.dayTripStatus === 'difficult' || isBehaviorBlocked;
+	$: isManualIneligible = value.dayTripStatus === 'ineligible' && !isInIsolation;
+	$: selectedIneligibleReason = value.dayTripIneligibleReason ?? 'behavior';
+	$: isBehaviorBlocked = isManualIneligible && selectedIneligibleReason === 'behavior';
+	$: isMedicalBlocked = isManualIneligible && selectedIneligibleReason === 'medical';
+	$: needsReason = value.dayTripStatus === 'difficult' || isManualIneligible;
 	$: suggestedFoodAmount = estimateFoodAmountPerMeal({
 		weightLbs: value.weightLbs,
 		dateOfBirth: value.dateOfBirth,
@@ -126,6 +135,18 @@
 	}
 
 	function handleSelect(field: keyof Dog, newValue: string) {
+		if (field === 'dayTripStatus') {
+			const nextStatus = newValue as DayTripStatus;
+			value = {
+				...value,
+				dayTripStatus: nextStatus,
+				dayTripIneligibleReason:
+					nextStatus === 'ineligible' ? (value.dayTripIneligibleReason ?? 'behavior') : null
+			} as Dog;
+			dispatch('change', { value, valid: !surgeryError });
+			return;
+		}
+
 		const next = { ...value, [field]: newValue } as Dog;
 		value = field === 'foodType' ? maybeAutofillFoodAmount(value, next) : next;
 		dispatch('change', { value, valid: !surgeryError });
@@ -164,7 +185,11 @@
 			value = { ...value, photoUrl: uploadedUrl } as Dog;
 			dispatch('change', { value, valid: !surgeryError });
 			if (previousPhotoUrl && previousPhotoUrl !== uploadedUrl) {
-				await deleteDogPhotoByUrl(previousPhotoUrl);
+				try {
+					await deleteDogPhotoByUrl(previousPhotoUrl);
+				} catch (cleanupError) {
+					console.warn('Previous dog photo cleanup failed', cleanupError);
+				}
 			}
 		} catch (error) {
 			console.error(error);
@@ -234,9 +259,32 @@
 		const next: Dog = {
 			...value,
 			dayTripStatus: checked ? 'ineligible' : value.dayTripStatus === 'ineligible' ? 'eligible' : value.dayTripStatus,
+			dayTripIneligibleReason:
+				checked ? 'behavior' : value.dayTripStatus === 'ineligible' ? null : value.dayTripIneligibleReason,
 			dayTripNotes: checked ? value.dayTripNotes : value.dayTripStatus === 'ineligible' ? null : value.dayTripNotes
 		};
 		value = next;
+		dispatch('change', { value, valid: !surgeryError });
+	}
+
+	function handleMedicalHoldToggle(checked: boolean) {
+		const next: Dog = {
+			...value,
+			dayTripStatus: checked ? 'ineligible' : value.dayTripStatus === 'ineligible' ? 'eligible' : value.dayTripStatus,
+			dayTripIneligibleReason:
+				checked ? 'medical' : value.dayTripStatus === 'ineligible' ? null : value.dayTripIneligibleReason,
+			dayTripNotes: checked ? value.dayTripNotes : value.dayTripStatus === 'ineligible' ? null : value.dayTripNotes
+		};
+		value = next;
+		dispatch('change', { value, valid: !surgeryError });
+	}
+
+	function handleIneligibleReasonSelect(reason: DayTripIneligibleReason) {
+		value = {
+			...value,
+			dayTripStatus: 'ineligible',
+			dayTripIneligibleReason: reason
+		} as Dog;
 		dispatch('change', { value, valid: !surgeryError });
 	}
 
@@ -789,12 +837,22 @@
 						<input
 							type="checkbox"
 							class="form-checkbox"
-						disabled={disabled}
-						checked={value.isMicrochipped}
-						on:change={(event) => handleCheckbox('isMicrochipped', event.currentTarget.checked)}
+							disabled={disabled}
+							checked={value.isMicrochipped}
+							on:change={(event) => handleCheckbox('isMicrochipped', event.currentTarget.checked)}
 						/>
 						<span class="text-sm" style="color: var(--marker-black);">Microchipped</span>
 					</label>
+					{#if value.isMicrochipped}
+						<input
+							type="date"
+							class="form-input form-inline-date"
+							disabled={disabled}
+							placeholder="Date"
+							value={toDate(value.microchipDate)?.toISOString().slice(0, 10) ?? ''}
+							on:change={(event) => handleDateChange('microchipDate', event.currentTarget.value)}
+						/>
+					{/if}
 				</div>
 				<div class="form-inline-row">
 					<label class="flex items-center gap-2 cursor-pointer min-w-0">
@@ -840,16 +898,6 @@
 						/>
 					{/if}
 				</div>
-			<div class="form-field">
-				<label class="form-label typewriter">Microchip Date</label>
-				<input
-					type="date"
-					class="form-input"
-					disabled={disabled}
-					value={toDate(value.microchipDate)?.toISOString().slice(0, 10) ?? ''}
-					on:change={(event) => handleDateChange('microchipDate', event.currentTarget.value)}
-				/>
-			</div>
 			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Health Problems</label>
 				<textarea
@@ -937,6 +985,30 @@
 				/>
 				<span class="text-sm" style="color: var(--marker-black);">Behavior check (blocks day trips)</span>
 			</label>
+			<label class="flex items-center gap-2 cursor-pointer mb-2">
+				<input
+					type="checkbox"
+					class="form-checkbox"
+					disabled={disabled}
+					checked={isMedicalBlocked}
+					on:change={(event) => handleMedicalHoldToggle(event.currentTarget.checked)}
+				/>
+				<span class="text-sm" style="color: var(--marker-black);">Medical hold (blocks day trips)</span>
+			</label>
+			{#if isManualIneligible}
+				<div class="flex flex-wrap gap-2 mb-2">
+					{#each ineligibleReasons as reason}
+						<button
+							type="button"
+							class={`form-choice-btn ${selectedIneligibleReason === reason.value ? 'form-choice-red' : ''}`}
+							disabled={disabled}
+							on:click={() => handleIneligibleReasonSelect(reason.value)}
+						>
+							{reason.label}
+						</button>
+					{/each}
+				</div>
+			{/if}
 			<div class="flex flex-wrap gap-2">
 				{#each dayTripStatuses as status}
 					<button
@@ -948,7 +1020,7 @@
 								: 'form-choice-red'
 								: ''
 						}`}
-						disabled={disabled || isBehaviorBlocked}
+						disabled={disabled}
 						on:click={() => handleSelect('dayTripStatus', status.value)}
 					>
 						{status.label}
@@ -957,6 +1029,7 @@
 			</div>
 			<p class="form-hint mt-1">
 				{#if isBehaviorBlocked}Blocked by behavior check
+				{:else if isMedicalBlocked}Blocked for medical reason
 				{:else if value.dayTripStatus === 'eligible'}Anyone can take on day trips
 				{:else}Adults only{/if}
 			</p>
@@ -967,7 +1040,13 @@
 				type="text"
 				class="form-input mt-1"
 				disabled={disabled}
-				placeholder={isBehaviorBlocked ? 'Why is this dog blocked from day trips?' : 'Reason for status (optional)'}
+				placeholder={
+					isBehaviorBlocked
+						? 'Why is this dog blocked from day trips?'
+						: isMedicalBlocked
+							? 'Medical reason for day trip hold'
+							: 'Reason for status (optional)'
+				}
 				value={value.dayTripNotes ?? ''}
 				on:input={(event) => handleInput('dayTripNotes', event.currentTarget.value)}
 			/>

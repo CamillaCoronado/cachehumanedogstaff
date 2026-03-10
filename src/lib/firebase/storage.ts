@@ -20,10 +20,11 @@ export async function uploadDogPhotoDataUrl(
 		(error as Error & { code: string }).code = 'storage/unauthenticated';
 		throw error;
 	}
+	const userId = auth.currentUser.uid;
 	const dogId = options?.dogId?.trim() || 'unassigned';
 	const extension = mimeToExtension(options?.mimeType ?? 'image/jpeg');
 	const fileId = createId('photo');
-	const path = `${DOG_PHOTO_ROOT}/${dogId}/${fileId}.${extension}`;
+	const path = `${DOG_PHOTO_ROOT}/${userId}/${dogId}/${fileId}.${extension}`;
 	const photoRef = ref(storage, path);
 	await uploadString(photoRef, dataUrl, 'data_url');
 	return getDownloadURL(photoRef);

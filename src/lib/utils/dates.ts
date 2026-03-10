@@ -1,5 +1,5 @@
 import { differenceInDays, differenceInMonths, differenceInYears, format, getDay, isSameDay, startOfDay } from 'date-fns';
-import type { DateValue, DayTripStatus, IsolationStatus } from '$lib/types';
+import type { DateValue, DayTripIneligibleReason, DayTripStatus, IsolationStatus } from '$lib/types';
 
 const MIN_DAYS_AFTER_SURGERY_FOR_BATH = 10;
 
@@ -99,6 +99,7 @@ export function checkDayTripEligibility(
 	isFixed: boolean,
 	dayTripStatus: DayTripStatus,
 	isolationStatus: IsolationStatus,
+	dayTripIneligibleReason: DayTripIneligibleReason | null | undefined,
 	dayTripNotes: string | null,
 	today = new Date()
 ): DayTripEligibility {
@@ -106,8 +107,9 @@ export function checkDayTripEligibility(
 	const intake = toDate(intakeDate);
 	const hasIntake = intake !== null && !Number.isNaN(intake.getTime());
 	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
-	const hasBehaviorReason = trimmedTripNotes.length > 0;
-	const behaviorBlocked = dayTripStatus === 'ineligible' && isolationStatus === 'none';
+	const hasTripReason = trimmedTripNotes.length > 0;
+	const ineligibleReason = dayTripIneligibleReason ?? 'behavior';
+	const manuallyBlocked = dayTripStatus === 'ineligible' && isolationStatus === 'none';
 
 	if (isolationStatus === 'sick') {
 		reasons.push('In isolation: Sick');
@@ -127,12 +129,18 @@ export function checkDayTripEligibility(
 		reasons.push('Must be spayed/neutered');
 	}
 
-	if (behaviorBlocked) {
-		reasons.push(hasBehaviorReason ? `Behavior check: ${trimmedTripNotes}` : 'Behavior check is on. Add why.');
+	if (manuallyBlocked) {
+		if (ineligibleReason === 'medical') {
+			reasons.push(hasTripReason ? `Medical hold: ${trimmedTripNotes}` : 'Medical hold');
+		} else if (ineligibleReason === 'other') {
+			reasons.push(hasTripReason ? `Day trips blocked: ${trimmedTripNotes}` : 'Day trips blocked');
+		} else {
+			reasons.push(hasTripReason ? `Behavior check: ${trimmedTripNotes}` : 'Behavior check is on. Add why.');
+		}
 	}
 
 	if (dayTripStatus === 'difficult' && isolationStatus === 'none') {
-		reasons.push(hasBehaviorReason ? `Difficult: ${trimmedTripNotes}` : 'Difficult dog - adults only');
+		reasons.push(hasTripReason ? `Difficult: ${trimmedTripNotes}` : 'Difficult dog - adults only');
 	}
 
 	const hasBlockingReason = reasons.some((reason) => !reason.startsWith('Difficult:') && reason !== 'Difficult dog - adults only');
@@ -141,7 +149,7 @@ export function checkDayTripEligibility(
 	let status: DayTripStatus = 'ineligible';
 	if (isolationStatus !== 'none') {
 		status = 'ineligible';
-	} else if (behaviorBlocked) {
+	} else if (manuallyBlocked) {
 		status = 'ineligible';
 	} else if (dayTripStatus === 'difficult') {
 		status = 'difficult';

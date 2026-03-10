@@ -9,6 +9,7 @@
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import { energyLabel, compatibilityLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
@@ -133,6 +134,7 @@
 			isVaccinated: false,
 			vaccinatedDate: null,
 			dayTripStatus: 'eligible',
+			dayTripIneligibleReason: null,
 			dayTripNotes: null,
 			inFoster: false,
 			isolationStatus: 'none',
@@ -177,10 +179,6 @@
 			toast.error('Fix the surgery date before saving.');
 			return;
 		}
-		if (capacityReached) {
-			toast.error('Shelter is at capacity (30 dogs).');
-			return;
-		}
 		saving = true;
 		try {
 			const { id, createdAt, updatedAt, ...payload } = draftDog;
@@ -206,6 +204,7 @@
 			dog.isFixed,
 			dog.dayTripStatus,
 			dog.isolationStatus,
+			dog.dayTripIneligibleReason,
 			dog.dayTripNotes,
 			today
 		);
@@ -248,22 +247,30 @@
 		return 'status-pill-red';
 	}
 
-	function tripLabel(status: Dog['dayTripStatus']) {
+	function tripLabel(status: Dog['dayTripStatus'], notes: string | null | undefined) {
 		if (status === 'eligible') return 'Day Trip: Eligible';
-		if (status === 'difficult') return 'Day Trip: Adults only';
+		if (status === 'difficult') {
+			const reason = notes?.trim() ?? '';
+			return reason ? `Day Trip: Adults only - ${reason}` : 'Day Trip: Adults only';
+		}
 		return 'Day Trip: Ineligible';
 	}
 
 	function adoptionLabel(dog: Dog) {
-		if (dog.status === 'adopted') return 'Adoption: Not available';
-		if (dog.isolationStatus !== 'none') return 'Adoption: Temporarily unavailable';
+		const adoption = getAdoptionAvailability(dog);
+		if (adoption.state === 'not_available') return 'Adoption: Not available';
+		if (adoption.state === 'medical_hold') {
+			return `Adoption: Not available (${adoption.missingMedicalRequirements.join(', ')})`;
+		}
+		if (adoption.state === 'isolation_hold') return 'Adoption: Temporarily unavailable';
 		return 'Adoption: Available';
 	}
 
 	function adoptionPillClass(dog: Dog) {
-		if (dog.status === 'adopted') return 'status-pill-red';
-		if (dog.isolationStatus !== 'none') return 'status-pill-yellow';
-		return 'status-pill-green';
+		const adoption = getAdoptionAvailability(dog);
+		if (adoption.state === 'available') return 'status-pill-green';
+		if (adoption.state === 'isolation_hold') return 'status-pill-yellow';
+		return 'status-pill-red';
 	}
 
 	function isBathDue(dog: Dog) {
@@ -282,6 +289,13 @@
 		if ((dog.goodOnLead ?? 'unknown') === 'unknown') missing.push('on-lead');
 		if ((dog.crateTrained ?? 'unknown') === 'unknown') missing.push('crate');
 		return missing;
+	}
+
+	function adoptionRequirementAction(requirement: string) {
+		if (requirement === 'microchip') return { label: 'Adoption blocked: add microchip.', priority: 97 };
+		if (requirement === 'vaccines') return { label: 'Adoption blocked: complete vaccinations.', priority: 96 };
+		if (requirement === 'spay/neuter') return { label: 'Adoption blocked: complete spay/neuter.', priority: 95 };
+		return { label: `Adoption blocked: ${requirement}.`, priority: 94 };
 	}
 
 	function pendingItems(
@@ -315,6 +329,25 @@
 					priority
 				});
 			}
+		}
+
+		const adoption = getAdoptionAvailability(dog);
+		if (adoption.state === 'medical_hold') {
+			for (const requirement of adoption.missingMedicalRequirements) {
+				const action = adoptionRequirementAction(requirement);
+				items.push({
+					label: action.label,
+					tone: 'blocked',
+					priority: action.priority
+				});
+			}
+		} else if (adoption.state === 'isolation_hold') {
+			const isolationReason = dog.isolationStatus === 'sick' ? 'Sick isolation' : 'Bite quarantine';
+			items.push({
+				label: `Adoption blocked: ${isolationReason}.`,
+				tone: 'blocked',
+				priority: 94
+			});
 		}
 
 		const dayTripGap = daysSince(dog.lastDayTripDate, today);
@@ -467,7 +500,7 @@
 					<button
 						class="board-control-btn board-control-btn-fill"
 						on:click={openAddModal}
-						disabled={!canEdit || capacityReached}
+						disabled={!canEdit}
 					>
 						<span class="add-plus" aria-hidden="true">+</span>
 						<span>add dog</span>
@@ -554,7 +587,7 @@
 									{adoptionLabel(dog)}
 								</span>
 								<span class={`status-pill ${tripPillClass(tripEligibility.status)}`}>
-									{tripLabel(tripEligibility.status)}
+									{tripLabel(tripEligibility.status, dog.dayTripNotes)}
 								</span>
 							</div>
 
