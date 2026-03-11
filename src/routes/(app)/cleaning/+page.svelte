@@ -403,7 +403,7 @@
 	}
 
 	.cleaning-grid-board {
-		border: 4px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: rgba(255, 255, 255, 0.9);
 	}
 
@@ -417,7 +417,7 @@
 		padding: 0.82rem 0.78rem;
 		display: grid;
 		gap: 0.66rem;
-		border-bottom: 4px solid var(--marker-black);
+		border-bottom: 1px solid #d5e0ea;
 	}
 
 	.cleaning-hero::after,
@@ -473,7 +473,7 @@
 
 	.shift-pill {
 		min-height: 2.75rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.24rem;
 		background: #ffffff;
 		font-family: var(--font-typewriter);
@@ -491,7 +491,7 @@
 
 	.sunday-toggle {
 		padding: 0.62rem;
-		border-bottom: 4px solid var(--marker-black);
+		border-bottom: 1px solid #d5e0ea;
 	}
 
 	.sunday-toggle-inner {
@@ -507,7 +507,7 @@
 
 	.sunday-toggle-btn {
 		min-height: 2.75rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.22rem;
 		background: #ffffff;
 		padding: 0.24rem 0.58rem;
@@ -531,14 +531,14 @@
 
 	.checklist-sheet {
 		position: relative;
-		border-top: 4px solid var(--marker-black);
+		border-top: 1px solid #d5e0ea;
 		background: #ffffff;
 		padding: 0.75rem 0.72rem;
 		overflow: hidden;
 	}
 
 	.section-title {
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1.28rem, 5.8vw, 1.8rem);
 		font-weight: 400;
 		letter-spacing: 0.06em;
@@ -558,7 +558,7 @@
 		align-items: center;
 		justify-content: center;
 		min-width: 2.5rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.22rem;
 		padding: 0.28rem 0.5rem;
 		font-family: var(--font-typewriter);

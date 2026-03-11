@@ -456,7 +456,7 @@
 
 <style>
 	.playgroups-board {
-		border: 4px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: rgba(255, 255, 255, 0.9);
 	}
 
@@ -464,12 +464,12 @@
 		display: grid;
 		gap: 0.38rem;
 		padding: 0.82rem;
-		border-bottom: 4px solid var(--marker-black);
+		border-bottom: 1px solid #d5e0ea;
 	}
 
 	.playgroups-title {
 		margin: 0;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1.5rem, 5.6vw, 2.1rem);
 		text-transform: uppercase;
 	}
@@ -487,7 +487,7 @@
 	.playgroups-search {
 		width: 100%;
 		max-width: 22rem;
-		border: 2px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.24rem;
 		padding: 0.46rem 0.58rem;
 		font-size: 1rem;
@@ -542,14 +542,14 @@
 	}
 
 	.panel {
-		border-top: 4px solid var(--marker-black);
+		border-top: 1px solid #d5e0ea;
 		padding: 0.62rem 0.82rem;
 		background: #ffffff;
 	}
 
 	.panel-head h3 {
 		margin: 0;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1.28rem, 5.8vw, 1.8rem);
 		font-weight: 400;
 		letter-spacing: 0.06em;
@@ -749,7 +749,7 @@
 	.recommendation-log-btn {
 		margin-top: 0.46rem;
 		min-height: 1.95rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.2rem;
 		padding: 0.18rem 0.52rem;
 		font-size: 0.58rem;
@@ -838,7 +838,7 @@
 	.manual-save-btn {
 		margin-top: 0.5rem;
 		min-height: 1.95rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.2rem;
 		padding: 0.2rem 0.52rem;
 		font-size: 0.6rem;
@@ -939,7 +939,7 @@
 		}
 
 		.panel:nth-child(even) {
-			border-left: 4px solid var(--marker-black);
+			border-left: 3px solid #016ba5;
 		}
 
 		.panel-history {

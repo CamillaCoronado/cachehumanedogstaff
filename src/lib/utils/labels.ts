@@ -1,4 +1,11 @@
-import type { Compatibility, DayTripStatus, DogSex, EnergyLevel, PottyTrainedStatus } from '$lib/types';
+import type {
+	Compatibility,
+	DayTripStatus,
+	DogHandlingLevel,
+	DogSex,
+	EnergyLevel,
+	PottyTrainedStatus
+} from '$lib/types';
 
 export function energyLabel(value: EnergyLevel | null | undefined): string {
 	if (value === 'very_high') return 'Very high';
@@ -31,6 +38,12 @@ export function dayTripLabel(status: DayTripStatus | null | undefined): string {
 	if (status === 'eligible') return 'Eligible';
 	if (status === 'difficult') return 'Adults only';
 	return 'Ineligible';
+}
+
+export function handlingLevelLabel(level: DogHandlingLevel | null | undefined): string {
+	if (level === 'manager_only') return 'Manager only';
+	if (level === 'staff_only') return 'Staff only';
+	return 'Volunteer';
 }
 
 /** Returns trimmed string or null if empty/invalid. Does NOT lowercase. */

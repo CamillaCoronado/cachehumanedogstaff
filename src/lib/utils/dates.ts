@@ -1,5 +1,13 @@
 import { differenceInDays, differenceInMonths, differenceInYears, format, getDay, isSameDay, startOfDay } from 'date-fns';
-import type { DateValue, DayTripIneligibleReason, DayTripStatus, IsolationStatus, UserRole } from '$lib/types';
+import type {
+	DateValue,
+	DayTripIneligibleReason,
+	DayTripStatus,
+	DogHandlingLevel,
+	IsolationStatus,
+	UserRole
+} from '$lib/types';
+import { handlingRestrictionReason, resolveDogHandlingLevel } from '$lib/utils/permissions';
 
 const MIN_DAYS_AFTER_SURGERY_FOR_BATH = 10;
 
@@ -103,19 +111,24 @@ export function checkDayTripEligibility(
 	dayTripManagerOnly: boolean | null | undefined,
 	dayTripManagerOnlyReason: DayTripIneligibleReason | null | undefined,
 	dayTripNotes: string | null,
+	handlingLevel: DogHandlingLevel | null | undefined,
 	actorRole: UserRole | null | undefined = null,
 	today = new Date()
 ): DayTripEligibility {
 	const reasons: string[] = [];
-	const intake = toDate(intakeDate);
-	const hasIntake = intake !== null && !Number.isNaN(intake.getTime());
 	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
 	const hasTripReason = trimmedTripNotes.length > 0;
 	const ineligibleReason = dayTripIneligibleReason ?? 'other';
 	const managerOnlyReason = dayTripManagerOnlyReason ?? 'other';
 	const requiresManagerOnly = dayTripManagerOnly === true;
-	const manuallyBlocked =
-		dayTripStatus === 'ineligible' && isolationStatus === 'none' && ineligibleReason === 'other';
+	const manuallyBlocked = dayTripStatus === 'ineligible' && isolationStatus === 'none' && !requiresManagerOnly;
+	const effectiveHandlingLevel = resolveDogHandlingLevel(
+		handlingLevel,
+		dayTripManagerOnly,
+		isolationStatus
+	);
+	const roleRestrictionReason = handlingRestrictionReason(effectiveHandlingLevel, actorRole);
+	const blockedByHandlingRole = Boolean(roleRestrictionReason);
 
 	if (isolationStatus === 'sick') {
 		reasons.push('In isolation: Sick');
@@ -123,8 +136,8 @@ export function checkDayTripEligibility(
 		reasons.push('In isolation: Bite quarantine');
 	}
 
-	if (!hasIntake) {
-		reasons.push('Must have intake date');
+	if (roleRestrictionReason) {
+		reasons.push(roleRestrictionReason);
 	}
 
 	if (!isVaccinated) {
@@ -136,7 +149,13 @@ export function checkDayTripEligibility(
 	}
 
 	if (manuallyBlocked) {
-		reasons.push(hasTripReason ? `Day trips blocked: ${trimmedTripNotes}` : 'Day trips blocked');
+		if (ineligibleReason === 'behavior') {
+			reasons.push(hasTripReason ? `Behavior hold: ${trimmedTripNotes}` : 'Behavior hold');
+		} else if (ineligibleReason === 'medical') {
+			reasons.push(hasTripReason ? `Medical hold: ${trimmedTripNotes}` : 'Medical hold');
+		} else {
+			reasons.push(hasTripReason ? `Day trips blocked: ${trimmedTripNotes}` : 'Day trips blocked');
+		}
 	}
 
 	if (requiresManagerOnly && isolationStatus === 'none') {
@@ -161,9 +180,10 @@ export function checkDayTripEligibility(
 		reasons.push(hasTripReason ? `Difficult: ${trimmedTripNotes}` : 'Difficult dog - adults only');
 	}
 
-	void actorRole;
-	const blockedByRequirements = !hasIntake || !isVaccinated || !isFixed;
-	const blockedByStatus = isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly;
+	void intakeDate;
+	const blockedByRequirements = !isVaccinated || !isFixed;
+	const blockedByStatus =
+		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole;
 	const eligible = !(blockedByRequirements || blockedByStatus);
 
 	let status: DayTripStatus = 'ineligible';
@@ -173,11 +193,14 @@ export function checkDayTripEligibility(
 		status = 'ineligible';
 	} else if (requiresManagerOnly) {
 		status = 'ineligible';
+	} else if (blockedByHandlingRole) {
+		status = 'ineligible';
 	} else if (dayTripStatus === 'difficult') {
 		status = 'difficult';
-	} else if (hasIntake && isVaccinated && isFixed) {
+	} else if (isVaccinated && isFixed) {
 		status = 'eligible';
 	}
 
+	void today;
 	return { eligible, status, reasons };
 }

@@ -1,7 +1,7 @@
 import type { Timestamp } from 'firebase/firestore';
 
 export type DateValue = Date | Timestamp;
-export type UserRole = 'admin' | 'manager' | 'staff';
+export type UserRole = 'admin' | 'manager' | 'staff' | 'volunteer';
 
 export interface UserProfile {
 	uid: string;
@@ -16,6 +16,7 @@ export type DogStatus = 'active' | 'adopted';
 export type DayTripStatus = 'ineligible' | 'difficult' | 'eligible';
 export type DayTripIneligibleReason = 'behavior' | 'medical' | 'other';
 export type IsolationStatus = 'none' | 'sick' | 'bite_quarantine';
+export type DogHandlingLevel = 'manager_only' | 'staff_only' | 'volunteer';
 export type Compatibility = 'yes' | 'no' | 'unknown';
 export type PottyTrainedStatus = 'yes' | 'no' | 'working_on_it' | 'unknown';
 export type EnergyLevel = 'low' | 'medium' | 'high' | 'very_high' | 'unknown';
@@ -75,6 +76,7 @@ export interface Dog {
 	dayTripManagerOnly: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	dayTripNotes: string | null;
+	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;
 	isolationStatus: IsolationStatus;
 	isolationStartDate: DateValue | null;

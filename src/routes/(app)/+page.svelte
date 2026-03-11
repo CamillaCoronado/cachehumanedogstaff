@@ -28,6 +28,7 @@
 
 	const CLEANING_COMPLETIONS_KEY = 'shelter.cleaningCompletions.v1';
 	const today = startOfDay(new Date());
+	const weatherLabel = '☁ 80°';
 
 	let loading = true;
 	let errorMessage = '';
@@ -58,6 +59,13 @@
 	}
 
 	$: todayKey = format(today, 'yyyy-MM-dd');
+	$: dashboardTimestamp = new Intl.DateTimeFormat('en-US', {
+		weekday: 'short',
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	}).format(new Date());
 	$: cleaningShift = shift === 'am' ? 'morning' : 'evening';
 	$: completion = cleaningCompletions[`${todayKey}-${cleaningShift}`];
 	$: completedTaskIds = new Set(completion?.completedTaskIds ?? []);
@@ -74,7 +82,7 @@
 	$: managerOnlyDogs = activeDogs
 		.filter(
 			(dog) =>
-				dog.dayTripManagerOnly === true &&
+				(dog.dayTripManagerOnly === true || dog.handlingLevel === 'manager_only') &&
 				dog.isolationStatus === 'none' &&
 				dog.isOutOnDayTrip === false
 		)
@@ -106,16 +114,16 @@
 	$: todayItems =
 		shift === 'am'
 			? [
-					{ id: 'feeding', label: 'feeding (am)', done: feedingDone },
-					{ id: 'cleaning', label: 'cleaning (am)', done: cleaningDone, checklistHref: '/cleaning' },
-					{ id: 'movement', label: 'dogs out', done: movementDone },
-					{ id: 'slack', label: 'slack update (am)', done: slackDone }
+					{ id: 'feeding', label: 'Feeding (AM)', done: feedingDone },
+					{ id: 'cleaning', label: 'Cleaning (AM)', done: cleaningDone, checklistHref: '/cleaning' },
+					{ id: 'movement', label: 'Dogs Out', done: movementDone },
+					{ id: 'slack', label: 'Slack Update (AM)', done: slackDone }
 				]
 			: [
-					{ id: 'feeding', label: 'feeding (pm)', done: feedingDone },
-					{ id: 'cleaning', label: 'cleaning (pm)', done: cleaningDone, checklistHref: '/cleaning' },
-					{ id: 'movement', label: 'bring dogs in @ 4:15', done: movementDone },
-					{ id: 'slack', label: 'slack update (pm)', done: slackDone }
+					{ id: 'feeding', label: 'Feeding (PM)', done: feedingDone },
+					{ id: 'cleaning', label: 'Cleaning (PM)', done: cleaningDone, checklistHref: '/cleaning' },
+					{ id: 'movement', label: 'Bring Dogs In @ 4:15', done: movementDone },
+					{ id: 'slack', label: 'Slack Update (PM)', done: slackDone }
 				];
 	$: needsAttention = buildNeedsAttention().slice(0, 4);
 
@@ -154,7 +162,7 @@
 			: null;
 		const ageTag = ageYears !== null ? ` (${ageYears})` : '';
 		const timeTag = startedAt ? format(startedAt, 'h:mma').toLowerCase() : 'unknown';
-		return `${dog.name.toLowerCase()}${ageTag} - ${timeTag}`;
+		return `${dog.name}${ageTag} - ${timeTag}`;
 	}
 
 	function isolationLabel(dog: Dog) {
@@ -166,6 +174,19 @@
 	function surgeryDateLabel(dog: Dog) {
 		const date = toDate(dog.surgeryDate);
 		return date ? format(date, 'M/d') : 'today';
+	}
+
+	function todayItemBullet(id: TodayActionId) {
+		if (id === 'feeding') return '🥣';
+		if (id === 'cleaning') return '🧽';
+		if (id === 'movement') return shift === 'am' ? '🚶' : '🚪';
+		return '💬';
+	}
+
+	function isolationBullet(dog: Dog) {
+		if (dog.isolationStatus === 'sick') return '🩺';
+		if (dog.isolationStatus === 'bite_quarantine') return '⚠';
+		return '•';
 	}
 
 	function dayGapLabel(days: number) {
@@ -185,7 +206,7 @@
 			.sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
 
 		for (const entry of bathDue.slice(0, 2)) {
-			lines.push(`${entry.dog.name.toLowerCase()} - bath ${entry.days} days`);
+			lines.push(`${entry.dog.name} - bath ${entry.days} days`);
 		}
 
 		const tripDue = activeDogs
@@ -195,7 +216,7 @@
 			.sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
 
 		for (const entry of tripDue.slice(0, 2)) {
-			lines.push(`${entry.dog.name.toLowerCase()} - day trip ${dayGapLabel(entry.days ?? 0)}`);
+			lines.push(`${entry.dog.name} - day trip ${dayGapLabel(entry.days ?? 0)}`);
 		}
 
 		return lines;
@@ -383,610 +404,543 @@
 	}
 </script>
 
-<section class="marker-dashboard" aria-label="Dashboard board">
-	<div class="board-grid">
-		<header class="title-strip">
-			<h1 class="board-title marker-black">DASHBOARD</h1>
-			<div class="magnet-group" aria-label="Shift toggle">
-				<button
-					type="button"
-					class="shift-magnet permanent-marker marker-black"
-					aria-pressed={shift === 'am'}
-					on:click={() => (shift = 'am')}
-				>
-					[AM]
-				</button>
-				<button
-					type="button"
-					class="shift-magnet permanent-marker marker-black"
-					aria-pressed={shift === 'pm'}
-					on:click={() => (shift = 'pm')}
-				>
-					[PM]
-				</button>
-			</div>
-		</header>
-
-		{#if errorMessage}
-			<p class="status-line marker-line marker-red-line">{errorMessage}</p>
-		{/if}
-
-		<div class="grid-row">
-			<section class="zone zone-today">
-				<h2 class="section-heading marker-black">today</h2>
-				<div class="today-action-list">
-					{#each todayItems as item}
-						<div class="today-action-row">
-							<button
-								type="button"
-								class={`today-action ${item.done ? 'today-action-done' : ''}`}
-								on:click={() => handleTodayAction(item.id)}
-								disabled={actionPending(item.id)}
-								aria-pressed={item.done}
-							>
-								<span class="today-check">{item.done ? '☑' : '☐'}</span>
-								<span class="today-label">{item.label}</span>
-								<span class="today-hint typewriter">
-									{#if actionPending(item.id)}
-										saving...
-									{:else if item.done}
-										done
-									{:else}
-										mark done
-									{/if}
-								</span>
-							</button>
-							{#if item.checklistHref}
-								<a class="today-checklist-link typewriter" href={item.checklistHref}>see checklist</a>
-							{/if}
-						</div>
-					{/each}
-				</div>
-			</section>
-			<section class="zone zone-dogs-out">
-				<h2 class="section-heading marker-black">day trips</h2>
-				<div class="zone-list">
-					{#if loading}
-						<p class="marker-line marker-red-line marker-muted">loading...</p>
-					{:else if dogsOut.length === 0}
-						<p class="marker-line marker-red-line marker-muted">none out</p>
-					{:else}
-						{#each dogsOut as dog}
-							<div class="trip-row">
-								<p class="trip-label typewriter">{formatOutLine(dog)}</p>
-								<button
-									type="button"
-									class="trip-back-btn typewriter"
-									on:click={() => handleMarkBackIn(dog)}
-									disabled={returningDogIds.has(dog.id)}
-								>
-									{returningDogIds.has(dog.id) ? 'saving...' : 'back in'}
-								</button>
-							</div>
-						{/each}
-					{/if}
-				</div>
-			</section>
+<section class="planner-dashboard" aria-label="Operations dashboard">
+	<header class="planner-head">
+		<p class="planner-datestamp">
+			{dashboardTimestamp}
+			<span class="planner-weather">{weatherLabel}</span>
+		</p>
+		<div class="planner-controls" aria-label="Dashboard controls">
+			<button type="button" class="planner-control planner-control-label">Filter</button>
+			<button
+				type="button"
+				class="planner-control planner-control-arrow"
+				on:click={() => (shift = 'am')}
+				aria-label="Show AM shift"
+			>
+				‹
+			</button>
+			<button
+				type="button"
+				class="planner-control planner-control-today"
+				on:click={() => (shift = new Date().getHours() < 12 ? 'am' : 'pm')}
+			>
+				Today
+			</button>
+			<button
+				type="button"
+				class="planner-control planner-control-arrow"
+				on:click={() => (shift = 'pm')}
+				aria-label="Show PM shift"
+			>
+				›
+			</button>
 		</div>
+	</header>
 
-		<div class="grid-row">
-			<section class="zone zone-manager">
-				<h2 class="section-heading marker-black">manager only</h2>
-				<div class="zone-list">
-					{#if loading}
-						<p class="marker-line marker-purple-line marker-muted">loading...</p>
-					{:else if managerOnlyDogs.length === 0}
-						<p class="marker-line marker-purple-line marker-muted">none</p>
-					{:else}
-						{#each managerOnlyDogs as dog}
-							<p class="marker-line marker-purple-line">{dog.name.toLowerCase()}</p>
-						{/each}
-					{/if}
-				</div>
-			</section>
-			<section class="zone zone-iso">
-				<h2 class="section-heading marker-black">iso</h2>
-				<div class="zone-list">
-					{#if loading}
-						<p class="marker-line marker-blue-line marker-muted">loading...</p>
-					{:else if isolationDogs.length === 0}
-						<p class="marker-line marker-blue-line marker-muted">none</p>
-					{:else}
-						{#each isolationDogs as dog}
-							<p class="marker-line marker-blue-line">{dog.name.toLowerCase()} ({isolationLabel(dog)})</p>
-						{/each}
-					{/if}
-				</div>
-			</section>
-		</div>
+	{#if errorMessage}
+		<p class="planner-error">{errorMessage}</p>
+	{/if}
 
-		<section class="zone zone-wide zone-foster">
-			<h2 class="section-heading marker-black">Foster</h2>
-			<div class="zone-list">
-				{#if loading}
-					<p class="marker-line marker-muted">loading...</p>
-				{:else if fosterDogs.length === 0}
-					<p class="marker-line marker-muted">none in foster</p>
-				{:else}
-					{#each fosterDogs as dog}
-						<div class="foster-row">
-							<p class="foster-label typewriter">{dog.name.toLowerCase()}</p>
-							<button
-								type="button"
-								class="foster-back-btn typewriter"
-								on:click={() => handleMarkInShelterFromFoster(dog)}
-								disabled={fosterUpdatingDogIds.has(dog.id)}
-							>
-								{fosterUpdatingDogIds.has(dog.id) ? 'saving...' : 'in shelter'}
-							</button>
-						</div>
-					{/each}
-				{/if}
+	<div class="planner-columns">
+		<section class="planner-list planner-list-sand">
+			<div class="planner-list-head">
+				<h2>Today</h2>
+				<span class="planner-pill planner-pill-sand">{todayItems.length}</span>
 			</div>
-		</section>
-
-		<section class="zone zone-wide zone-needs-attention zone-needs">
-			<h2 class="section-heading marker-black">needs attention</h2>
-			<div class="zone-list">
-				{#if loading}
-					<p class="marker-line marker-orange-line marker-muted">loading...</p>
-				{:else if needsAttention.length === 0}
-					<p class="marker-line marker-orange-line marker-muted">none right now</p>
-				{:else}
-					{#each needsAttention as line}
-						<p class="marker-line marker-orange-line">{line}</p>
-					{/each}
-				{/if}
-			</div>
-		</section>
-
-		{#if surgeryAlerts.length > 0}
-			<aside class="sticky-note" aria-label="Do not feed">
-				<p class="sticky-heading">🚫 DO NOT FEED</p>
-				{#each surgeryAlerts as dog}
-					<p class="sticky-line whiteboard-hand">{dog.name.toLowerCase()} - surgery {surgeryDateLabel(dog)}</p>
+			<div class="planner-items">
+				{#each todayItems as item}
+					<div class="planner-row-wrap">
+						<button
+							type="button"
+							class={`planner-row planner-row-click ${item.done ? 'planner-row-done' : ''}`}
+							on:click={() => handleTodayAction(item.id)}
+							disabled={actionPending(item.id)}
+							aria-pressed={item.done}
+						>
+							<span class="planner-row-main">
+								<span class="planner-bullet">{todayItemBullet(item.id)}</span>
+								<span class="planner-row-text">{item.label}</span>
+							</span>
+							<span class={`planner-checkbox ${item.done ? 'planner-checkbox-checked' : ''}`}>
+								{#if actionPending(item.id)}
+									…
+								{:else if item.done}
+									✓
+								{/if}
+							</span>
+						</button>
+						{#if item.checklistHref}
+							<a class="planner-inline-link" href={item.checklistHref}>Open checklist</a>
+						{/if}
+					</div>
 				{/each}
-			</aside>
-		{/if}
+			</div>
+			<button type="button" class="planner-add-row">
+				<span>Add section</span>
+				<span class="planner-add-icons" aria-hidden="true">
+					<span class="planner-add-dot">+</span>
+					<span class="planner-add-caret">⌃</span>
+				</span>
+			</button>
+		</section>
+
+		<section class="planner-list planner-list-rose">
+			<div class="planner-list-head">
+				<h2>Day Trips</h2>
+				<span class="planner-pill planner-pill-rose">{dogsOut.length}</span>
+			</div>
+			<div class="planner-items">
+				{#if loading}
+					<p class="planner-empty-row">Loading trip board...</p>
+				{:else if dogsOut.length === 0}
+					<p class="planner-empty-row">No dogs are out right now.</p>
+				{:else}
+					{#each dogsOut as dog}
+						<button
+							type="button"
+							class="planner-row planner-row-click"
+							on:click={() => handleMarkBackIn(dog)}
+							disabled={returningDogIds.has(dog.id)}
+						>
+							<span class="planner-row-main">
+								<span class="planner-bullet">🐕</span>
+								<span class="planner-row-text">{formatOutLine(dog)}</span>
+							</span>
+							<span class={`planner-checkbox ${returningDogIds.has(dog.id) ? 'planner-checkbox-busy' : ''}`}>
+								{returningDogIds.has(dog.id) ? '…' : ''}
+							</span>
+						</button>
+					{/each}
+				{/if}
+			</div>
+		</section>
+
+		<section class="planner-list planner-list-lilac">
+			<div class="planner-list-head">
+				<h2>Manager Only</h2>
+				<span class="planner-pill planner-pill-lilac">{managerOnlyDogs.length}</span>
+			</div>
+			<div class="planner-items">
+				{#if loading}
+					<p class="planner-empty-row">Loading...</p>
+				{:else if managerOnlyDogs.length === 0}
+					<p class="planner-empty-row">No manager-only assignments.</p>
+				{:else}
+					{#each managerOnlyDogs as dog}
+						<div class="planner-row planner-row-static">
+							<span class="planner-row-main">
+								<span class="planner-bullet">⭐</span>
+								<span class="planner-row-text">{dog.name}</span>
+							</span>
+							<span class="planner-checkbox"></span>
+						</div>
+					{/each}
+				{/if}
+			</div>
+			<button type="button" class="planner-add-row">
+				<span>Add section</span>
+				<span class="planner-add-icons" aria-hidden="true">
+					<span class="planner-add-dot">+</span>
+					<span class="planner-add-caret">⌃</span>
+				</span>
+			</button>
+		</section>
+
+		<section class="planner-list planner-list-cyan">
+			<div class="planner-list-head">
+				<h2>Isolation</h2>
+				<span class="planner-pill planner-pill-cyan">{isolationDogs.length}</span>
+			</div>
+			<div class="planner-items">
+				{#if loading}
+					<p class="planner-empty-row">Loading...</p>
+				{:else if isolationDogs.length === 0}
+					<p class="planner-empty-row">No dogs in isolation.</p>
+				{:else}
+					{#each isolationDogs as dog}
+						<div class="planner-row planner-row-static">
+							<span class="planner-row-main">
+								<span class="planner-bullet">{isolationBullet(dog)}</span>
+								<span class="planner-row-text">{dog.name} ({isolationLabel(dog)})</span>
+							</span>
+							<span class="planner-checkbox"></span>
+						</div>
+					{/each}
+				{/if}
+			</div>
+		</section>
 	</div>
+
+	<button type="button" class="planner-fab" aria-label="Add board item">+</button>
 </section>
 
 <style>
-	.marker-dashboard {
+	.planner-dashboard {
 		position: relative;
-		width: 100%;
-		max-width: 100vw;
-		min-width: 0;
-		--ink-red-soft: #b8423c;
-		--ink-purple-soft: #7656a8;
-		--ink-blue-soft: #2f79b6;
-		--ink-green-soft: #23845a;
-		--ink-orange-soft: #b76e28;
-		--ink-foster-soft: #7d6240;
-		--zone-red-soft: rgba(184, 66, 60, 0.045);
-		--zone-purple-soft: rgba(118, 86, 168, 0.05);
-		--zone-blue-soft: rgba(47, 121, 182, 0.055);
-		--zone-green-soft: rgba(35, 132, 90, 0.075);
-		--zone-orange-soft: rgba(183, 110, 40, 0.06);
-		--zone-foster-soft: rgba(125, 98, 64, 0.07);
-		--marker-muted-ink: #667388;
+		display: grid;
+		gap: 0.62rem;
+		padding: 0.66rem 0.66rem 0.84rem;
+		border-radius: 1rem;
+		border: 1px solid #d3dbe6;
+		background:
+			radial-gradient(40rem 20rem at 100% -25%, rgba(57, 142, 193, 0.05) 0%, transparent 62%),
+			linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+		box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
 	}
 
-	.board-grid {
-		position: relative;
-		border: 4px solid var(--marker-black);
-		background: rgba(255, 255, 255, 0.88);
-		overflow: visible;
-		width: 100%;
-		max-width: 100%;
-		min-width: 0;
-	}
-
-	.title-strip {
+	.planner-head {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: space-between;
-		gap: 0.9rem;
-		padding: 0.85rem 0.8rem 0.8rem;
-		border-bottom: 4px solid var(--marker-black);
-		min-width: 0;
+		gap: 0.6rem;
+		padding: 0 0.1rem;
 	}
 
-	.board-title {
+	.planner-datestamp {
 		margin: 0;
-		font-family: var(--font-printed);
-		font-weight: 400;
-		text-transform: uppercase;
-		font-size: clamp(2.15rem, 8.4vw, 3rem);
-		line-height: 0.98;
-		letter-spacing: 0.07em;
-		text-shadow: none;
+		display: flex;
+		align-items: center;
+		gap: 0.54rem;
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: clamp(1.16rem, 2.1vw, 1.94rem);
+		font-weight: 500;
+		line-height: 1.08;
+		letter-spacing: 0.01em;
+		color: #2f3946;
 	}
 
-	.magnet-group {
-		display: inline-grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.35rem;
-		width: clamp(7.6rem, 39vw, 9.4rem);
-		flex-shrink: 0;
+	.planner-weather {
+		font-family: var(--font-ui);
+		font-size: 0.96rem;
+		font-weight: 600;
+		color: #6c7581;
 	}
 
-	.shift-magnet {
-		min-height: 2.35rem;
-		border: 2px solid #20242c;
-		border-radius: 0.36rem;
-		background: linear-gradient(170deg, #f6f7f9 0%, #d8dee8 100%);
-		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.8),
-			0 1.5px 0 rgba(0, 0, 0, 0.38);
-		font-size: 1.08rem;
+	.planner-controls {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.24rem;
+	}
+
+	.planner-control {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 2rem;
+		height: 1.88rem;
+		padding: 0 0.52rem;
+		border: 1px solid #d8e0ea;
+		border-radius: 0.54rem;
+		background: #f7f9fc;
+		color: #646e7b;
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
+		font-weight: 600;
 		line-height: 1;
-		padding-top: 0.1rem;
 	}
 
-	.shift-magnet[aria-pressed='true'] {
-		background: linear-gradient(170deg, #e4f7e8 0%, #b5e5bf 100%);
+	.planner-control-arrow {
+		padding: 0;
+		font-size: 1rem;
 	}
 
-	.status-line {
-		padding: 0.7rem 0.8rem;
+	.planner-control-label,
+	.planner-control-today {
+		min-width: 3.25rem;
 	}
 
-	.grid-row {
-		display: grid;
-		grid-template-columns: 1fr;
-		border-top: 4px solid var(--marker-black);
+	.planner-control-today {
+		background: #f1f4f8;
 	}
 
-	.zone {
-		display: grid;
-		align-content: start;
-		gap: 0.46rem;
-		padding: 0.86rem 0.8rem 0.8rem;
-	}
-
-	.grid-row .zone + .zone {
-		border-top: 4px solid var(--marker-black);
-	}
-
-	.zone-wide {
-		border-top: 4px solid var(--marker-black);
-	}
-
-	.section-heading {
+	.planner-error {
 		margin: 0;
-		font-family: var(--font-printed);
-		font-weight: 400;
-		text-transform: uppercase;
-		font-size: clamp(1.35rem, 6.1vw, 1.95rem);
-		line-height: 1.02;
-		letter-spacing: 0.06em;
-		text-shadow: none;
+		padding: 0.56rem 0.62rem;
+		border: 1px solid #efc7c7;
+		border-radius: 0.62rem;
+		background: #fff1f1;
+		color: #a13b3b;
+		font-size: 0.78rem;
+		font-weight: 600;
 	}
 
-	.section-heading::after {
-		content: '';
-		display: block;
-		width: 2.4rem;
-		height: 3px;
-		margin-top: 0.26rem;
-		background: var(--marker-black);
-		border-radius: 999px;
-	}
-
-	.zone-list {
-		margin-top: 0;
+	.planner-columns {
 		display: grid;
-		gap: 0.28rem;
+		gap: 0.58rem;
 	}
 
-	.today-action-list {
+	.planner-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.42rem;
+		padding: 0.58rem 0.5rem 0.52rem;
+		border: 1px solid rgba(79, 96, 117, 0.16);
+		border-radius: 0.92rem;
+		min-height: 24.4rem;
+	}
+
+	.planner-list-sand {
+		background: linear-gradient(180deg, #efe6d9 0%, #ece4d8 100%);
+	}
+
+	.planner-list-rose {
+		background: linear-gradient(180deg, #f4dde4 0%, #f0d8df 100%);
+	}
+
+	.planner-list-lilac {
+		background: linear-gradient(180deg, #ece8f3 0%, #e7e3ef 100%);
+	}
+
+	.planner-list-cyan {
+		background: linear-gradient(180deg, #daeff0 0%, #d4ebed 100%);
+	}
+
+	.planner-list-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.48rem;
+	}
+
+	.planner-list-head h2 {
+		margin: 0;
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: clamp(1.44rem, 1.95vw, 2.04rem);
+		font-weight: 500;
+		line-height: 1.02;
+		color: #2e3845;
+	}
+
+	.planner-pill {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.2rem;
+		height: 1.2rem;
+		padding: 0 0.3rem;
+		border-radius: 999px;
+		font-family: var(--font-ui);
+		font-size: 0.58rem;
+		font-weight: 700;
+		color: #ffffff;
+	}
+
+	.planner-pill-sand {
+		background: #c1933c;
+	}
+
+	.planner-pill-rose {
+		background: #dd7182;
+	}
+
+	.planner-pill-lilac {
+		background: #a98dba;
+	}
+
+	.planner-pill-cyan {
+		background: #46a8b5;
+	}
+
+	.planner-items {
 		display: grid;
 		gap: 0.36rem;
 	}
 
-	.today-action-row {
+	.planner-row-wrap {
 		display: grid;
-		gap: 0.24rem;
+		gap: 0.16rem;
 	}
 
-	.today-action {
-		width: 100%;
+	.planner-row {
 		display: flex;
 		align-items: center;
-		gap: 0.48rem;
-		padding: 0.36rem 0.44rem;
-		border: 2px solid rgba(35, 132, 90, 0.36);
+		justify-content: space-between;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.48rem 0.5rem;
+		border: 1px solid rgba(96, 109, 123, 0.15);
 		border-radius: 0.28rem;
-		background: rgba(255, 255, 255, 0.8);
-		color: var(--ink-green-soft);
+		background: rgba(255, 255, 255, 0.5);
+	}
+
+	.planner-row-click {
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.planner-row-click:disabled {
+		opacity: 0.7;
+		cursor: default;
+	}
+
+	.planner-row-done {
+		border-color: rgba(92, 128, 73, 0.4);
+		background: rgba(255, 255, 255, 0.62);
+	}
+
+	.planner-row-main {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		min-width: 0;
+	}
+
+	.planner-bullet {
+		flex-shrink: 0;
+		font-size: 0.78rem;
+	}
+
+	.planner-row-text {
+		display: inline-block;
+		font-family: var(--font-ui);
+		font-size: 0.9rem;
+		font-weight: 600;
+		line-height: 1.24;
+		color: #374150;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.planner-checkbox {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.15rem;
+		height: 1.15rem;
+		flex-shrink: 0;
+		border: 2px solid #dde2e8;
+		border-radius: 0.12rem;
+		background: rgba(255, 255, 255, 0.9);
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: #50606f;
+	}
+
+	.planner-checkbox-checked {
+		border-color: #739763;
+		background: #f5fbf1;
+		color: #577a48;
+	}
+
+	.planner-checkbox-busy {
+		color: #667483;
+	}
+
+	.planner-inline-link {
+		justify-self: end;
+		font-size: 0.58rem;
+		font-weight: 600;
+		letter-spacing: 0.03em;
+		color: #55708a;
+		text-decoration: underline;
+		text-underline-offset: 0.12em;
+	}
+
+	.planner-empty-row {
+		margin: 0;
+		padding: 0.52rem 0.5rem;
+		border: 1px solid rgba(96, 109, 123, 0.15);
+		border-radius: 0.28rem;
+		background: rgba(255, 255, 255, 0.46);
+		font-size: 0.84rem;
+		font-weight: 600;
+		line-height: 1.3;
+		color: #5f6976;
+	}
+
+	.planner-add-row {
+		margin-top: auto;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: 0.14rem 0;
+		border: 0;
+		background: transparent;
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: 2rem;
+		font-weight: 500;
+		letter-spacing: 0.01em;
+		color: #666d76;
 		text-align: left;
 	}
 
-	.today-action:disabled {
-		opacity: 0.78;
+	.planner-add-icons {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.34rem;
 	}
 
-	.today-action-done {
-		background: rgba(35, 132, 90, 0.16);
-		border-color: rgba(35, 132, 90, 0.55);
+	.planner-add-dot {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.24rem;
+		height: 1.24rem;
+		border: 1px solid rgba(105, 116, 128, 0.32);
+		border-radius: 999px;
+		font-size: 0.84rem;
 	}
 
-	.today-check {
-		font-family: var(--font-marker);
-		font-size: 1.38rem;
+	.planner-add-caret {
+		font-size: 0.9rem;
+		opacity: 0.62;
+	}
+
+	.planner-fab {
+		position: absolute;
+		right: 0.7rem;
+		bottom: 0.7rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.75rem;
+		height: 2.75rem;
+		border: 1px solid #2e84b7;
+		border-radius: 999px;
+		background: linear-gradient(180deg, #2f97d1 0%, #2b82b4 100%);
+		box-shadow: 0 10px 18px rgba(40, 103, 140, 0.3);
+		font-size: 1.5rem;
 		line-height: 1;
-		flex-shrink: 0;
+		color: #ffffff;
 	}
 
-	.today-label {
-		font-family: var(--font-marker);
-		font-size: clamp(1.06rem, 4.6vw, 1.35rem);
-		font-weight: 700;
-		line-height: 1.14;
-	}
-
-	.today-hint {
-		margin-left: auto;
-		font-size: 0.58rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: rgba(35, 87, 62, 0.86);
-	}
-
-	.today-checklist-link {
-		justify-self: end;
-		font-size: 0.55rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: #355e8b;
-		text-decoration: underline;
-		text-underline-offset: 0.15em;
-	}
-
-	.marker-line {
-		margin: 0;
-		font-family: var(--font-marker);
-		font-size: clamp(1.18rem, 5.1vw, 1.6rem);
-		font-weight: 700;
-		line-height: 1.2;
-		letter-spacing: 0.01em;
-		text-shadow:
-			0.65px 0 currentColor,
-			-0.55px 0 currentColor,
-			0 0.52px currentColor;
-	}
-
-	.marker-muted {
-		color: var(--marker-muted-ink) !important;
-		opacity: 1;
-		font-weight: 600;
-		text-shadow: none;
-	}
-
-	.marker-red-line {
-		color: var(--ink-red-soft);
-	}
-
-	.marker-purple-line {
-		color: var(--ink-purple-soft);
-	}
-
-	.marker-blue-line {
-		color: var(--ink-blue-soft);
-	}
-
-	.marker-green-line {
-		color: var(--ink-green-soft);
-	}
-
-	.marker-orange-line {
-		color: var(--ink-orange-soft);
-	}
-
-	.zone-dogs-out {
-		background: linear-gradient(180deg, var(--zone-red-soft) 0%, rgba(255, 255, 255, 0) 74%);
-	}
-
-	.trip-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 0.44rem;
-		align-items: center;
-		padding: 0.34rem 0.42rem;
-		border: 2px solid rgba(184, 66, 60, 0.34);
-		border-radius: 0.28rem;
-		background: rgba(255, 255, 255, 0.83);
-	}
-
-	.trip-label {
-		margin: 0;
-		font-size: 0.86rem;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
-		color: #853330;
-		line-height: 1.2;
-		font-weight: 700;
-	}
-
-	.trip-back-btn {
-		min-height: 1.86rem;
-		padding: 0.24rem 0.52rem;
-		border: 2px solid rgba(133, 51, 48, 0.65);
-		border-radius: 0.26rem;
-		background: #fff3f2;
-		color: #7a2a27;
-		font-size: 0.56rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		white-space: nowrap;
-	}
-
-	.zone-manager {
-		background: linear-gradient(180deg, var(--zone-purple-soft) 0%, rgba(255, 255, 255, 0) 74%);
-	}
-
-	.zone-iso {
-		background: linear-gradient(180deg, var(--zone-blue-soft) 0%, rgba(255, 255, 255, 0) 74%);
-	}
-
-	.zone-needs {
-		background: linear-gradient(180deg, var(--zone-orange-soft) 0%, rgba(255, 255, 255, 0) 74%);
-	}
-
-	.zone-foster {
-		background: linear-gradient(180deg, var(--zone-foster-soft) 0%, rgba(255, 255, 255, 0) 74%);
-	}
-
-	.zone-dogs-out .section-heading::after {
-		background: var(--ink-red-soft);
-	}
-
-	.zone-manager .section-heading::after {
-		background: var(--ink-purple-soft);
-	}
-
-	.zone-iso .section-heading::after {
-		background: var(--ink-blue-soft);
-	}
-
-	.zone-needs .section-heading::after {
-		background: var(--ink-orange-soft);
-	}
-
-	.zone-foster .section-heading::after {
-		background: var(--ink-foster-soft);
-	}
-
-	.foster-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 0.44rem;
-		align-items: center;
-		padding: 0.34rem 0.42rem;
-		border: 2px solid rgba(125, 98, 64, 0.34);
-		border-radius: 0.28rem;
-		background: rgba(255, 255, 255, 0.83);
-	}
-
-	.foster-label {
-		margin: 0;
-		font-size: 0.86rem;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
-		color: #6e5436;
-		line-height: 1.2;
-		font-weight: 700;
-	}
-
-	.foster-back-btn {
-		min-height: 1.86rem;
-		padding: 0.24rem 0.52rem;
-		border: 2px solid rgba(110, 84, 54, 0.65);
-		border-radius: 0.26rem;
-		background: #fff8ef;
-		color: #674727;
-		font-size: 0.56rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		white-space: nowrap;
-	}
-
-	.zone-today {
-		background: linear-gradient(180deg, var(--zone-green-soft) 0%, rgba(255, 255, 255, 0) 78%);
-	}
-
-	.zone-today .section-heading::after {
-		background: var(--ink-green-soft);
-	}
-
-	.sticky-note {
-		position: relative;
-		z-index: 3;
-		width: min(16rem, calc(100% - 1.6rem));
-		margin: -0.7rem 0.7rem 0.9rem auto;
-		padding: 0.72rem 0.76rem 0.7rem;
-		border: 2px solid rgba(52, 43, 8, 0.55);
-		border-radius: 0.08rem;
-		background: #ffe57b;
-		box-shadow: 0 8px 13px rgba(0, 0, 0, 0.2);
-		transform: rotate(-1.8deg);
-	}
-
-	.sticky-heading {
-		margin: 0;
-		font-family: var(--font-printed);
-		text-transform: uppercase;
-		font-size: clamp(1rem, 4.8vw, 1.4rem);
-		font-weight: 700;
-		line-height: 1.12;
-		letter-spacing: 0.045em;
-		color: #1f232b;
-		text-shadow: none;
-	}
-
-	.sticky-line {
-		margin: 0.24rem 0 0;
-		font-size: clamp(0.96rem, 4.2vw, 1.2rem);
-		font-weight: 700;
-		line-height: 1.2;
-		color: #1f232b;
-	}
-
-	@media (min-width: 840px) {
-		.title-strip {
-			padding: 0.95rem 0.95rem 0.88rem;
-		}
-
-		.grid-row {
-			grid-template-columns: 1fr 1fr;
-		}
-
-		.grid-row .zone + .zone {
-			border-top: none;
-			border-left: 4px solid var(--marker-black);
-		}
-
-		.zone {
-			padding: 0.95rem;
-		}
-
-		.zone-list {
-			gap: 0.22rem;
-		}
-
-		.zone-needs-attention {
-			padding-right: 17rem;
-		}
-
-		.sticky-note {
-			position: absolute;
-			top: 8.15rem;
-			right: 0.85rem;
-			width: 15rem;
-			margin: 0;
+	@media (min-width: 760px) {
+		.planner-columns {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 	}
 
-	@media (max-width: 480px) {
-		.title-strip {
-			gap: 0.48rem;
-			padding: 0.74rem 0.62rem 0.7rem;
+	@media (min-width: 1180px) {
+		.planner-columns {
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 560px) {
+		.planner-dashboard {
+			padding: 0.52rem 0.52rem 0.74rem;
 		}
 
-		.board-title {
-			font-size: clamp(1.8rem, 8vw, 2.45rem);
-			letter-spacing: 0.05em;
+		.planner-head {
+			flex-direction: column;
+			align-items: flex-start;
 		}
 
-		.magnet-group {
-			width: clamp(6.6rem, 35vw, 8.2rem);
-			gap: 0.24rem;
+		.planner-datestamp {
+			flex-wrap: wrap;
+			gap: 0.3rem 0.56rem;
 		}
 
-		.shift-magnet {
-			min-height: 2.15rem;
-			font-size: 0.98rem;
+		.planner-controls {
+			width: 100%;
+		}
+
+		.planner-control-label,
+		.planner-control-today {
+			flex: 1 1 0;
 		}
 	}
 </style>

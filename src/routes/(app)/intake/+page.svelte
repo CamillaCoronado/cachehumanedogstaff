@@ -914,6 +914,7 @@
 			dayTripManagerOnly: false,
 			dayTripManagerOnlyReason: null,
 			dayTripNotes: null,
+			handlingLevel: 'volunteer',
 			inFoster,
 			isolationStatus: 'none',
 			isolationStartDate: null,
@@ -2108,7 +2109,7 @@
 
 <style>
 	.intake-board {
-		border: 4px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: rgba(255, 255, 255, 0.9);
 		max-width: 100%;
 		min-width: 0;
@@ -2118,12 +2119,12 @@
 
 	.intake-header {
 		padding: 0.84rem;
-		border-bottom: 4px solid var(--marker-black);
+		border-bottom: 1px solid #d5e0ea;
 	}
 
 	.intake-title {
 		margin: 0;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1.35rem, 5.1vw, 1.92rem);
 		text-transform: uppercase;
 	}
@@ -2149,7 +2150,7 @@
 
 	.intake-upload,
 	.intake-review {
-		border-top: 4px solid var(--marker-black);
+		border-top: 1px solid #d5e0ea;
 		padding: 0.82rem;
 		background: #ffffff;
 		min-width: 0;
@@ -2159,7 +2160,7 @@
 	.intake-upload h3,
 	.intake-review h3 {
 		margin: 0 0 0.6rem;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1.28rem, 5.8vw, 1.8rem);
 		font-weight: 400;
 		letter-spacing: 0.06em;
@@ -2186,7 +2187,7 @@
 
 	.intake-btn {
 		min-height: 2.04rem;
-		border: 2px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.24rem;
 		padding: 0.22rem 0.66rem;
 		background: #ffffff;
@@ -2471,7 +2472,7 @@
 
 		.intake-review {
 			border-top: none;
-			border-left: 4px solid var(--marker-black);
+			border-left: 3px solid #016ba5;
 		}
 
 		.suggestion-grid {

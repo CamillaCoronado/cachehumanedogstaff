@@ -11,7 +11,8 @@
 		display: grid;
 		place-items: center;
 		background:
-			linear-gradient(180deg, #dde4ec 0%, #ced7e1 45%, #c6ced8 100%);
+			radial-gradient(60rem 28rem at 0% -20%, rgba(1, 107, 165, 0.08) 0%, transparent 62%),
+			linear-gradient(180deg, #f5f8fc 0%, #edf3f9 100%);
 	}
 
 	.auth-surface {

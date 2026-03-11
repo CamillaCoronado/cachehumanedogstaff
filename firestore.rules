@@ -33,7 +33,7 @@ service cloud.firestore {
     }
 
     function isValidRole(role) {
-      return role == 'admin' || role == 'manager' || role == 'staff';
+      return role == 'admin' || role == 'manager' || role == 'staff' || role == 'volunteer';
     }
 
     function isValidSelfProfilePayload(userId) {

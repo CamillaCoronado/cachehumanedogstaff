@@ -693,7 +693,7 @@
 	}
 
 	.kennels-grid-board {
-		border: 4px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: rgba(255, 255, 255, 0.9);
 	}
 
@@ -702,12 +702,12 @@
 		display: grid;
 		gap: 0.72rem;
 		padding: 0.82rem 0.8rem;
-		border-bottom: 4px solid var(--marker-black);
+		border-bottom: 1px solid #d5e0ea;
 	}
 
 	.kennel-title {
 		margin: 0.3rem 0 0;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-weight: 400;
 		text-transform: uppercase;
 		letter-spacing: 0.07em;

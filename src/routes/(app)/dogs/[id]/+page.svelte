@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
-	import { resolveRole, canEditDogs } from '$lib/utils/permissions';
+	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
 	import {
 		getDog,
 		updateDog,
@@ -33,7 +33,7 @@
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import { energyLabel, compatibilityLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 	let dog: Dog | null = null;
 	let loading = true;
@@ -51,6 +51,7 @@
 	let stoolToDateFilter = '';
 	let confirmAction: 'archive' | 'delete' | null = null;
 	let confirmBusy = false;
+	let activeStatusInfo: 'adoption' | 'daytrip' | 'handling' | null = null;
 
 	const today = new Date();
 
@@ -70,6 +71,7 @@
 				dog.dayTripManagerOnly,
 				dog.dayTripManagerOnlyReason,
 				dog.dayTripNotes,
+				dog.handlingLevel,
 				role,
 				today
 			)
@@ -80,12 +82,12 @@
 			: dayTripEligibility.status === 'difficult'
 				? 'whiteboard-trip-pill-yellow'
 				: 'whiteboard-trip-pill-red';
-	$: dayTripBadgeText =
-		dayTripEligibility.status === 'ineligible'
-			? 'Ineligible for day trips'
-			: dayTripEligibility.status === 'difficult'
-				? 'Adults only day trips'
-				: 'Eligible for day trips';
+	$: effectiveHandlingLevel = dog
+		? resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly, dog.isolationStatus)
+		: 'volunteer';
+	$: handlingLevelText = handlingLevelLabel(effectiveHandlingLevel);
+	$: isManagerHandlingOnly = effectiveHandlingLevel === 'manager_only';
+	$: isStaffHandlingOnly = effectiveHandlingLevel === 'staff_only';
 	$: daysSinceLastTrip = dog?.lastDayTripDate ? daysSince(dog.lastDayTripDate, today) : null;
 	$: currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 	$: nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -123,6 +125,31 @@
 	$: managerOnlyReason = dog?.dayTripManagerOnlyReason ?? null;
 	$: isManagerOnly = Boolean(dog) && dog.dayTripManagerOnly === true && dog.isolationStatus === 'none';
 	$: dayTripReasonNote = dog?.dayTripNotes?.trim() ?? '';
+	$: primaryDayTripReason =
+		dayTripEligibility.status === 'ineligible'
+			? dayTripEligibility.reasons[0] ?? dayTripReasonNote
+			: dayTripEligibility.status === 'difficult'
+				? dayTripReasonNote || dayTripEligibility.reasons.find((reason) =>
+						reason.toLowerCase().startsWith('difficult')
+					) || ''
+				: '';
+	$: dayTripBadgeReason = primaryDayTripReason.replace(/\s+/g, ' ').trim();
+	$: dayTripBadgeText =
+		dayTripEligibility.status === 'ineligible'
+			? dayTripBadgeReason
+				? `Ineligible: ${dayTripBadgeReason}`
+				: 'Ineligible for day trips'
+			: dayTripEligibility.status === 'difficult'
+				? dayTripBadgeReason
+					? `Caution: ${dayTripBadgeReason}`
+					: 'Adults only day trips'
+				: 'Eligible for day trips';
+	$: dayTripBadgeTitle =
+		dayTripEligibility.status === 'ineligible' && primaryDayTripReason
+			? `Day trip hold: ${primaryDayTripReason}`
+			: dayTripEligibility.status === 'difficult' && primaryDayTripReason
+				? `Caution: ${primaryDayTripReason}`
+				: dayTripBadgeText;
 	$: managerOnlyNote = !isManagerOnly
 		? ''
 		: managerOnlyReason === 'behavior'
@@ -136,7 +163,7 @@
 				: dayTripReasonNote
 					? `Manager only: ${dayTripReasonNote}`
 					: 'Manager only';
-	$: difficultWhiteboardNote = dayTripReasonNote ? `Adults only: ${dayTripReasonNote}` : 'Adults only';
+	$: difficultWhiteboardNote = dayTripReasonNote ? `Caution: ${dayTripReasonNote}` : 'Adults only';
 	$: activeTrip = dayTripLogs.find((log) => !log.endedAt) ?? null;
 	$: adoptionAvailability = dog ? getAdoptionAvailability(dog) : null;
 	$: adoptionNotice = dog
@@ -144,53 +171,113 @@
 			? 'No longer available for adoption'
 			: adoptionAvailability?.state === 'medical_hold'
 				? `Not available for adoption: needs ${adoptionAvailability.missingMedicalRequirements.join(', ')}`
-				: adoptionAvailability?.state === 'isolation_hold'
-					? 'Temporarily unavailable for adoption'
-					: 'Available for adoption'
+				: adoptionAvailability?.state === 'handling_hold'
+					? `Adoption restricted: ${adoptionAvailability.holdReason ?? 'handling plan'}`
+				: adoptionAvailability?.state === 'day_trip_hold'
+					? `Not available for adoption: ${adoptionAvailability.holdReason ?? 'care hold'}`
+					: adoptionAvailability?.state === 'isolation_hold'
+						? 'Temporarily unavailable for adoption'
+						: 'Available for adoption'
 		: 'Unavailable';
-	$: adoptionToneClass = adoptionAvailability?.state === 'available' ? 'whiteboard-alert-ok' : 'whiteboard-alert-warn';
+	$: adoptionIsAvailable = adoptionAvailability?.state === 'available';
+	$: adoptionReason =
+		adoptionAvailability?.state === 'medical_hold'
+			? `needs ${adoptionAvailability.missingMedicalRequirements.join(', ')}`
+			: adoptionAvailability?.state === 'not_available'
+				? adoptionAvailability.holdReason ?? 'not available'
+				: adoptionAvailability?.state === 'handling_hold' ||
+					  adoptionAvailability?.state === 'day_trip_hold' ||
+					  adoptionAvailability?.state === 'isolation_hold'
+					? adoptionAvailability.holdReason ?? 'care hold'
+					: '';
+	$: adoptionReasonBadge = adoptionReason.replace(/\s+/g, ' ').trim();
+	$: adoptionPillClass = adoptionIsAvailable ? 'whiteboard-trip-pill-green' : 'whiteboard-trip-pill-red';
+	$: adoptionPillText = adoptionIsAvailable
+		? 'Adoption: Available'
+		: adoptionReasonBadge
+			? `Adoption: Unavailable (${adoptionReasonBadge})`
+			: 'Adoption: Unavailable';
 	$: whiteboardStatusTagClass = dog
-		? dog.isolationStatus !== 'none' || dayTripEligibility.status === 'ineligible' || isManagerOnly
+		? dog.isolationStatus !== 'none' ||
+		  isManagerOnly ||
+		  isManagerHandlingOnly ||
+		  isStaffHandlingOnly
 			? 'whiteboard-tag-red'
 			: dayTripEligibility.status === 'difficult'
 				? 'whiteboard-tag-yellow'
 				: 'whiteboard-tag-green'
 		: 'whiteboard-tag-green';
+	$: stripHasCarefulWarning =
+		Boolean(dog) &&
+		!dog.isOutOnDayTrip &&
+		dog.isolationStatus === 'none' &&
+		!isManagerOnly &&
+		!isManagerHandlingOnly &&
+		!isStaffHandlingOnly &&
+		dayTripEligibility.status === 'ineligible';
+	$: stripStatusPillClass =
+		stripHasCarefulWarning
+			? 'whiteboard-trip-pill-yellow'
+			: whiteboardStatusTagClass === 'whiteboard-tag-red'
+			? 'whiteboard-trip-pill-red'
+			: whiteboardStatusTagClass === 'whiteboard-tag-yellow'
+				? 'whiteboard-trip-pill-yellow'
+				: 'whiteboard-trip-pill-green';
 	$: whiteboardNote = dog
 		? dog.isOutOnDayTrip
 			? 'Day Trip'
 			: dog.isolationStatus !== 'none'
-				? 'Isolation'
+				? dog.isolationStatus === 'sick'
+					? 'Manager only: sick isolation'
+					: 'Manager only: bite quarantine'
 				: isManagerOnly
 					? managerOnlyNote
-					: isBehaviorIneligible
+					: isManagerHandlingOnly
 						? dayTripReasonNote
-							? `Behavior hold: ${dayTripReasonNote}`
-							: 'Behavior hold'
-					: isMedicalIneligible
-						? dayTripReasonNote
-							? `Medical hold: ${dayTripReasonNote}`
-							: 'Medical hold'
-						: isOtherIneligible
+							? `Manager only: ${dayTripReasonNote}`
+							: 'Manager only'
+						: isStaffHandlingOnly
 							? dayTripReasonNote
-								? `Day trip hold: ${dayTripReasonNote}`
-								: 'Day trip hold'
-						: isUnknownIneligible
-							? dayTripReasonNote
-								? `Day trip hold: ${dayTripReasonNote}`
-								: 'Day trip hold'
-						: dog.dayTripStatus === 'difficult'
-							? difficultWhiteboardNote
-							: ''
+								? `Staff only: ${dayTripReasonNote}`
+								: 'Staff only'
+						: dayTripEligibility.status === 'ineligible'
+							? primaryDayTripReason
+								? `Careful: ${primaryDayTripReason}`
+								: 'Careful'
+							: dog.dayTripStatus === 'difficult'
+								? difficultWhiteboardNote
+								: ''
 		: '';
+	$: stripReasonLabel = whiteboardNote || `Handling: ${handlingLevelText}`;
+	$: stripReasonText = stripReasonLabel;
+	$: stripReasonTitle = stripReasonLabel;
+	$: activeStatusText =
+		activeStatusInfo === 'adoption'
+			? adoptionPillText
+			: activeStatusInfo === 'daytrip'
+				? dayTripBadgeText
+				: activeStatusInfo === 'handling'
+					? stripReasonText
+					: '';
+	$: activeStatusToneClass =
+		activeStatusInfo === 'adoption'
+			? adoptionPillClass
+			: activeStatusInfo === 'daytrip'
+				? dayTripBadgeClass
+				: stripStatusPillClass;
 	$: whiteboardNoteToneClass =
 		whiteboardNote === 'Day Trip'
 			? 'whiteboard-note-blue'
 			: dog &&
 				  !dog.isOutOnDayTrip &&
-				  (dog.isolationStatus !== 'none' || dog.dayTripStatus === 'ineligible' || isManagerOnly)
+				  (dog.isolationStatus !== 'none' ||
+						isManagerOnly ||
+						isManagerHandlingOnly ||
+						isStaffHandlingOnly)
 				? 'whiteboard-note-red'
-				: dog && !dog.isOutOnDayTrip && dog.dayTripStatus === 'difficult'
+				: dog &&
+					  !dog.isOutOnDayTrip &&
+					  dog.dayTripStatus === 'difficult'
 					? 'whiteboard-note-yellow'
 					: '';
 
@@ -200,6 +287,7 @@
 
 	async function loadAll() {
 		loading = true;
+		activeStatusInfo = null;
 		dog = await getDog(dogId);
 		if (dog) {
 			[notes, feedingLogs, stoolLogs, dayTripLogs] = await Promise.all([
@@ -215,6 +303,10 @@
 			dayTripLogs = [];
 		}
 		loading = false;
+	}
+
+	function toggleStatusInfo(kind: 'adoption' | 'daytrip' | 'handling') {
+		activeStatusInfo = activeStatusInfo === kind ? null : kind;
 	}
 
 	function updateDraft(event: CustomEvent<{ value: Dog; valid: boolean }>) {
@@ -404,51 +496,51 @@
 							</svg>
 							<span>Back</span>
 						</a>
-						<span class="label-maker label-maker-blue">Dog Detail</span>
+						<span class="dog-detail-chip">Dog detail</span>
 					</div>
-					<h2 class="dog-detail-title">{dog.name}</h2>
 				</div>
 				{#if canEdit}
 					<div class="dog-detail-actions">
 						<button
+							type="button"
 							class={`icon-action ${editMode ? 'icon-action-cancel' : 'icon-action-edit'}`}
 							on:click={() => (editMode = !editMode)}
 							aria-label={editMode ? 'Cancel edit' : 'Edit dog'}
 							title={editMode ? 'Cancel edit' : 'Edit dog'}
 						>
 							{#if editMode}
-								<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M9 6 4 11l5 5" />
-									<path d="M4 11h10a4 4 0 1 1 0 8h-2" />
-									<path d="M18.5 4.5l.3.8.8.3-.8.3-.3.8-.3-.8-.8-.3.8-.3.3-.8z" fill="currentColor" stroke="none" />
-								</svg>
-							{:else}
-								<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M4 20l4.2-1 9.2-9.2a2.2 2.2 0 1 0-3.1-3.1L5.1 15.9 4 20z" />
-									<path d="m13.4 7.6 3 3" />
-									<path d="M19.2 2.8l.4 1 .9.4-.9.4-.4 1-.4-1-.9-.4.9-.4.4-1z" fill="currentColor" stroke="none" />
-								</svg>
-							{/if}
-						</button>
-						<button
-							class="icon-action icon-action-save"
-							on:click={saveDog}
-							disabled={!editMode || saving}
-							aria-label={saving ? 'Saving changes' : 'Save changes'}
-							title={saving ? 'Saving changes' : 'Save changes'}
-						>
-							{#if saving}
-								<svg class="icon-svg icon-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-									<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2" opacity="0.28" />
-									<path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+								<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M8 8l8 8" />
+									<path d="m16 8-8 8" />
 								</svg>
 							{:else}
 								<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M12 20.2s-6.4-4.1-8.4-7c-2-2.8-.9-6.6 2.2-7.2 2-.4 3.3.7 4.2 1.9.9-1.2 2.2-2.3 4.2-1.9 3.1.6 4.2 4.4 2.2 7.2-2 2.9-8.4 7-8.4 7z" />
-									<path d="m9.2 11.8 2 2 3.7-3.7" />
+									<path d="M12 20h8.5" />
+									<path d="M16.7 3.6a2.12 2.12 0 0 1 3 3L8 18.3l-4 1 1-4z" />
 								</svg>
 							{/if}
 						</button>
+						{#if editMode}
+							<button
+								type="button"
+								class="icon-action icon-action-save"
+								on:click={saveDog}
+								disabled={saving}
+								aria-label={saving ? 'Saving changes' : 'Save changes'}
+								title={saving ? 'Saving changes' : 'Save changes'}
+							>
+								{#if saving}
+									<svg class="icon-svg icon-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+										<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2" opacity="0.28" />
+										<path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+									</svg>
+								{:else}
+									<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="m20 7-9 10-5-5" />
+									</svg>
+								{/if}
+							</button>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -458,17 +550,10 @@
 					<article class="kennel-sheet">
 					<div class="kennel-clip" aria-hidden="true"></div>
 					<div class="kennel-sheet-inner">
-						<div class="kennel-adoption-banner">
-							<div class={`whiteboard-status-tag ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
-							<p class={`whiteboard-alert typewriter ${adoptionToneClass}`}>{adoptionNotice}</p>
-							<div class="whiteboard-trip whiteboard-trip-inline typewriter">
-								<p class={`whiteboard-trip-pill ${dayTripBadgeClass}`}>{dayTripBadgeText}</p>
-							</div>
-						</div>
-
-						<div class="kennel-sheet-main">
-							<div class="kennel-photo">
+						<p class="kennel-name kennel-name-top">{dog.name}</p>
+						<div class="kennel-photo">
 							<div class="kennel-photo-frame">
+								<div class={`photo-corner-stripe ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
 								{#if dog.photoUrl}
 									<img
 										class="kennel-photo-image"
@@ -481,57 +566,145 @@
 								{/if}
 							</div>
 							<p class="kennel-photo-label typewriter">
-								{dog.photoUrl ? 'Photo on file' : canEdit ? 'Photo pending upload (use Edit Dog)' : 'Photo pending upload'}
+								{dog.photoUrl ? 'Photo on file' : 'Photo pending upload'}
 							</p>
-							</div>
-
-							<div class="kennel-facts typewriter">
-									<p><span>Original Entry:</span> <strong class="detail-value">{formatDate(dog.originalIntakeDate)}</strong></p>
-									<p><span>Current Entry:</span> <strong class="detail-value">{formatDate(dog.intakeDate)}</strong></p>
-									<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate)}</strong></p>
-								<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
-							<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
-							<p><span>Breed:</span> <strong class="detail-value">{dog.breed || 'Unknown'}</strong></p>
-							<p><span>Estimated Birthday:</span> <strong class="detail-value">{formatDate(dog.dateOfBirth)}</strong></p>
-							<p><span>Age:</span> <strong class="detail-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
-							<p><span>Color:</span> <strong class="detail-value">Unknown</strong></p>
-							<p><span>Sex:</span> <strong class="detail-value">{sexLabel(dog.sex)}</strong></p>
-							<p><span>Weight:</span> <strong class="detail-value">{dog.weightLbs ? `${dog.weightLbs} lbs` : 'Unknown'}</strong></p>
-							<p><span>Energy:</span> <strong class="detail-value">{energyLabel(dog.energyLevel)}</strong></p>
-							<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
-							<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : 'Adopted'}</strong></p>
-							<p><span>Food:</span> <strong class="detail-value">{dog.foodType} ({dog.foodAmount || 'TBD'})</strong></p>
-							<p><span>Own Food:</span> <strong class="detail-value">{dog.hasOwnFood ? 'Yes' : 'No'}</strong></p>
-							{#if dog.hasOwnFood}
-								<p>
-									<span>Transition to Hills:</span>
-									<strong class="detail-value">{dog.transitionToHills === true ? 'Yes' : dog.transitionToHills === false ? 'No' : 'Not set'}</strong>
-								</p>
-							{/if}
-							<p><span>Microchipped:</span> <strong class="detail-value">{dog.isMicrochipped ? 'Yes' : 'No'}</strong></p>
 						</div>
-					</div>
 
-					<div class="kennel-sheet-description typewriter">
-						<p class="kennel-sheet-description-title">Description</p>
-						<p>{dog.dietaryNotes || dog.dayTripNotes || 'No additional profile notes logged yet.'}</p>
-						<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
-						<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
-						<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
-						<p><span>Housetrained:</span> <strong class="detail-value">{pottyLabel(dog.pottyTrained)}</strong></p>
-						<p><span>Best Home Fit:</span> <strong class="detail-value">{dog.idealHome || 'Not yet documented'}</strong></p>
-					</div>
+						<div class="kennel-adoption-banner">
+							<div class="whiteboard-trip whiteboard-trip-inline typewriter">
+								<div class="whiteboard-trip-icons" role="group" aria-label="Dog status details">
+									<button
+										type="button"
+										class={`whiteboard-icon-btn ${adoptionPillClass} ${activeStatusInfo === 'adoption' ? 'whiteboard-icon-btn-active' : ''}`}
+										on:click={() => toggleStatusInfo('adoption')}
+										aria-label={adoptionPillText}
+										aria-pressed={activeStatusInfo === 'adoption'}
+										title={adoptionNotice}
+									>
+										<span class="whiteboard-pill-icon" aria-hidden="true">
+											<svg viewBox="0 0 24 24" fill="none">
+												<path d="M3.5 10.2 12 3l8.5 7.2"></path>
+												<path d="M5.5 9.3V20h13V9.3"></path>
+												<path d="M10 20v-5.3h4V20"></path>
+											</svg>
+										</span>
+									</button>
+									<button
+										type="button"
+										class={`whiteboard-icon-btn ${dayTripBadgeClass} ${activeStatusInfo === 'daytrip' ? 'whiteboard-icon-btn-active' : ''}`}
+										on:click={() => toggleStatusInfo('daytrip')}
+										aria-label={dayTripBadgeText}
+										aria-pressed={activeStatusInfo === 'daytrip'}
+										title={dayTripBadgeTitle}
+									>
+										<span class="whiteboard-pill-icon" aria-hidden="true">
+											<svg viewBox="0 0 24 24" fill="none">
+												<circle cx="12" cy="12" r="3.5"></circle>
+												<path d="M12 2.9v2.6"></path>
+												<path d="M12 18.5v2.6"></path>
+												<path d="M2.9 12h2.6"></path>
+												<path d="M18.5 12h2.6"></path>
+												<path d="m5.8 5.8 1.8 1.8"></path>
+												<path d="m16.4 16.4 1.8 1.8"></path>
+												<path d="m5.8 18.2 1.8-1.8"></path>
+												<path d="m16.4 7.6 1.8-1.8"></path>
+											</svg>
+										</span>
+									</button>
+									<button
+										type="button"
+										class={`whiteboard-icon-btn ${stripStatusPillClass} ${activeStatusInfo === 'handling' ? 'whiteboard-icon-btn-active' : ''}`}
+										on:click={() => toggleStatusInfo('handling')}
+										aria-label={stripReasonText}
+										aria-pressed={activeStatusInfo === 'handling'}
+										title={stripReasonTitle}
+									>
+										<span class="whiteboard-pill-icon" aria-hidden="true">
+											<svg viewBox="0 0 24 24" fill="none">
+												{#if effectiveHandlingLevel === 'manager_only'}
+													<path d="M4 18h16l-1.2-8.6-4.8 3.8L12 7l-2 6.2-4.8-3.8z"></path>
+												{:else if effectiveHandlingLevel === 'staff_only'}
+													<rect x="4.2" y="5.3" width="15.6" height="13.4" rx="2.2"></rect>
+													<path d="M8.4 10.1h7.2"></path>
+													<path d="M8.4 13.8h7.2"></path>
+												{:else}
+													<path d="M12 19.2c-3.8-2.8-7-5.4-7-8.4 0-2.3 1.8-4.1 4.1-4.1 1.2 0 2.3.5 3.1 1.4.8-.9 1.9-1.4 3.1-1.4 2.3 0 4.1 1.8 4.1 4.1 0 3-3.2 5.6-7 8.4z"></path>
+												{/if}
+											</svg>
+										</span>
+									</button>
+								</div>
+								{#if activeStatusInfo}
+									<p class={`whiteboard-trip-detail ${activeStatusToneClass}`}>{activeStatusText}</p>
+								{/if}
+							</div>
+						</div>
 
-					<p class="kennel-sheet-footer typewriter">
-						All shelter pets are fixed, microchipped, and up-to-date on vaccinations before adoption.
-					</p>
+						<div class="kennel-sheet-main">
+							<div class="kennel-sections typewriter">
+								<details class="kennel-section" open>
+									<summary>Intake & Shelter</summary>
+									<div class="kennel-section-body kennel-facts">
+										<p><span>Original Entry:</span> <strong class="detail-value">{formatDate(dog.originalIntakeDate)}</strong></p>
+										<p><span>Current Entry:</span> <strong class="detail-value">{formatDate(dog.intakeDate)}</strong></p>
+										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate)}</strong></p>
+										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
+										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
+										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
+										<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : 'Adopted'}</strong></p>
+									</div>
+								</details>
+
+								<details class="kennel-section">
+									<summary>Profile</summary>
+									<div class="kennel-section-body kennel-facts">
+										<p><span>Breed:</span> <strong class="detail-value">{dog.breed || 'Unknown'}</strong></p>
+										<p><span>Estimated Birthday:</span> <strong class="detail-value">{formatDate(dog.dateOfBirth)}</strong></p>
+										<p><span>Age:</span> <strong class="detail-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
+										<p><span>Color:</span> <strong class="detail-value">Unknown</strong></p>
+										<p><span>Sex:</span> <strong class="detail-value">{sexLabel(dog.sex)}</strong></p>
+										<p><span>Weight:</span> <strong class="detail-value">{dog.weightLbs ? `${dog.weightLbs} lbs` : 'Unknown'}</strong></p>
+										<p><span>Energy:</span> <strong class="detail-value">{energyLabel(dog.energyLevel)}</strong></p>
+										<p><span>Microchipped:</span> <strong class="detail-value">{dog.isMicrochipped ? 'Yes' : 'No'}</strong></p>
+									</div>
+								</details>
+
+								<details class="kennel-section">
+									<summary>Care & Food</summary>
+									<div class="kennel-section-body kennel-facts">
+										<p><span>Handling:</span> <strong class="detail-value">{handlingLevelText}</strong></p>
+										<p><span>Food:</span> <strong class="detail-value">{dog.foodType} ({dog.foodAmount || 'TBD'})</strong></p>
+										<p><span>Own Food:</span> <strong class="detail-value">{dog.hasOwnFood ? 'Yes' : 'No'}</strong></p>
+										{#if dog.hasOwnFood}
+											<p>
+												<span>Transition to Hills:</span>
+												<strong class="detail-value">{dog.transitionToHills === true ? 'Yes' : dog.transitionToHills === false ? 'No' : 'Not set'}</strong>
+											</p>
+										{/if}
+									</div>
+								</details>
+
+								<details class="kennel-section">
+									<summary>Behavior & Home Fit</summary>
+									<div class="kennel-section-body kennel-facts">
+										<p><span>Description:</span> <strong class="detail-note">{dog.dietaryNotes || dog.dayTripNotes || 'No additional profile notes logged yet.'}</strong></p>
+										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
+										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
+										<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
+										<p><span>Housetrained:</span> <strong class="detail-value">{pottyLabel(dog.pottyTrained)}</strong></p>
+										<p><span>Best Home Fit:</span> <strong class="detail-value">{dog.idealHome || 'Not yet documented'}</strong></p>
+									</div>
+								</details>
+							</div>
+						</div>
+
 				</div>
 				</article>
 
-				<aside class="kennel-whiteboard">
-				{#if whiteboardNote}
-					<p class={`whiteboard-note ${whiteboardNoteToneClass}`}>{whiteboardNote}</p>
-				{/if}
+					<aside class="kennel-whiteboard">
+					{#if whiteboardNote}
+						<p class={`whiteboard-note ${whiteboardNoteToneClass}`}>{whiteboardNote}</p>
+					{/if}
 
 				<dl class="whiteboard-facts typewriter">
 					<div>
@@ -576,6 +749,10 @@
 								In shelter
 							{/if}
 						</dd>
+					</div>
+					<div>
+						<dt>Handling</dt>
+						<dd>{handlingLevelText}</dd>
 					</div>
 					<div>
 						<dt>Re-entry Dates</dt>
@@ -804,16 +981,11 @@
 
 	.dog-detail-board {
 		display: grid;
-		gap: 0.88rem;
+		gap: 1.05rem;
 		max-width: 100%;
 		min-width: 0;
-	}
-
-	.dog-detail-title {
-		margin-top: 0.42rem;
-		font-size: clamp(2.2rem, 9vw, 3.8rem);
-		line-height: 0.95;
-		color: var(--marker-black);
+		color: #1f3550;
+		font-family: var(--font-ui);
 	}
 
 	.dog-detail-head {
@@ -824,23 +996,39 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.44rem;
+		gap: 0.52rem;
+	}
+
+	.dog-detail-chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.2rem 0.62rem 0.22rem;
+		border: 1px solid #d2ddeb;
+		border-radius: 999px;
+		background: #edf4fc;
+		font-family: var(--font-ui);
+		font-size: 0.76rem;
+		font-weight: 700;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		line-height: 1;
+		color: #2f5f8f;
 	}
 
 	.dog-detail-back {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.22rem;
+		gap: 0.34rem;
 		margin-bottom: 0;
-		font-size: 0.8rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: #4f6178;
+		font-size: 0.94rem;
+		letter-spacing: 0.01em;
+		text-transform: none;
+		color: #5e748d;
 		text-decoration: none;
 	}
 
 	.dog-detail-back:hover {
-		color: #2f4f78;
+		color: #2c567e;
 	}
 
 	.dog-detail-back-icon {
@@ -851,44 +1039,62 @@
 	.dog-detail-actions {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.42rem;
+		gap: 0.5rem;
+		position: relative;
+		z-index: 3;
 	}
 
 	.dog-detail-board :global(button.icon-action) {
-		all: unset;
-		min-height: 0;
-		width: 2.2rem;
-		height: 2.2rem;
+		-webkit-appearance: none;
+		appearance: none;
+		padding: 0;
+		margin: 0;
+		width: 2.4rem;
+		height: 2.4rem;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
+		position: relative;
+		z-index: 1;
+		pointer-events: auto;
+		touch-action: manipulation;
 		cursor: pointer;
 		user-select: none;
+		border-radius: 0.72rem;
+		border: 1px solid #d5e0ec;
+		background: #f6faff;
+		box-shadow:
+			0 1px 2px rgba(18, 52, 82, 0.08),
+			0 1px 0 rgba(255, 255, 255, 0.8) inset;
 		transition:
 			transform 130ms ease,
 			color 130ms ease,
-			opacity 130ms ease;
+			opacity 130ms ease,
+			border-color 130ms ease,
+			background-color 130ms ease;
 	}
 
 	.dog-detail-board :global(button.icon-action:focus-visible) {
-		outline: 2px solid #89a8cb;
+		outline: 2px solid #7da3ce;
 		outline-offset: 2px;
-		border-radius: 0.3rem;
 	}
 
 	.dog-detail-board :global(button.icon-action:hover:not(:disabled)) {
-		transform: translateY(-1px) scale(1.08);
+		transform: translateY(-1px);
+		border-color: #c1d2e6;
+		background: #f1f7ff;
 	}
 
 	.dog-detail-board :global(button.icon-action:disabled) {
 		cursor: not-allowed;
-		opacity: 0.38;
+		opacity: 0.46;
 		transform: none;
+		background: #f4f7fb;
 	}
 
 	.icon-svg {
-		width: 2rem;
-		height: 2rem;
+		width: 1.18rem;
+		height: 1.18rem;
 	}
 
 	.icon-spin {
@@ -896,15 +1102,15 @@
 	}
 
 	.icon-action-edit {
-		color: #476f9f;
+		color: #355e86;
 	}
 
 	.icon-action-cancel {
-		color: #8f5f7b;
+		color: #815971;
 	}
 
 	.icon-action-save {
-		color: #3b8a66;
+		color: #2f7b57;
 	}
 
 	@keyframes icon-spin {
@@ -917,17 +1123,15 @@
 	}
 
 	.dog-detail-board :global(.rounded-3xl) {
-		border: 1.5px solid #c4ccd7;
-		border-radius: 0.35rem;
-		background: var(--paper);
-		box-shadow:
-			0 2px 5px rgba(0, 0, 0, 0.05),
-			0 8px 14px rgba(0, 0, 0, 0.08);
+		border: 1px solid #d9e2ee;
+		border-radius: 1.4rem;
+		background: #fbfdff;
+		box-shadow: 0 8px 20px rgba(20, 56, 92, 0.08);
 	}
 
 	.dog-detail-board :global(.rounded-2xl) {
-		border-radius: 0.25rem;
-		border: 1.5px solid #c7cfda;
+		border-radius: 1rem;
+		border: 1px solid #dde5f0;
 		background: #ffffff;
 	}
 
@@ -941,21 +1145,21 @@
 
 	.dog-detail-board :global(button.rounded-full) {
 		min-height: 2.75rem;
-		border-radius: 0.23rem;
-		border: 1.5px solid var(--marker-black);
-		font-family: var(--font-typewriter);
-		font-size: 0.7rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: var(--marker-black);
-		background: rgba(255, 255, 255, 0.9);
-		padding: 0.26rem 0.66rem;
+		border-radius: 999px;
+		border: 1px solid #d5e0ea;
+		font-family: var(--font-ui);
+		font-size: 0.78rem;
+		font-weight: 600;
+		letter-spacing: 0.01em;
+		text-transform: none;
+		color: #1c3b59;
+		background: #ffffff;
+		padding: 0.3rem 0.9rem;
 	}
 
 	.dog-detail-board :global(button.rounded-full.bg-brand-600) {
-		background: var(--sticky-blue);
-		color: #103b60;
+		background: #d7ebfd;
+		color: #0f4f86;
 	}
 
 	.dog-detail-board :global(button.rounded-full:disabled) {
@@ -966,52 +1170,31 @@
 	.dog-detail-board :global(input:not([type='checkbox']):not([type='radio'])),
 	.dog-detail-board :global(textarea),
 	.dog-detail-board :global(select) {
-		border: 1.5px solid #bcc6d2;
-		border-radius: 0.22rem;
+		border: 1px solid #cfd9e6;
+		border-radius: 0.75rem;
 		background: #ffffff;
 		color: var(--marker-black);
-		font-size: 1rem;
+		font-size: 0.98rem;
 		min-height: 2.75rem;
 	}
 
 	.kennel-scene {
 		position: relative;
 		display: grid;
-		gap: 0.5rem;
-		padding: 0.5rem;
-		border: 1.5px solid #b9c1cc;
-		border-radius: 0.42rem;
-		overflow: hidden;
-		background: #d5dae1;
+		gap: 0.9rem;
+		padding: 0.15rem 0;
+		border: none;
+		border-radius: 0;
+		overflow: visible;
+		background: transparent;
 	}
 
 	.kennel-scene::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		background:
-			repeating-linear-gradient(
-				90deg,
-				rgba(240, 244, 248, 0.88) 0,
-				rgba(240, 244, 248, 0.88) 3px,
-				rgba(176, 185, 197, 0.24) 3px,
-				rgba(176, 185, 197, 0.24) 42px
-			),
-			repeating-linear-gradient(
-				0deg,
-				transparent 0,
-				transparent 74px,
-				rgba(150, 159, 171, 0.2) 74px,
-				rgba(150, 159, 171, 0.2) 78px
-			);
+		display: none;
 	}
 
 	.kennel-scene::after {
-		content: '';
-		position: absolute;
-		inset: 0;
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(114, 123, 136, 0.14) 100%);
-		pointer-events: none;
+		display: none;
 	}
 
 	.kennel-sheet,
@@ -1023,70 +1206,69 @@
 	}
 
 	.kennel-sheet {
-		background: #fffefa;
-		border: 1.5px solid #ccd3df;
-		box-shadow:
-			0 2px 6px rgba(0, 0, 0, 0.12),
-			0 10px 18px rgba(0, 0, 0, 0.14);
-		padding: 0.88rem 0.8rem 0.74rem;
+		background: transparent;
+		border: none;
+		box-shadow: none;
+		border-radius: 0;
+		padding: 0.26rem 0.45rem 0.45rem;
 	}
 
 	.kennel-clip {
-		position: absolute;
-		top: -0.52rem;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 6.2rem;
-		height: 0.62rem;
-		border-radius: 0.16rem;
-		border: 1px solid #7d8898;
-		background: linear-gradient(180deg, #545f6f 0%, #8e99a8 100%);
+		display: none;
 	}
 
 	.kennel-sheet-inner {
 		display: grid;
-		gap: 0.68rem;
+		gap: 0.66rem;
 	}
 
 	.kennel-adoption-banner {
 		display: grid;
-		gap: 0.4rem;
+		gap: 0.72rem;
+		width: 100%;
 		justify-items: start;
 	}
 
 	.kennel-sheet-main {
 		display: grid;
-		gap: 0.68rem;
+		gap: 0.92rem;
 		align-items: start;
 		min-width: 0;
 	}
 
 	.kennel-photo {
 		display: grid;
-		gap: 0.32rem;
+		gap: 0.44rem;
 		justify-items: center;
+		align-content: start;
 	}
 
 	.kennel-photo-frame {
-		width: 7.6rem;
+		position: relative;
+		width: min(66vw, 10.5rem);
 		aspect-ratio: 3 / 4;
-		border: 1.5px solid #c5ccda;
-		background:
-			linear-gradient(180deg, #f5f7fa 0%, #dde4ee 100%),
-			repeating-linear-gradient(
-				45deg,
-				rgba(255, 255, 255, 0.25) 0,
-				rgba(255, 255, 255, 0.25) 8px,
-				rgba(215, 224, 236, 0.12) 8px,
-				rgba(215, 224, 236, 0.12) 16px
-			);
-		color: #7f8997;
-		font-family: var(--font-permanent);
-		font-size: 2.6rem;
+		border: 1px solid #d4deeb;
+		border-radius: 0.7rem;
+		background: #eef3fb;
+		color: #7e8fa3;
+		font-family: var(--font-ui);
+		font-size: 2.4rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		overflow: hidden;
+	}
+
+	.photo-corner-stripe {
+		position: absolute;
+		top: 0.34rem;
+		right: -1.45rem;
+		width: 4.8rem;
+		height: 0.58rem;
+		border-radius: 999px;
+		transform: rotate(45deg);
+		pointer-events: none;
+		z-index: 2;
 	}
 
 	.kennel-photo-image {
@@ -1098,92 +1280,156 @@
 
 	.kennel-photo-label {
 		margin: 0;
-		font-size: 0.58rem;
-		letter-spacing: 0.09em;
-		text-transform: uppercase;
-		color: #6d7f97;
+		font-size: 0.76rem;
+		letter-spacing: 0.01em;
+		text-transform: none;
+		color: #6a7f96;
+		font-family: var(--font-ui);
+		text-align: center;
 	}
 
 	.kennel-facts {
-		font-size: 0.68rem;
-		line-height: 1.36;
-		color: #26344a;
+		font-size: 1.07rem;
+		line-height: 1.44;
+		color: #27415d;
+		font-family: var(--font-ui);
 	}
 
 	.kennel-facts p {
-		margin: 0.08rem 0;
+		margin: 0.2rem 0;
 		overflow-wrap: anywhere;
+	}
+
+	.kennel-name {
+		margin: 0 0 0.3rem;
+		font-size: clamp(1.9rem, 4.3vw, 2.7rem);
+		line-height: 0.95;
+		font-weight: 800;
+		letter-spacing: -0.01em;
+		color: #173a58;
+	}
+
+	.kennel-name-top {
+		margin: 0 0 0.06rem;
+		text-align: center;
+	}
+
+	.kennel-sections {
+		display: grid;
+		gap: 0.42rem;
+	}
+
+	.kennel-section {
+		border: 1px solid #dde6f1;
+		border-radius: 0.82rem;
+		background: #ffffff;
+		box-shadow:
+			0 1px 2px rgba(16, 45, 70, 0.05),
+			0 1px 0 rgba(255, 255, 255, 0.8) inset;
+		overflow: hidden;
+	}
+
+	.kennel-section > summary {
+		list-style: none;
+		cursor: pointer;
+		padding: 0.56rem 0.74rem;
+		font-size: 0.82rem;
+		line-height: 1.2;
+		font-weight: 700;
+		color: #2f4a66;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		transition: background-color 120ms ease;
+	}
+
+	.kennel-section > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.kennel-section > summary:hover {
+		background: #f8fbff;
+	}
+
+	.kennel-section > summary::after {
+		content: '';
+		width: 0.46rem;
+		height: 0.46rem;
+		border-right: 2px solid #68839c;
+		border-bottom: 2px solid #68839c;
+		transform: rotate(45deg) translateY(-0.08rem);
+		transition: transform 120ms ease;
+		margin-left: 0.45rem;
+		flex: 0 0 auto;
+	}
+
+	.kennel-section[open] > summary {
+		border-bottom: 1px solid #e6edf6;
+		background: #f7fbff;
+	}
+
+	.kennel-section[open] > summary::after {
+		transform: rotate(-135deg) translateY(-0.02rem);
+	}
+
+	.kennel-section-body {
+		padding: 0.54rem 0.74rem 0.64rem;
 	}
 
 	.kennel-facts span {
 		display: inline-block;
-		min-width: 8.2rem;
-		color: #53637b;
+		min-width: 6.8rem;
+		color: #5a7189;
 	}
 
 	.detail-value {
 		font-family: var(--font-ui);
-		font-size: 0.95em;
-		font-weight: 800;
+		font-size: 0.98em;
+		font-weight: 700;
 		letter-spacing: 0;
-		color: #1f2f46;
+		color: #1d3854;
 	}
 
-	.kennel-sheet-description {
-		border-top: 1px dashed #bfcbda;
-		padding-top: 0.46rem;
-		font-size: 0.66rem;
-		color: #2f3d52;
-	}
-
-	.kennel-sheet-description p {
-		margin: 0.08rem 0;
-	}
-
-	.kennel-sheet-description-title {
-		margin: 0 0 0.2rem;
-		font-size: 0.75rem;
-		font-family: var(--font-printed);
-		color: #1c2b43;
+	.detail-note {
+		font-family: var(--font-ui);
+		font-size: 0.95em;
+		font-weight: 600;
+		letter-spacing: 0;
+		color: #2c4864;
 	}
 
 	.kennel-sheet-footer {
 		margin: 0;
-		border-top: 1px dashed #bfcbda;
-		padding-top: 0.44rem;
-		font-size: 0.57rem;
+		border-top: 1px solid #e2e9f3;
+		padding-top: 0.5rem;
+		font-size: 0.93rem;
+		line-height: 1.35;
 		text-align: center;
-		color: #60708a;
+		color: #6b7f97;
+		font-family: var(--font-ui);
 	}
 
 	.kennel-whiteboard {
 		display: grid;
-		gap: 0.58rem;
+		gap: 0.7rem;
 		align-content: start;
-		background: linear-gradient(180deg, #fcfdff 0%, #f0f4f9 100%);
-		border: 1.5px solid #b8c0cd;
-		box-shadow:
-			0 2px 6px rgba(0, 0, 0, 0.11),
-			0 10px 18px rgba(0, 0, 0, 0.12);
-		padding: 0.86rem 0.74rem 0.78rem;
-	}
-
-	.whiteboard-status-tag {
-		width: 5.4rem;
-		height: 1.02rem;
-		border-radius: 0.16rem;
+		background: #f8fbff;
+		border: none;
+		box-shadow: none;
+		border-radius: 0.9rem;
+		padding: 0.7rem 0.7rem 0.68rem;
 	}
 
 	.whiteboard-tag-green {
-		background: linear-gradient(135deg, #3aaf66 0%, #2f9356 100%);
+		background: linear-gradient(135deg, #79cfa1 0%, #67bf90 100%);
 	}
 
 	.whiteboard-tag-yellow {
-		background: linear-gradient(135deg, #d2ab45 0%, #b0872f 100%);
+		background: linear-gradient(135deg, #f2cb7b 0%, #e8bb62 100%);
 	}
 
 	.whiteboard-tag-red {
-		background: linear-gradient(135deg, #c93b35 0%, #a82e2a 100%);
+		background: linear-gradient(135deg, #ee8e8a 0%, #e57470 100%);
 	}
 
 	.whiteboard-alert {
@@ -1194,7 +1440,7 @@
 		text-align: center;
 		font-size: 1.25rem;
 		line-height: 1.16;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		color: #3f506b;
 	}
 
@@ -1212,10 +1458,12 @@
 
 	.whiteboard-note {
 		margin: 0.12rem 0 0.26rem;
-		text-align: center;
-		font-size: 2.6rem;
-		line-height: 0.96;
-		transform: rotate(-3deg);
+		text-align: left;
+		font-size: 1.05rem;
+		line-height: 1.22;
+		font-weight: 700;
+		transform: none;
+		font-family: var(--font-ui);
 	}
 
 	.whiteboard-note-red {
@@ -1233,24 +1481,26 @@
 	.whiteboard-facts {
 		margin: 0;
 		display: grid;
-		gap: 0.28rem;
-		font-size: 0.64rem;
-		color: #2f3d52;
+		gap: 0.4rem;
+		font-size: 0.94rem;
+		color: #334b63;
+		font-family: var(--font-ui);
 	}
 
 	.whiteboard-facts div {
 		display: grid;
-		grid-template-columns: minmax(0, 7.3rem) minmax(0, 1fr);
-		gap: 0.36rem;
-		border-top: 1px dashed #c5ceda;
-		padding-top: 0.28rem;
+		grid-template-columns: 1fr;
+		gap: 0.18rem;
+		border-top: 1px solid #e5ecf5;
+		padding-top: 0.34rem;
 	}
 
 	.whiteboard-facts dt {
-		font-size: 0.59rem;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
-		color: #61728b;
+		font-size: 0.78rem;
+		letter-spacing: 0;
+		text-transform: none;
+		color: #5d738a;
+		font-weight: 600;
 	}
 
 	.whiteboard-facts dd {
@@ -1260,20 +1510,57 @@
 	}
 
 	.whiteboard-trip {
-		border-top: 1px dashed #c5ceda;
-		padding-top: 0.38rem;
-		font-size: 0.64rem;
-		color: #2f3d52;
+		border-top: 1px solid #e5ecf5;
+		padding-top: 0.42rem;
+		font-size: 0.9rem;
+		line-height: 1.4;
+		color: #2f4560;
+		font-family: var(--font-ui);
 	}
 
 	.whiteboard-trip-inline {
 		width: 100%;
 		border-top: none;
 		padding-top: 0;
+		display: grid;
+		grid-template-columns: 1fr;
+		align-items: start;
+		gap: 0.52rem;
 	}
 
-	.whiteboard-trip p {
-		margin: 0.08rem 0;
+	.whiteboard-trip-icons {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-wrap: nowrap;
+		gap: 0.6rem;
+		width: 100%;
+	}
+
+	.whiteboard-icon-btn {
+		all: unset;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		border-radius: 999px;
+		transition:
+			transform 120ms ease,
+			opacity 120ms ease;
+	}
+
+	.whiteboard-icon-btn:hover {
+		transform: translateY(-1px);
+	}
+
+	.whiteboard-icon-btn:focus-visible {
+		outline: 2px solid #7da3ce;
+		outline-offset: 2px;
+	}
+
+	.whiteboard-icon-btn-active .whiteboard-pill-icon {
+		border-color: currentColor;
+		box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 24%, #ffffff);
 	}
 
 	.whiteboard-trip-pill {
@@ -1282,25 +1569,62 @@
 		border: none;
 		border-radius: 0;
 		background: transparent;
-		font-family: var(--font-permanent);
-		font-size: 1.22rem;
-		line-height: 1.05;
-		letter-spacing: 0.03em;
+		font-family: var(--font-ui);
+		font-size: 0.84rem;
+		line-height: 1.18;
+		letter-spacing: 0;
 		font-weight: 700;
-		text-transform: uppercase;
-		display: inline-block;
+		text-transform: none;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.48rem;
+		width: 100%;
+	}
+
+	.whiteboard-trip-detail {
+		margin: 0.04rem 0 0;
+		font-size: 0.95rem;
+		line-height: 1.34;
+		font-weight: 700;
+	}
+
+	.whiteboard-pill-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.3rem;
+		height: 2.3rem;
+		min-width: 2.3rem;
+		min-height: 2.3rem;
+		flex: 0 0 2.3rem;
+		aspect-ratio: 1 / 1;
+		border-radius: 999px;
+		border: 1px solid #b9c7d8;
+		background: #f7faff;
+		color: currentColor;
+		transform: translateY(-0.02rem);
+	}
+
+	.whiteboard-pill-icon svg {
+		width: 1.5rem;
+		height: 1.5rem;
+		stroke: currentColor;
+		stroke-width: 1.8;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		fill: none;
 	}
 
 	.whiteboard-trip-pill-green {
-		color: #166534;
+		color: #2f7f59;
 	}
 
 	.whiteboard-trip-pill-yellow {
-		color: #c2410c;
+		color: #a77022;
 	}
 
 	.whiteboard-trip-pill-red {
-		color: #b91c1c;
+		color: #b94a46;
 	}
 
 	.whiteboard-actions {
@@ -1335,12 +1659,6 @@
 		border-top: none;
 	}
 
-	@media (min-width: 720px) {
-		.kennel-sheet-main {
-			grid-template-columns: auto 1fr;
-		}
-	}
-
 	@media (min-width: 900px) {
 		.kennel-scene {
 			grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
@@ -1353,32 +1671,27 @@
 		}
 	}
 
-	@media (max-width: 640px) {
+	@media (min-width: 641px) {
 		.kennel-facts {
-			font-size: 1.07rem;
-			line-height: 1.44;
+			font-size: 0.82rem;
+			line-height: 1.45;
 		}
 
 		.kennel-facts span {
-			min-width: 6.8rem;
-		}
-
-		.kennel-sheet-description {
-			font-size: 1.03rem;
-			line-height: 1.38;
-		}
-
-		.kennel-sheet-description-title {
-			font-size: 1.17rem;
+			min-width: 8.3rem;
 		}
 
 		.kennel-sheet-footer {
-			font-size: 0.93rem;
-			line-height: 1.35;
+			font-size: 0.7rem;
+			line-height: 1.3;
+		}
+
+		.kennel-photo-frame {
+			width: 8.3rem;
 		}
 
 		.whiteboard-note {
-			font-size: 2.2rem;
+			font-size: 1.18rem;
 		}
 
 		.whiteboard-alert {
@@ -1387,28 +1700,34 @@
 		}
 
 		.whiteboard-facts {
-			font-size: 0.99rem;
-			gap: 0.4rem;
+			font-size: 0.76rem;
+			gap: 0.34rem;
 		}
 
 		.whiteboard-facts dt {
-			font-size: 0.84rem;
-			letter-spacing: 0.06em;
+			font-size: 0.72rem;
+			letter-spacing: 0;
 		}
 
 		.whiteboard-trip {
-			font-size: 0.99rem;
-			line-height: 1.4;
+			font-size: 0.8rem;
+			line-height: 1.3;
 		}
 
 		.whiteboard-trip-pill {
-			font-size: 1.56rem;
+			font-size: 0.88rem;
 			padding: 0;
+			width: auto;
 		}
 
 		.whiteboard-facts div {
-			grid-template-columns: 1fr;
-			gap: 0.18rem;
+			grid-template-columns: minmax(0, 7.3rem) minmax(0, 1fr);
+			gap: 0.36rem;
+		}
+
+		.whiteboard-trip-detail {
+			font-size: 0.88rem;
+			line-height: 1.3;
 		}
 	}
 </style>

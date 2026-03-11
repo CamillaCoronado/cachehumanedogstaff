@@ -6,6 +6,7 @@
 		DayTripIneligibleReason,
 		DayTripStatus,
 		Dog,
+		DogHandlingLevel,
 		DogSex,
 		DogStatus,
 		EnergyLevel,
@@ -54,6 +55,31 @@
 		{ value: 'high', label: 'High' },
 		{ value: 'very_high', label: 'Very high' }
 	];
+	const handlingLevelOptions: {
+		value: DogHandlingLevel;
+		label: string;
+		description: string;
+		toneClass: string;
+	}[] = [
+		{
+			value: 'manager_only',
+			label: 'Manager only',
+			description: 'Only managers/admin should directly handle this dog.',
+			toneClass: 'form-choice-purple'
+		},
+		{
+			value: 'staff_only',
+			label: 'Staff only',
+			description: 'Staff and managers can handle; volunteers should not.',
+			toneClass: 'form-choice-yellow'
+		},
+		{
+			value: 'volunteer',
+			label: 'Volunteer OK',
+			description: 'Volunteer-safe handling level.',
+			toneClass: 'form-choice-green'
+		}
+	];
 	const dayTripStatuses: { value: DayTripStatus; label: string; description: string }[] = [
 		{ value: 'eligible', label: 'Eligible', description: 'Anyone can take on day trips' },
 		{ value: 'difficult', label: 'Difficult', description: 'Adults only' },
@@ -83,6 +109,8 @@
 	$: selectedIneligibleReason = value.dayTripIneligibleReason ?? 'other';
 	$: selectedManagerOnlyReason = value.dayTripManagerOnlyReason ?? 'other';
 	$: needsReason = value.dayTripStatus === 'difficult' || isManualIneligible || isManagerOnly;
+	$: selectedHandlingLevel =
+		handlingLevelOptions.find((option) => option.value === value.handlingLevel) ?? handlingLevelOptions[2];
 	$: suggestedFoodAmount = estimateFoodAmountPerMeal({
 		weightLbs: value.weightLbs,
 		dateOfBirth: value.dateOfBirth,
@@ -268,7 +296,8 @@
 			dayTripManagerOnly: checked,
 			dayTripManagerOnlyReason: checked ? (value.dayTripManagerOnlyReason ?? 'behavior') : null,
 			dayTripStatus: checked ? 'ineligible' : shouldRestoreEligible ? 'eligible' : value.dayTripStatus,
-			dayTripIneligibleReason: checked ? null : value.dayTripIneligibleReason
+			dayTripIneligibleReason: checked ? null : value.dayTripIneligibleReason,
+			handlingLevel: checked ? 'manager_only' : value.handlingLevel
 		};
 		value = next;
 		dispatch('change', { value, valid: !surgeryError });
@@ -280,7 +309,8 @@
 			dayTripManagerOnly: true,
 			dayTripManagerOnlyReason: reason,
 			dayTripStatus: 'ineligible',
-			dayTripIneligibleReason: null
+			dayTripIneligibleReason: null,
+			handlingLevel: 'manager_only'
 		};
 		value = next;
 		dispatch('change', { value, valid: !surgeryError });
@@ -818,6 +848,22 @@
 				></textarea>
 			</div>
 		</div>
+	</div>
+	<div class="form-section md:col-span-2">
+		<h4 class="form-section-title permanent-marker">Handling Access</h4>
+		<div class="flex flex-wrap gap-2">
+			{#each handlingLevelOptions as option}
+				<button
+					type="button"
+					class={`form-choice-btn ${value.handlingLevel === option.value ? option.toneClass : ''}`}
+					disabled={disabled}
+					on:click={() => handleSelect('handlingLevel', option.value)}
+				>
+					{option.label}
+				</button>
+			{/each}
+		</div>
+		<p class="form-hint mt-1">{selectedHandlingLevel.description}</p>
 	</div>
 	<div class="form-field">
 		<label class="form-label typewriter">Surgery Date</label>

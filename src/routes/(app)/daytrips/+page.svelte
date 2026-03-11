@@ -109,6 +109,7 @@
 			dog.dayTripManagerOnly,
 			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
+			dog.handlingLevel,
 			role,
 			new Date()
 		);
@@ -397,7 +398,7 @@
 	}
 
 	.daytrip-grid-board {
-		border: 4px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: rgba(255, 255, 255, 0.9);
 	}
 
@@ -405,7 +406,7 @@
 		padding: 0.82rem 0.78rem;
 		display: grid;
 		gap: 0.66rem;
-		border-bottom: 4px solid var(--marker-black);
+		border-bottom: 1px solid #d5e0ea;
 	}
 
 	.daytrip-title {
@@ -428,7 +429,7 @@
 	.month-input,
 	.refresh-trip-btn {
 		min-height: 2rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.24rem;
 		padding: 0.28rem 0.58rem;
 		background: #ffffff;
@@ -467,11 +468,11 @@
 		display: grid;
 		gap: 0.42rem;
 		padding: 0.72rem 0.78rem;
-		border-top: 4px solid var(--marker-black);
+		border-top: 1px solid #d5e0ea;
 	}
 
 	.trip-section-label {
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1.28rem, 5.8vw, 1.8rem);
 		font-weight: 400;
 		letter-spacing: 0.06em;
@@ -608,12 +609,12 @@
 	}
 
 	.section-header-row td {
-		border-top: 4px solid var(--marker-black);
+		border-top: 1px solid #d5e0ea;
 	}
 
 	.section-header-cell {
 		padding: 0.48rem 0.72rem !important;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1.1rem, 4.5vw, 1.5rem);
 		font-weight: 400;
 		letter-spacing: 0.06em;

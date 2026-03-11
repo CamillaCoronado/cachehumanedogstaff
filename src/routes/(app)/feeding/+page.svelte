@@ -819,7 +819,7 @@
 	}
 
 	.feeding-grid-board {
-		border: 4px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: rgba(255, 255, 255, 0.9);
 	}
 
@@ -827,7 +827,7 @@
 		display: grid;
 		gap: 0.64rem;
 		padding: 0.82rem 0.8rem;
-		border-bottom: 4px solid var(--marker-black);
+		border-bottom: 1px solid #d5e0ea;
 	}
 
 	.feeding-body {
@@ -851,7 +851,7 @@
 		align-items: center;
 		min-height: 2.75rem;
 		border-radius: 0.24rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: #ffffff;
 		padding: 0.2rem;
 		gap: 0.16rem;
@@ -877,7 +877,7 @@
 	.mark-all-btn {
 		min-height: 2.75rem;
 		border-radius: 0.24rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		background: var(--sticky-blue);
 		padding: 0.28rem 0.62rem;
 		font-size: 0.88rem;
@@ -937,7 +937,7 @@
 
 	.feeding-route-select {
 		min-height: 1.9rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.22rem;
 		background: #ffffff;
 		padding: 0.1rem 0.48rem;
@@ -951,7 +951,7 @@
 
 	.feeding-section-title {
 		margin: 0;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-weight: 400;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
@@ -991,7 +991,7 @@
 
 	.feeding-history-btn {
 		min-height: 1.9rem;
-		border: 1.5px solid var(--marker-black);
+		border: 1px solid #d5e0ea;
 		border-radius: 0.22rem;
 		background: #ffffff;
 		padding: 0.12rem 0.56rem;
@@ -1069,7 +1069,7 @@
 	}
 
 	.feeding-run-amount {
-		font-family: var(--font-marker);
+		font-family: var(--font-ui);
 		font-weight: 700;
 		color: #2f79b6;
 	}
@@ -1188,14 +1188,14 @@
 	}
 
 	.feeding-special-name {
-		font-family: var(--font-marker);
+		font-family: var(--font-ui);
 		font-size: 0.92rem;
 		line-height: 1.06;
 		color: #1f3248;
 	}
 
 	.feeding-special-amount {
-		font-family: var(--font-marker);
+		font-family: var(--font-ui);
 		font-size: 0.9rem;
 		line-height: 1.06;
 		color: #2f79b6;
@@ -1260,7 +1260,7 @@
 
 	.feeding-feed-name {
 		margin: 0;
-		font-family: var(--font-printed);
+		font-family: var(--font-ui);
 		font-size: clamp(1rem, 3.8vw, 1.24rem);
 		line-height: 1;
 		text-transform: uppercase;
@@ -1292,7 +1292,7 @@
 		display: inline-flex;
 		align-items: baseline;
 		gap: 0.34rem;
-		font-family: var(--font-marker);
+		font-family: var(--font-ui);
 		font-size: clamp(1.05rem, 4vw, 1.28rem);
 		font-weight: 700;
 		line-height: 1;
