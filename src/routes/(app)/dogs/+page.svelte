@@ -4,15 +4,15 @@
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
-	import { resolveRole, canEditDogs } from '$lib/utils/permissions';
-	import { listDogs, createDog, logBath, startDayTrip, endDayTrip } from '$lib/data/dogs';
+	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
+	import { listDogs, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
-	import { energyLabel, compatibilityLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 	type TripEligibility = ReturnType<typeof checkDayTripEligibility>;
 	type CardActionTone = 'ready' | 'blocked' | 'info';
@@ -33,7 +33,8 @@
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
 	let loading = true;
 	let search = '';
-	let showArchived = false;
+	let viewMode: 'active' | 'all' | 'archived' = 'active';
+	let fosterOnly = false;
 	let sortKey: 'name' | 'days' | 'age' | 'weight' = 'days';
 	let sortDir: 'asc' | 'desc' = 'asc';
 	let showAddModal = false;
@@ -51,7 +52,12 @@
 	$: capacityReached = activeCount >= capacity;
 	$: availableSpots = Math.max(0, capacity - activeCount);
 	$: filteredDogs = dogs
-		.filter((dog) => (showArchived ? true : dog.status === 'active'))
+		.filter((dog) =>
+			viewMode === 'all' ? true :
+			viewMode === 'archived' ? dog.status !== 'active' :
+			dog.status === 'active'
+		)
+		.filter((dog) => fosterOnly ? dog.inFoster : true)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
 		const direction = sortDir === 'asc' ? 1 : -1;
@@ -138,6 +144,7 @@
 			dayTripManagerOnly: false,
 			dayTripManagerOnlyReason: null,
 			dayTripNotes: null,
+			handlingLevel: 'volunteer',
 			inFoster: false,
 			isolationStatus: 'none',
 			isolationStartDate: null,
@@ -210,6 +217,7 @@
 			dog.dayTripManagerOnly,
 			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
+			dog.handlingLevel,
 			role,
 			today
 		);
@@ -241,6 +249,12 @@
 		await refreshDogs();
 	}
 
+	async function handleReturnDog(dog: Dog) {
+		await returnDog(dog.id);
+		toast.success(`${dog.name} returned to active roster.`);
+		await refreshDogs();
+	}
+
 	function openAddModal() {
 		resetDraft();
 		showAddModal = true;
@@ -262,11 +276,37 @@
 		return 'Day Trip: Ineligible';
 	}
 
+	function handlingPillClass(level: Dog['handlingLevel']) {
+		if (level === 'manager_only') return 'status-pill-purple';
+		if (level === 'staff_only') return 'status-pill-blue';
+		return 'status-pill-green';
+	}
+
+	function handlingLabel(level: Dog['handlingLevel']) {
+		if (level === 'manager_only') return 'Handling: Manager only';
+		if (level === 'staff_only') return 'Handling: Staff only';
+		return 'Handling: Volunteer OK';
+	}
+
+	function dogHandlingLevel(dog: Dog) {
+		return resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly, dog.isolationStatus);
+	}
+
 	function adoptionLabel(dog: Dog) {
 		const adoption = getAdoptionAvailability(dog);
 		if (adoption.state === 'not_available') return 'Adoption: Not available';
 		if (adoption.state === 'medical_hold') {
 			return `Adoption: Not available (${adoption.missingMedicalRequirements.join(', ')})`;
+		}
+		if (adoption.state === 'handling_hold') {
+			return adoption.holdReason
+				? `Adoption: Restricted (${adoption.holdReason})`
+				: 'Adoption: Restricted (handling plan)';
+		}
+		if (adoption.state === 'day_trip_hold') {
+			return adoption.holdReason
+				? `Adoption: Not available (${adoption.holdReason})`
+				: 'Adoption: Not available (care hold)';
 		}
 		if (adoption.state === 'isolation_hold') return 'Adoption: Temporarily unavailable';
 		return 'Adoption: Available';
@@ -275,6 +315,8 @@
 	function adoptionPillClass(dog: Dog) {
 		const adoption = getAdoptionAvailability(dog);
 		if (adoption.state === 'available') return 'status-pill-green';
+		if (adoption.state === 'handling_hold') return 'status-pill-yellow';
+		if (adoption.state === 'day_trip_hold') return 'status-pill-yellow';
 		if (adoption.state === 'isolation_hold') return 'status-pill-yellow';
 		return 'status-pill-red';
 	}
@@ -326,6 +368,7 @@
 				else if (normalized.includes('must be vaccinated')) priority = 90;
 				else if (normalized.includes('must be spayed/neutered')) priority = 85;
 				else if (normalized.includes('must have intake date')) priority = 80;
+				else if (normalized.includes('handling')) priority = 79;
 				else if (normalized.includes('manager only')) priority = 76;
 				else if (normalized.includes('behavior check')) priority = 75;
 				else if (normalized.includes('difficult')) priority = 60;
@@ -341,6 +384,21 @@
 			}
 		}
 
+		const effectiveHandlingLevel = dogHandlingLevel(dog);
+		if (effectiveHandlingLevel === 'manager_only') {
+			items.push({
+				label: 'Handling level: manager-only.',
+				tone: 'info',
+				priority: 78
+			});
+		} else if (effectiveHandlingLevel === 'staff_only') {
+			items.push({
+				label: 'Handling level: staff-only.',
+				tone: 'info',
+				priority: 74
+			});
+		}
+
 		const adoption = getAdoptionAvailability(dog);
 		if (adoption.state === 'medical_hold') {
 			for (const requirement of adoption.missingMedicalRequirements) {
@@ -351,6 +409,18 @@
 					priority: action.priority
 				});
 			}
+		} else if (adoption.state === 'handling_hold') {
+			items.push({
+				label: `Adoption restricted: ${adoption.holdReason ?? 'handling plan'}.`,
+				tone: 'blocked',
+				priority: 93
+			});
+		} else if (adoption.state === 'day_trip_hold') {
+			items.push({
+				label: `Adoption blocked: ${adoption.holdReason ?? 'care hold'}.`,
+				tone: 'blocked',
+				priority: 93
+			});
 		} else if (adoption.state === 'isolation_hold') {
 			const isolationReason = dog.isolationStatus === 'sick' ? 'Sick isolation' : 'Bite quarantine';
 			items.push({
@@ -439,7 +509,33 @@
 
 	function sortArrow(key: typeof sortKey) {
 		if (sortKey !== key) return '';
-		return sortDir === 'asc' ? '(asc)' : '(desc)';
+		return sortDir === 'asc' ? ' ↑' : ' ↓';
+	}
+
+	function photoStripeClass(dog: Dog): string {
+		const level = dogHandlingLevel(dog);
+		if (level === 'manager_only') return 'card-stripe-red';
+		if (level === 'staff_only') return 'card-stripe-yellow';
+		return 'card-stripe-green';
+	}
+
+	function handlingColorClass(level: Dog['handlingLevel']): string {
+		if (level === 'manager_only') return 'card-pill-red';
+		if (level === 'staff_only') return 'card-pill-yellow';
+		return 'card-pill-green';
+	}
+
+	function adoptionColorClass(dog: Dog): string {
+		const adoption = getAdoptionAvailability(dog);
+		if (adoption.state === 'available') return 'card-pill-green';
+		if (adoption.state === 'handling_hold' || adoption.state === 'day_trip_hold' || adoption.state === 'isolation_hold') return 'card-pill-yellow';
+		return 'card-pill-red';
+	}
+
+	function tripColorClass(status: Dog['dayTripStatus']): string {
+		if (status === 'eligible') return 'card-pill-green';
+		if (status === 'difficult') return 'card-pill-yellow';
+		return 'card-pill-red';
 	}
 
 
@@ -454,6 +550,7 @@
 			compatibilityLabel(dog.goodWithDogs),
 			compatibilityLabel(dog.goodWithCats),
 			compatibilityLabel(dog.goodWithKids),
+			handlingLevelLabel(dogHandlingLevel(dog)),
 			energyLabel(dog.energyLevel)
 		]
 			.join(' ')
@@ -480,6 +577,22 @@
 		event.preventDefault();
 		openDogProfile(dogId);
 	}
+
+	let dismissedItems: Record<string, Set<string>> = {};
+
+	function isItemDismissed(dogId: string, label: string): boolean {
+		return dismissedItems[dogId]?.has(label) ?? false;
+	}
+
+	function toggleDismissItem(dogId: string, label: string) {
+		const current = new Set(dismissedItems[dogId] ?? []);
+		if (current.has(label)) {
+			current.delete(label);
+		} else {
+			current.add(label);
+		}
+		dismissedItems = { ...dismissedItems, [dogId]: current };
+	}
 </script>
 
 <section class="marker-dogs" aria-label="Dogs board">
@@ -504,6 +617,7 @@
 								<option value="admin">Admin</option>
 								<option value="manager">Manager</option>
 								<option value="staff">Staff</option>
+								<option value="volunteer">Volunteer</option>
 							</select>
 						</label>
 					{/if}
@@ -556,11 +670,30 @@
 								name {sortArrow('name')}
 							</button>
 						</div>
-					<label class="archived-toggle typewriter">
-						<input type="checkbox" bind:checked={showArchived} />
-						show archived
-					</label>
+					<div class="archived-filter-group">
+						<label class="archived-toggle typewriter">
+							<input type="checkbox"
+								checked={viewMode === 'all'}
+								on:change={(e) => viewMode = e.currentTarget.checked ? 'all' : 'active'}
+							/>
+							show archived
+						</label>
+						<button
+							class={`sort-chip ${viewMode === 'archived' ? 'sort-chip-active' : ''}`}
+							on:click={() => viewMode = viewMode === 'archived' ? 'active' : 'archived'}
+						>
+							archived only
+						</button>
+					</div>
+				<div class="archived-filter-group">
+					<button
+						class={`sort-chip ${fosterOnly ? 'sort-chip-active' : ''}`}
+						on:click={() => (fosterOnly = !fosterOnly)}
+					>
+						foster only
+					</button>
 				</div>
+			</div>
 			</details>
 		</section>
 
@@ -574,10 +707,11 @@
 					{#each sortedDogs as dog}
 						{@const tripEligibility = getTripEligibility(dog)}
 						{@const bathDue = isBathDue(dog)}
+						{@const effectiveHandlingLevel = dogHandlingLevel(dog)}
 						{@const lastPlaygroupDate = lastPlaygroupByDogId[dog.id] ?? null}
 						{@const cardPendingItems = pendingItems(dog, tripEligibility, bathDue, lastPlaygroupDate)}
 						<div
-							class={`dog-card dog-card-clickable ${dog.isOutOnDayTrip ? 'dog-card-trip' : ''} ${dog.inFoster ? 'dog-card-foster' : ''}`}
+							class={`dog-card dog-card-clickable ${dog.isOutOnDayTrip ? 'dog-card-trip' : ''} ${dog.inFoster ? 'dog-card-foster' : ''} ${dog.status !== 'active' ? 'dog-card-archived' : ''}`}
 							role="link"
 							tabindex="0"
 							aria-label={`Open ${dog.name} profile`}
@@ -585,95 +719,130 @@
 							on:keydown={(event) => handleCardKeydown(event, dog.id)}
 						>
 							<header class="dog-card-header">
-								<div class="dog-card-headline">
-									<a class="dog-name-link" href={`/dogs/${dog.id}`}>{dog.name}</a>
-									<p class="dog-kennel typewriter">kennel: {dog.outdoorKennelAssignment || 'unassigned'}</p>
-								</div>
-								<span class="days-tag typewriter">{daysSince(dog.intakeDate, today) ?? 0} days</span>
-							</header>
-
-							<div class="dog-front-status-list">
-								<span class={`status-pill ${adoptionPillClass(dog)}`}>
-									{adoptionLabel(dog)}
-								</span>
-								<span class={`status-pill ${tripPillClass(tripEligibility.status)}`}>
-									{tripLabel(tripEligibility.status, dog.dayTripNotes, dog.dayTripManagerOnly ?? false)}
-								</span>
-							</div>
-
-							<div class="dog-fact-grid">
-								<p class="fact-row">
-									<span class="fact-label typewriter">age</span>
-									<span class="fact-value erase-marker-purple">{formatAge(dog.dateOfBirth, today)}</span>
-								</p>
-								<p class="fact-row">
-									<span class="fact-label typewriter">sex</span>
-									<span class="fact-value erase-marker-blue">{sexLabel(dog.sex)}</span>
-								</p>
-							</div>
-
-							<details class="dog-details-drawer">
-								<summary class="dog-details-summary typewriter">
-									care details
-									<span class="dog-details-count">{cardPendingItems.length} pending</span>
-								</summary>
-								<div class="dog-details-body">
-									<div class="meet-card">
-										<p class="fact-label typewriter">meet and greet quick answers</p>
-										<dl class="meet-grid">
-											<div class="meet-row">
-												<dt class="meet-key">Origin</dt>
-												<dd class="meet-value">{dog.origin || 'Unknown'}</dd>
-											</div>
-											<div class="meet-row">
-												<dt class="meet-key">Potty Trained</dt>
-												<dd class="meet-value">{pottyLabel(dog.pottyTrained)}</dd>
-											</div>
-											<div class="meet-row">
-												<dt class="meet-key">Good w/ Dogs</dt>
-												<dd class="meet-value">{compatibilityLabel(dog.goodWithDogs)}</dd>
-											</div>
-											<div class="meet-row">
-												<dt class="meet-key">Good w/ Cats</dt>
-												<dd class="meet-value">{compatibilityLabel(dog.goodWithCats)}</dd>
-											</div>
-											<div class="meet-row">
-												<dt class="meet-key">Good w/ Kids</dt>
-												<dd class="meet-value">{compatibilityLabel(dog.goodWithKids)}</dd>
-											</div>
-											<div class="meet-row">
-												<dt class="meet-key">Energy</dt>
-												<dd class="meet-value">{energyLabel(dog.energyLevel)}</dd>
-											</div>
-										</dl>
-										<p class="meet-home">
-											<span class="meet-key">Best Home</span>
-											<span class="meet-home-value">{dog.idealHome || 'Not yet documented'}</span>
-										</p>
-									</div>
-
-									<div class="next-step-card">
-										<p class="fact-label typewriter">pending items</p>
-										{#if cardPendingItems.length === 0}
-											<p class="next-action-empty">No pending items.</p>
+								<div class="card-photo-wrap">
+									<div class="card-photo-frame">
+										<div class={`card-photo-stripe ${photoStripeClass(dog)}`} aria-hidden="true"></div>
+										{#if dog.photoUrl}
+											<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true" />
 										{:else}
-											<ul class="next-action-list">
-												{#each cardPendingItems as item}
-													<li class={`next-action-item ${actionItemClass(item.tone)}`}>
-														<span>{item.label}</span>
-														{#if item.action === 'log_bath'}
-															<button
-																class="pending-inline-btn"
-																on:click|stopPropagation={() => handleLogBath(dog)}
-															>
-																log bath
-															</button>
-														{/if}
-													</li>
-												{/each}
-											</ul>
+											<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>
 										{/if}
 									</div>
+								</div>
+								<div class="dog-card-headline">
+									<a class="dog-name-link" href={`/dogs/${dog.id}`}>{dog.name}</a>
+									{#if dog.breed}<p class="dog-breed">{dog.breed}</p>{/if}
+									<p class="dog-kennel typewriter">kennel: {dog.outdoorKennelAssignment || 'unassigned'}</p>
+								</div>
+								{#if dog.status !== 'active'}
+								<span class="days-tag days-tag-archived typewriter">Adopted</span>
+							{:else}
+								<span class="days-tag typewriter">{daysSince(dog.intakeDate, today) ?? 0} days</span>
+							{/if}
+							</header>
+
+							<div class="card-status-icons" role="group" aria-label="Dog status">
+								<span class={`card-status-pill ${handlingColorClass(effectiveHandlingLevel)}`}>
+									<span class="card-pill-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none">
+											{#if effectiveHandlingLevel === 'manager_only'}
+												<path d="M4 18h16l-1.2-8.6-4.8 3.8L12 7l-2 6.2-4.8-3.8z"></path>
+											{:else if effectiveHandlingLevel === 'staff_only'}
+												<rect x="4.2" y="5.3" width="15.6" height="13.4" rx="2.2"></rect>
+												<path d="M8.4 10.1h7.2"></path>
+												<path d="M8.4 13.8h7.2"></path>
+											{:else}
+												<path d="M12 20.2s-6.4-4.1-8.4-7c-2-2.8-.9-6.6 2.2-7.2 2-.4 3.3.7 4.2 1.9.9-1.2 2.2-2.3 4.2-1.9 3.1.6 4.2 4.4 2.2 7.2-2 2.9-8.4 7-8.4 7z"></path>
+											{/if}
+										</svg>
+									</span>
+									<span class="card-pill-label">{handlingLabel(effectiveHandlingLevel)}</span>
+								</span>
+								<span class={`card-status-pill ${adoptionColorClass(dog)}`}>
+									<span class="card-pill-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none">
+											<path d="M3.5 10.2 12 3l8.5 7.2"></path>
+											<path d="M5.5 9.3V20h13V9.3"></path>
+											<path d="M10 20v-5.3h4V20"></path>
+										</svg>
+									</span>
+									<span class="card-pill-label">{adoptionLabel(dog)}</span>
+								</span>
+								<span class={`card-status-pill ${tripColorClass(tripEligibility.status)}`}>
+									<span class="card-pill-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none">
+											<circle cx="12" cy="12" r="3.5"></circle>
+											<path d="M12 2.9v2.6"></path>
+											<path d="M12 18.5v2.6"></path>
+											<path d="M2.9 12h2.6"></path>
+											<path d="M18.5 12h2.6"></path>
+											<path d="m5.8 5.8 1.8 1.8"></path>
+											<path d="m16.4 16.4 1.8 1.8"></path>
+											<path d="m5.8 18.2 1.8-1.8"></path>
+											<path d="m16.4 7.6 1.8-1.8"></path>
+										</svg>
+									</span>
+									<span class="card-pill-label">{tripLabel(tripEligibility.status, dog.dayTripNotes, dog.dayTripManagerOnly ?? false)}</span>
+								</span>
+							</div>
+
+							<div class="card-facts">
+								<p><span>Age</span><strong class="card-fact-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
+								<p><span>Sex</span><strong class="card-fact-value">{sexLabel(dog.sex)}</strong></p>
+							</div>
+
+							<details class="card-kennel-section">
+								<summary>Meet & Greet</summary>
+								<div class="kennel-section-body">
+									<div class="card-facts">
+										<p><span>Origin</span><strong class="card-fact-value">{dog.origin || 'Unknown'}</strong></p>
+										<p><span>Potty Trained</span><strong class="card-fact-value">{pottyLabel(dog.pottyTrained)}</strong></p>
+										<p><span>Good w/ Dogs</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
+										<p><span>Good w/ Cats</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
+										<p><span>Good w/ Kids</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
+										<p><span>Energy</span><strong class="card-fact-value">{energyLabel(dog.energyLevel)}</strong></p>
+										<p><span>Best Home</span><strong class="card-fact-value">{dog.idealHome || 'Not documented'}</strong></p>
+									</div>
+								</div>
+							</details>
+
+							<details class="card-kennel-section">
+								<summary>
+									<span class="summary-label">Pending items <span class="dog-details-count">{cardPendingItems.length}</span></span>
+								</summary>
+								<div class="kennel-section-body">
+									{#if cardPendingItems.length === 0}
+										<p class="next-action-empty">No pending items.</p>
+									{:else}
+										<ul class="next-action-list">
+											{#each cardPendingItems as item}
+												{@const dismissed = isItemDismissed(dog.id, item.label)}
+												<li class={`next-action-item ${actionItemClass(item.tone)} ${dismissed ? 'next-action-dismissed' : ''}`}>
+													<button
+														class={`pending-check-btn ${dismissed ? 'pending-check-done' : ''}`}
+														on:click|stopPropagation={() => toggleDismissItem(dog.id, item.label)}
+														aria-label={dismissed ? 'Mark as pending' : 'Mark as done'}
+														aria-pressed={dismissed}
+													>
+														{#if dismissed}
+															<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+																<polyline points="3,8.5 6.5,12 13,4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+															</svg>
+														{/if}
+													</button>
+													<span class={`pending-item-label ${dismissed ? 'pending-item-done' : ''}`}>{item.label}</span>
+													{#if item.action === 'log_bath' && !dismissed}
+														<button
+															class="pending-inline-btn"
+															on:click|stopPropagation={() => handleLogBath(dog)}
+														>
+															log bath
+														</button>
+													{/if}
+												</li>
+											{/each}
+										</ul>
+									{/if}
 								</div>
 							</details>
 
@@ -690,13 +859,23 @@
 							</div>
 
 							<div class="dog-actions">
-								<button
-									class="action-btn"
-									on:click={() => handleTripToggle(dog)}
-									disabled={!dog.isOutOnDayTrip && !tripEligibility.eligible}
-								>
-									{dog.isOutOnDayTrip ? 'mark returned' : 'send out'}
-								</button>
+								{#if dog.status !== 'active'}
+									<button
+										class="action-btn action-btn-return"
+										on:click|stopPropagation={() => handleReturnDog(dog)}
+										disabled={!canEdit}
+									>
+										return to shelter
+									</button>
+								{:else}
+									<button
+										class="action-btn"
+										on:click={() => handleTripToggle(dog)}
+										disabled={!dog.isOutOnDayTrip && !tripEligibility.eligible}
+									>
+										{dog.isOutOnDayTrip ? 'mark returned' : 'send out'}
+									</button>
+								{/if}
 							</div>
 						</div>
 					{/each}
@@ -736,120 +915,127 @@
 	}
 
 	.dogs-grid-board {
-		border: 4px solid var(--marker-black);
-		background: rgba(255, 255, 255, 0.9);
+		display: grid;
+		gap: 0.58rem;
 	}
 
 	.marker-line {
 		margin: 0;
-		font-family: var(--font-marker);
-		font-weight: 700;
+		font-family: var(--font-ui);
+		font-weight: 600;
 		letter-spacing: 0.01em;
-		line-height: 1.16;
-		text-shadow:
-			0.58px 0 currentColor,
-			-0.48px 0 currentColor,
-			0 0.48px currentColor;
+		line-height: 1.2;
+		text-shadow: none;
 	}
 
 	.marker-blue-line {
-		color: #2f79b6;
+		color: #394758;
 	}
 
 	.marker-muted {
-		color: #667388 !important;
+		color: #6d7683 !important;
 		font-weight: 600;
 		text-shadow: none;
 	}
 
 	.dogs-summary-row {
 		display: flex;
-		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.42rem;
+		gap: 0.58rem;
 	}
 
 	.dogs-title-wrap {
 		display: grid;
-		gap: 0.08rem;
+		gap: 0.12rem;
 		flex: 1 1 auto;
 		min-width: 0;
 	}
 
 	.dogs-board-sub {
 		margin: 0;
-		font-size: clamp(1rem, 4.4vw, 1.34rem);
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: clamp(1.45rem, 2.4vw, 2.05rem);
+		font-weight: 500;
+		letter-spacing: 0.01em;
+		line-height: 1.04;
+		color: #303948;
 	}
 
 	.dogs-capacity-note {
 		margin: 0;
-		font-size: clamp(0.82rem, 3.8vw, 1rem);
+		font-size: 0.84rem;
+		font-weight: 600;
+		color: #6b7480;
 	}
 
 	.dogs-header-actions {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.36rem;
-		width: auto;
-		flex: 0 0 auto;
+		gap: 0.3rem;
 		justify-content: flex-end;
 	}
 
 	.role-selector {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.36rem;
-		min-height: 2rem;
-		padding: 0.3rem 0.54rem;
-		border: 2px solid var(--marker-black);
-		background: #ffffff;
-		font-size: 0.62rem;
-		letter-spacing: 0.08em;
+		gap: 0.3rem;
+		min-height: 1.96rem;
+		padding: 0.24rem 0.56rem;
+		border: 1px solid #d8e0ea;
+		border-radius: 0.52rem;
+		background: #f7f9fc;
+		font-size: 0.6rem;
+		font-weight: 600;
+		letter-spacing: 0.07em;
 		text-transform: uppercase;
+		color: #596374;
 	}
 
 	.role-selector select {
-		border: 0;
-		background: transparent;
+		border: 1px solid #d5deea;
+		border-radius: 0.34rem;
+		background: #ffffff;
+		padding: 0.18rem 0.26rem;
 		font-size: 0.68rem;
 		font-weight: 700;
-		color: #2f3f53;
+		color: #2d3b4f;
 	}
 
 	.board-control-btn {
-		min-height: 2rem;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 0.24rem;
-		border: 2px solid var(--marker-black);
-		border-radius: 0.24rem;
-		padding: 0.28rem 0.64rem;
-		font-family: var(--font-typewriter);
-		font-size: 0.56rem;
+		gap: 0.32rem;
+		min-height: 1.96rem;
+		border: 1px solid #cad7e8;
+		border-radius: 0.58rem;
+		padding: 0.28rem 0.66rem;
+		font-family: var(--font-ui);
+		font-size: 0.66rem;
 		font-weight: 700;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
-		color: var(--marker-black);
-		background: #ffffff;
+		color: #2f435c;
+		background: #f4f8fd;
 		text-decoration: none;
-		flex: 0 0 auto;
 	}
 
 	.add-plus {
-		font-size: 1.22rem;
+		font-size: 1.1rem;
 		line-height: 0.8;
-		font-weight: 900;
+		font-weight: 800;
 	}
 
-	.board-control-btn:hover {
-		background: #edf4ff;
+	.board-control-btn:hover:not(:disabled) {
+		background: #eaf2fb;
 	}
 
 	.board-control-btn-fill {
-		background: #dcebf8;
+		border-color: #2e84b7;
+		background: linear-gradient(180deg, #2f97d1 0%, #2b82b4 100%);
+		color: #ffffff;
 	}
 
 	.board-control-btn:disabled {
@@ -860,39 +1046,40 @@
 	.dogs-control-strip {
 		display: grid;
 		gap: 0.5rem;
-		padding: 0.64rem 0.62rem;
-		border-bottom: 4px solid var(--marker-black);
+		padding: 0.08rem;
 	}
 
 	.dogs-search-wrap {
 		display: grid;
-		gap: 0.12rem;
+		gap: 0.14rem;
 	}
 
 	.control-label {
-		font-size: 0.56rem;
-		letter-spacing: 0.11em;
+		font-size: 0.58rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: #4f6178;
+		color: #5f6978;
 	}
 
 	.dogs-search-input {
 		width: 100%;
-		min-height: 1.72rem;
-		border: 2px solid var(--marker-black);
-		border-radius: 0.24rem;
-		padding: 0.08rem 0.54rem;
-		font-size: 0.84rem;
+		min-height: 2rem;
+		border: 1px solid #d8e0ea;
+		border-radius: 0.54rem;
+		padding: 0.12rem 0.64rem;
+		font-size: 0.86rem;
+		font-weight: 600;
 		line-height: 1.2;
-		letter-spacing: 0.04em;
-		color: #26354a;
+		letter-spacing: 0.02em;
+		color: #2d3b4f;
 		background: #ffffff;
 	}
 
 	.dogs-filters-drawer {
-		border: 2px solid rgba(26, 31, 40, 0.32);
-		border-radius: 0.24rem;
-		background: rgba(248, 251, 255, 0.78);
+		border: 1px solid #d8e0ea;
+		border-radius: 0.64rem;
+		background: #f7f9fc;
 	}
 
 	.dogs-filters-summary {
@@ -901,11 +1088,12 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 0.34rem 0.46rem;
-		font-size: 0.58rem;
-		letter-spacing: 0.1em;
+		padding: 0.38rem 0.54rem;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: #2f3f53;
+		color: #45556a;
 	}
 
 	.dogs-filters-summary::-webkit-details-marker {
@@ -924,37 +1112,46 @@
 
 	.dogs-filters-body {
 		display: none;
-		padding: 0 0.46rem 0.46rem;
+		padding: 0 0.54rem 0.54rem;
 	}
 
 	.dogs-filters-drawer[open] .dogs-filters-body {
 		display: grid;
-		gap: 0.36rem;
+		gap: 0.42rem;
 	}
 
 	.dogs-sort-group {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.32rem;
+		gap: 0.3rem;
 	}
 
 	.sort-chip {
-		min-height: 1.84rem;
-		border: 2px solid var(--marker-black);
-		border-radius: 0.24rem;
+		min-height: 1.88rem;
+		border: 1px solid #d2dbe8;
+		border-radius: 0.52rem;
 		background: #ffffff;
-		padding: 0.24rem 0.54rem;
-		font-family: var(--font-typewriter);
-		font-size: 0.54rem;
+		padding: 0.26rem 0.58rem;
+		font-family: var(--font-ui);
+		font-size: 0.63rem;
 		font-weight: 700;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
-		color: #243346;
+		color: #2f425b;
 	}
 
 	.sort-chip-active {
+		border-color: #2e84b7;
 		background: #e8f3ff;
+		color: #1e4f72;
+	}
+
+	.archived-filter-group {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3rem;
 	}
 
 	.archived-toggle {
@@ -962,84 +1159,150 @@
 		align-items: center;
 		gap: 0.34rem;
 		min-height: 1.84rem;
-		font-size: 0.58rem;
-		letter-spacing: 0.08em;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #33475f;
+		color: #4a5b70;
+		cursor: pointer;
 	}
 
 	.archived-toggle input {
 		width: 1rem;
 		height: 1rem;
-		accent-color: #33475f;
+		accent-color: #2e84b7;
 	}
 
 	.dogs-zone {
-		padding: 0.7rem 0.62rem;
+		padding: 0.08rem;
 	}
 
 	.dogs-state {
 		margin-top: 0;
-		padding: 0.58rem 0.6rem;
-		border: 2px solid rgba(68, 83, 102, 0.35);
-		background: rgba(255, 255, 255, 0.84);
+		padding: 0.72rem 0.74rem;
+		border: 1px solid #d4dde8;
+		border-radius: 0.7rem;
+		background: #f8fbff;
+		font-size: 0.88rem;
 	}
 
 	.dogs-card-grid {
 		margin-top: 0;
 		display: grid;
-		gap: 0;
+		gap: 0.72rem;
 	}
 
 	.dog-card {
-		border: 0;
-		border-bottom: 3px solid var(--marker-black);
-		background: transparent;
-		padding: 0.62rem 0.08rem;
+		border: 1px solid #d3dbe6;
+		border-radius: 0.92rem;
+		background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
+		padding: 0.78rem;
 		display: grid;
-		gap: 0.44rem;
-	}
-
-	.dog-card:last-child {
-		border-bottom: 0;
+		gap: 0.58rem;
+		box-shadow: 0 8px 18px rgba(28, 50, 71, 0.06);
 	}
 
 	.dog-card-clickable {
 		cursor: pointer;
-		transition: background-color 140ms ease;
+		transition: transform 130ms ease, box-shadow 130ms ease;
 	}
 
 	.dog-card-clickable:hover {
-		background: rgba(233, 241, 251, 0.36);
+		transform: translateY(-1px);
+		box-shadow: 0 12px 22px rgba(28, 50, 71, 0.1);
 	}
 
 	.dog-card-clickable:focus-visible {
-		outline: 3px solid #3d85c6;
+		outline: 3px solid #2e84b7;
 		outline-offset: 2px;
 	}
 
 	.dog-card-trip {
-		background: rgba(239, 248, 255, 0.88);
+		background: linear-gradient(180deg, #f2f8ff 0%, #ebf4ff 100%);
 	}
 
 	.dog-card-foster {
-		background: rgba(255, 247, 236, 0.9);
+		background: linear-gradient(180deg, #fef6ea 0%, #fbf0e3 100%);
+	}
+
+	.dog-card-archived {
+		opacity: 0.55;
+		background: linear-gradient(180deg, #f5f7fa 0%, #f0f3f7 100%);
+		filter: grayscale(0.4);
 	}
 
 	.dog-card-header {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 0.42rem;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		gap: 0.56rem;
 		align-items: start;
 	}
 
-	.dog-name-link {
-		font-family: var(--font-printed);
-		font-size: clamp(1.16rem, 5.4vw, 1.38rem);
-		letter-spacing: 0.03em;
+	.card-photo-wrap {
+		flex-shrink: 0;
+		padding-top: 0.1rem;
+	}
+
+	.card-photo-frame {
+		position: relative;
+		width: 3.1rem;
+		aspect-ratio: 3 / 4;
+		border: 1px solid #d4deeb;
+		border-radius: 0.5rem;
+		background: #eef3fb;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		overflow: hidden;
+	}
+
+	.card-photo-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.card-photo-initial {
+		font-family: var(--font-ui);
+		font-weight: 800;
+		font-size: 1.1rem;
 		text-transform: uppercase;
-		color: var(--marker-black);
+		color: #7e8fa3;
+	}
+
+	.card-photo-stripe {
+		position: absolute;
+		top: 0.24rem;
+		right: -0.9rem;
+		width: 2.8rem;
+		height: 0.42rem;
+		border-radius: 999px;
+		transform: rotate(45deg);
+		pointer-events: none;
+		z-index: 2;
+	}
+
+	.card-stripe-green {
+		background: linear-gradient(135deg, #79cfa1 0%, #67bf90 100%);
+	}
+
+	.card-stripe-yellow {
+		background: linear-gradient(135deg, #f2cb7b 0%, #e8bb62 100%);
+	}
+
+	.card-stripe-red {
+		background: linear-gradient(135deg, #ee8e8a 0%, #e57470 100%);
+	}
+
+	.dog-name-link {
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: clamp(1.35rem, 2vw, 1.82rem);
+		font-weight: 800;
+		letter-spacing: -0.01em;
+		color: #173a58;
 		text-decoration: none;
+		line-height: 1;
 	}
 
 	.dog-name-link:hover {
@@ -1048,163 +1311,249 @@
 
 	.dog-kennel {
 		margin: 0.13rem 0 0;
-		font-size: 0.58rem;
-		letter-spacing: 0.08em;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #486079;
+		color: #5c697b;
+	}
+
+	.dog-breed {
+		margin: 0.14rem 0 0;
+		font-size: 0.74rem;
+		font-weight: 600;
+		color: #5a6d84;
+		line-height: 1.2;
 	}
 
 	.days-tag {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-height: 1.82rem;
-		border: 2px solid var(--marker-black);
-		border-radius: 0.22rem;
-		padding: 0.18rem 0.46rem;
-		background: #edf4fb;
-		font-size: 0.56rem;
-		letter-spacing: 0.08em;
+		min-height: 1.76rem;
+		border: 1px solid #d6dfe9;
+		border-radius: 999px;
+		padding: 0.16rem 0.56rem;
+		background: #f1f5fa;
+		font-size: 0.58rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #25364a;
+		color: #47586e;
 		white-space: nowrap;
+	}
+
+	.days-tag-archived {
+		background: #eef0f3;
+		border-color: #c8cfd8;
+		color: #6b7a8a;
 	}
 
 	.dog-fact-grid {
 		display: grid;
-		gap: 0.24rem;
+		gap: 0.3rem;
 	}
 
-	.dog-front-status-list {
+	/* Card status icons (whiteboard-pill style) */
+	.card-status-icons {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.28rem;
+		flex-direction: column;
+		gap: 0.36rem;
 	}
 
-	.dog-details-drawer {
-		border: 2px dashed rgba(56, 77, 104, 0.45);
-		border-radius: 0.22rem;
-		background: rgba(241, 247, 255, 0.72);
-		padding: 0.22rem 0.34rem;
+	.card-status-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.44rem;
+		font-size: 0.74rem;
+		font-weight: 700;
+		line-height: 1.2;
+		color: #2f4a66;
 	}
 
-	.dog-details-summary {
+	.card-pill-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.9rem;
+		height: 1.9rem;
+		min-width: 1.9rem;
+		border-radius: 999px;
+		border: 1.5px solid #b9c7d8;
+		background: #f7faff;
+		color: currentColor;
+		flex-shrink: 0;
+	}
+
+	.card-pill-icon svg {
+		width: 1.1rem;
+		height: 1.1rem;
+		stroke: currentColor;
+		stroke-width: 1.8;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		fill: none;
+	}
+
+	.card-pill-label {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.card-pill-green {
+		color: #2f7f59;
+	}
+
+	.card-pill-yellow {
+		color: #a77022;
+	}
+
+	.card-pill-red {
+		color: #b94a46;
+	}
+
+	.card-pill-blue {
+		color: #1e4f72;
+	}
+
+	.card-pill-purple {
+		color: #4c2e8a;
+	}
+
+	/* Card facts (kennel-facts style) */
+	.card-facts {
+		display: grid;
+		gap: 0.14rem;
+		font-size: 0.82rem;
+		line-height: 1.44;
+		color: #27415d;
+		font-family: var(--font-ui);
+	}
+
+	.card-facts p {
+		margin: 0;
+		display: grid;
+		grid-template-columns: minmax(5.2rem, 6.8rem) minmax(0, 1fr);
+		gap: 0.36rem;
+		align-items: baseline;
+		padding: 0.18rem 0;
+		border-top: 1px solid #e5ecf5;
+	}
+
+	.card-facts p:first-child {
+		border-top: none;
+		padding-top: 0;
+	}
+
+	.card-facts span {
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #5a7189;
+	}
+
+	.card-fact-value {
+		font-weight: 700;
+		color: #1d3854;
+		font-size: 0.82rem;
+	}
+
+	.card-facts-inset {
+		margin-top: 0;
+	}
+
+	/* Care details drawer (kennel-section style) */
+	.card-kennel-section {
+		border: 1px solid #dde6f1;
+		border-radius: 0.82rem;
+		background: #ffffff;
+		box-shadow: 0 1px 2px rgba(16, 45, 70, 0.05), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+		overflow: hidden;
+	}
+
+	.card-kennel-section > summary {
 		list-style: none;
+		cursor: pointer;
+		padding: 0.52rem 0.7rem;
+		font-size: 0.76rem;
+		font-weight: 700;
+		color: #2f4a66;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.4rem;
-		cursor: pointer;
-		font-size: 0.54rem;
-		letter-spacing: 0.08em;
+		transition: background-color 120ms ease;
 		text-transform: uppercase;
-		color: #30455d;
+		letter-spacing: 0.04em;
 	}
 
-	.dog-details-summary::-webkit-details-marker {
+	.card-kennel-section > summary::-webkit-details-marker {
 		display: none;
 	}
 
+	.card-kennel-section > summary:hover {
+		background: #f8fbff;
+	}
+
+	.card-kennel-section > summary::after {
+		content: '';
+		width: 0.42rem;
+		height: 0.42rem;
+		border-right: 2px solid #68839c;
+		border-bottom: 2px solid #68839c;
+		transform: rotate(45deg) translateY(-0.08rem);
+		transition: transform 120ms ease;
+		flex: 0 0 auto;
+	}
+
+	.card-kennel-section[open] > summary {
+		border-bottom: 1px solid #e6edf6;
+		background: #f7fbff;
+	}
+
+	.card-kennel-section[open] > summary::after {
+		transform: rotate(-135deg) translateY(-0.02rem);
+	}
+
+	.kennel-section-body {
+		padding: 0.54rem 0.7rem 0.64rem;
+		display: grid;
+		gap: 0.56rem;
+	}
+
+	.summary-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.36rem;
+	}
+
 	.dog-details-count {
-		font-family: var(--font-typewriter);
-		font-size: 0.5rem;
+		font-family: var(--font-ui);
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		color: #607287;
+		text-transform: none;
+	}
+
+	.card-meet-facts {
+		display: grid;
+		gap: 0.2rem;
+	}
+
+	.card-sub-title {
+		margin: 0;
+		font-size: 0.6rem;
+		font-weight: 700;
 		letter-spacing: 0.08em;
-		color: #4b627f;
-	}
-
-	.dog-details-drawer[open] .dog-details-body {
-		display: grid;
-		gap: 0.44rem;
-		padding-top: 0.34rem;
-	}
-
-	.meet-card {
-		border: 2px solid rgba(37, 72, 120, 0.32);
-		background: rgba(234, 244, 255, 0.7);
-		padding: 0.44rem 0.48rem;
-		display: grid;
-		gap: 0.3rem;
-	}
-
-	.meet-grid {
-		margin: 0;
-		display: grid;
-		gap: 0;
-	}
-
-	.meet-row {
-		display: grid;
-		grid-template-columns: minmax(6.2rem, 8.2rem) minmax(0, 1fr);
-		gap: 0.38rem;
-		align-items: start;
-		padding: 0.22rem 0;
-		border-bottom: 1px solid rgba(79, 97, 120, 0.22);
-	}
-
-	.meet-row:last-child {
-		border-bottom: 0;
-	}
-
-	.meet-key {
-		margin: 0;
-		font-family: var(--font-typewriter);
-		font-size: 0.54rem;
-		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #4f6178;
-	}
-
-	.meet-value {
-		margin: 0;
-		font-size: 0.72rem;
-		line-height: 1.24;
-		font-weight: 900;
-		color: #152334;
-	}
-
-	.meet-home {
-		margin: 0;
-		padding-top: 0.26rem;
-		border-top: 1px dashed rgba(79, 97, 120, 0.35);
-		display: grid;
-		grid-template-columns: minmax(6.2rem, 8.2rem) minmax(0, 1fr);
-		gap: 0.38rem;
-		align-items: start;
-	}
-
-	.meet-home-value {
-		font-size: 0.72rem;
-		line-height: 1.28;
-		font-weight: 900;
-		color: #152334;
-	}
-
-	.fact-row {
-		margin: 0;
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr);
-		gap: 0.38rem;
-		align-items: baseline;
-		padding-bottom: 0.12rem;
-		border-bottom: 2px solid rgba(26, 31, 40, 0.16);
-	}
-
-	.fact-label {
-		font-size: 0.52rem;
-		letter-spacing: 0.09em;
-		text-transform: uppercase;
-		color: #50627a;
-	}
-
-	.fact-value {
-		font-size: 1.04rem;
-		line-height: 1.12;
+		color: #5a7189;
 	}
 
 	.next-step-card {
-		border: 2px solid rgba(35, 132, 90, 0.42);
-		background: rgba(235, 248, 241, 0.82);
-		padding: 0.44rem 0.48rem;
+		display: grid;
+		gap: 0.2rem;
 	}
 
 	.next-action-list {
@@ -1212,134 +1561,201 @@
 		padding: 0;
 		list-style: none;
 		display: grid;
-		gap: 0.24rem;
+		gap: 0.28rem;
 	}
 
 	.next-action-item {
 		margin: 0;
-		padding: 0.24rem 0.34rem;
-		border: 1.5px solid #b9c4d2;
-		border-radius: 0.2rem;
-		font-size: 0.66rem;
-		line-height: 1.2;
-		font-weight: 700;
+		padding: 0.26rem 0.36rem 0.26rem 0.28rem;
+		border: 1px solid #c6d0dc;
+		border-radius: 0.44rem;
+		font-size: 0.72rem;
+		line-height: 1.25;
+		font-weight: 600;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 0.35rem;
+		gap: 0.38rem;
+	}
+
+	.next-action-dismissed {
+		opacity: 0.52;
+	}
+
+	.pending-check-btn {
+		flex-shrink: 0;
+		width: 1.15rem;
+		height: 1.15rem;
+		border: 1.8px solid currentColor;
+		border-radius: 0.26rem;
+		background: rgba(255, 255, 255, 0.55);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+		cursor: pointer;
+		transition: background 100ms ease, border-color 100ms ease;
+	}
+
+	.pending-check-btn svg {
+		width: 0.82rem;
+		height: 0.82rem;
+	}
+
+	.pending-check-done {
+		background: currentColor;
+	}
+
+	.pending-check-done svg polyline {
+		stroke: #ffffff;
+	}
+
+	.pending-item-label {
+		flex: 1 1 0;
+		min-width: 0;
+	}
+
+	.pending-item-done {
+		text-decoration: line-through;
 	}
 
 	.pending-inline-btn {
-		min-height: 1.84rem;
-		border: 1.5px solid var(--marker-black);
-		border-radius: 0.2rem;
+		min-height: 1.72rem;
+		border: 1px solid #d3dbe8;
+		border-radius: 0.42rem;
 		padding: 0.22rem 0.56rem;
-		font-family: var(--font-typewriter);
+		font-family: var(--font-ui);
 		font-size: 0.62rem;
 		font-weight: 700;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
-		color: #1d2c3f;
+		color: #2d425b;
 		background: #ffffff;
 	}
 
 	.pending-inline-btn:hover {
-		background: #edf4ff;
+		background: #ecf3fb;
 	}
 
 	.next-action-empty {
 		margin: 0.22rem 0 0;
-		font-size: 0.66rem;
-		color: #4f6178;
+		font-size: 0.74rem;
+		color: #5a6d84;
 	}
 
 	.next-action-ready {
-		background: #ddf3e6;
+		background: #e1f4e8;
 		color: #1f5f43;
 	}
 
 	.next-action-blocked {
-		background: #f9e3e1;
+		background: #f9e6e4;
 		color: #8f2f2b;
 	}
 
 	.next-action-info {
-		background: #e2effd;
+		background: #e6f1fd;
 		color: #264b73;
 	}
 
 	.dog-status-list {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.28rem;
+		gap: 0.32rem;
 	}
 
 	.status-pill {
 		display: inline-flex;
 		align-items: center;
-		border: 2px solid var(--marker-black);
-		border-radius: 0.22rem;
-		padding: 0.17rem 0.42rem;
-		font-family: var(--font-typewriter);
-		font-size: 0.54rem;
+		border: 1px solid #d3dce8;
+		border-radius: 999px;
+		padding: 0.28rem 0.62rem;
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
 		font-weight: 700;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.02em;
 		text-transform: uppercase;
-		color: #1d2c3f;
+		color: #2f435c;
 	}
 
 	.status-pill-green {
-		background: #ddf3e6;
+		background: #e1f4e8;
+		border-color: #b8dfc5;
+		color: #1a5e35;
 	}
 
 	.status-pill-yellow {
-		background: #fbf2d7;
+		background: #f9f0d9;
+		border-color: #e4cfa0;
+		color: #7a5a1c;
 	}
 
 	.status-pill-red {
-		background: #f9e3e1;
+		background: #f9e6e4;
+		border-color: #e8b9b5;
+		color: #7a2828;
 	}
 
 	.status-pill-blue {
-		background: #e2effd;
+		background: #e6f1fd;
+		border-color: #b8d8f4;
+		color: #1e4f72;
+	}
+
+	.status-pill-purple {
+		background: #ede9fe;
+		border-color: #cfc4f6;
+		color: #4c2e8a;
 	}
 
 	.status-pill-foster {
-		background: #f7eada;
+		background: #f8ebdd;
+		border-color: #e5cab0;
+		color: #7a4a1c;
 	}
 
 	.status-alert {
 		width: 100%;
-		font-size: 0.96rem;
+		font-size: 0.86rem;
+		font-weight: 700;
 		line-height: 1.14;
 	}
 
 	.dog-actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.34rem;
+		gap: 0.32rem;
 	}
 
 	.action-btn {
-		min-height: 2.02rem;
-		border: 2px solid var(--marker-black);
-		border-radius: 0.22rem;
-		padding: 0.2rem 0.55rem;
-		font-family: var(--font-typewriter);
-		font-size: 0.56rem;
+		min-height: 1.88rem;
+		border: 1px solid #d0daea;
+		border-radius: 0.52rem;
+		padding: 0.22rem 0.62rem;
+		font-family: var(--font-ui);
+		font-size: 0.62rem;
 		font-weight: 700;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
-		color: #1c2b3c;
-		background: #e8f1fb;
+		color: #2f435c;
+		background: #e9f2fb;
 	}
 
-	.action-btn:hover {
-		background: #dce8f6;
+	.action-btn:hover:not(:disabled) {
+		background: #dbe8f8;
+	}
+
+	.action-btn-return {
+		border-color: #c5d9c5;
+		color: #2a5c2a;
+		background: #edf7ed;
+	}
+
+	.action-btn-return:hover:not(:disabled) {
+		background: #dff0df;
 	}
 
 	.action-btn:disabled {
-		opacity: 0.5;
+		opacity: 0.55;
 		cursor: not-allowed;
 	}
 
@@ -1354,21 +1770,23 @@
 	}
 
 	.modal-btn {
-		min-height: 2.24rem;
-		border: 2px solid var(--marker-black);
-		border-radius: 0.24rem;
+		min-height: 2rem;
+		border: 1px solid #d1dae8;
+		border-radius: 0.56rem;
 		padding: 0.26rem 0.72rem;
-		font-family: var(--font-typewriter);
-		font-size: 0.64rem;
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
 		font-weight: 700;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
-		color: #1d2a3a;
+		color: #2f435c;
 		background: #ffffff;
 	}
 
 	.modal-btn-fill {
-		background: #dcebf8;
+		border-color: #2e84b7;
+		background: linear-gradient(180deg, #2f97d1 0%, #2b82b4 100%);
+		color: #ffffff;
 	}
 
 	.modal-btn:disabled {
@@ -1380,8 +1798,7 @@
 		.dogs-control-strip {
 			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 			align-items: end;
-			gap: 0.8rem;
-			padding: 0.95rem;
+			gap: 0.72rem;
 		}
 
 		.dogs-summary-row {
@@ -1391,13 +1808,10 @@
 
 		.dogs-header-actions {
 			justify-content: flex-end;
-			width: auto;
 		}
 
 		.board-control-btn {
-			flex: 0 0 auto;
-			font-size: 0.62rem;
-			min-height: 2.28rem;
+			min-height: 2rem;
 		}
 
 		.dogs-filters-drawer {
@@ -1415,80 +1829,40 @@
 			padding: 0;
 		}
 
-		.dogs-zone {
-			padding: 0.95rem;
+		.card-kennel-section {
+			border-radius: 0.82rem;
 		}
 
-		.dog-details-drawer {
-			border: 0;
-			background: transparent;
-			padding: 0;
-		}
-
-		.dog-details-summary {
+		.card-kennel-section > summary {
 			display: none;
 		}
 
-		.dog-details-body {
+		.card-kennel-section .kennel-section-body {
 			display: grid !important;
-			gap: 0.56rem;
 		}
 
+		.card-status-icons {
+			flex-direction: row;
+			flex-wrap: wrap;
+			gap: 0.3rem 0.6rem;
+		}
+	}
+
+	@media (min-width: 980px) {
 		.dogs-card-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
-
-		.dog-card {
-			padding-left: 0.08rem;
-			padding-right: 0.08rem;
-			border-right: 0;
-		}
-
-		.dog-card:last-child {
-			border-bottom: 3px solid var(--marker-black);
-		}
-
-		.dog-card:nth-child(odd) {
-			border-right: 3px solid var(--marker-black);
-			padding-right: 0.62rem;
-		}
-
-		.dog-card:nth-child(even) {
-			padding-left: 0.62rem;
-		}
-
 	}
 
-	@media (min-width: 1180px) {
+	@media (min-width: 1320px) {
 		.dogs-card-grid {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
 		}
+	}
 
-		.dog-card {
-			border-right: 0;
-			padding-left: 0.62rem;
-			padding-right: 0.62rem;
+	@media (max-width: 560px) {
+		.dogs-summary-row {
+			flex-wrap: wrap;
 		}
-
-		.dog-card:nth-child(3n + 1),
-		.dog-card:nth-child(3n + 2) {
-			border-right: 3px solid var(--marker-black);
-		}
-
-		.dog-card:nth-child(3n + 1) {
-			padding-left: 0.08rem;
-			padding-right: 0.62rem;
-		}
-
-		.dog-card:nth-child(3n + 2) {
-			padding-left: 0.62rem;
-			padding-right: 0.62rem;
-		}
-
-		.dog-card:nth-child(3n) {
-			padding-left: 0.62rem;
-			padding-right: 0.08rem;
-		}
-
 	}
 </style>

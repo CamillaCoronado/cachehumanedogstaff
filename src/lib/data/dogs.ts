@@ -1,5 +1,6 @@
 import type {
 	BehavioralNote,
+	DogHandlingLevel,
 	DayTripIneligibleReason,
 	DayTripLog,
 	Dog,
@@ -71,6 +72,7 @@ interface StoredDog {
 	dayTripManagerOnly?: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	dayTripNotes: string | null;
+	handlingLevel?: DogHandlingLevel;
 	inFoster: boolean;
 	isolationStatus: 'none' | 'sick' | 'bite_quarantine';
 	isolationStartDate: string | null;
@@ -148,6 +150,11 @@ function normalizeDayTripIneligibleReason(value: unknown): DayTripIneligibleReas
 	return value === 'behavior' || value === 'medical' || value === 'other' ? value : null;
 }
 
+function normalizeDogHandlingLevel(value: unknown): DogHandlingLevel {
+	if (value === 'manager_only' || value === 'staff_only' || value === 'volunteer') return value;
+	return 'volunteer';
+}
+
 function serializeDog(dog: Dog): StoredDog {
 	const serializedIntakeDate = toDateString(dog.intakeDate) ?? new Date().toISOString();
 	const serializedOriginalEntry = toDateString(dog.originalIntakeDate) ?? serializedIntakeDate;
@@ -205,6 +212,7 @@ function serializeDog(dog: Dog): StoredDog {
 		dayTripManagerOnly: dog.dayTripManagerOnly ?? false,
 		dayTripManagerOnlyReason: dog.dayTripManagerOnly ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
 		dayTripNotes: dog.dayTripNotes,
+		handlingLevel: dog.handlingLevel ?? 'volunteer',
 		inFoster: dog.inFoster ?? false,
 		isolationStatus: dog.isolationStatus,
 		isolationStartDate: toDateString(dog.isolationStartDate),
@@ -221,6 +229,7 @@ function deserializeDog(stored: StoredDog): Dog {
 	const normalizedDayTripNotes = (stored.dayTripNotes ?? '').trim();
 	const normalizedDayTripIneligibleReason = normalizeDayTripIneligibleReason(stored.dayTripIneligibleReason);
 	const normalizedDayTripManagerOnlyReason = normalizeDayTripIneligibleReason(stored.dayTripManagerOnlyReason);
+	const normalizedHandlingLevel = normalizeDogHandlingLevel(stored.handlingLevel);
 	const dayTripManagerOnly = stored.dayTripManagerOnly ?? false;
 	const normalizedDayTripStatus =
 		(stored.dayTripStatus ?? 'eligible') === 'ineligible' &&
@@ -290,6 +299,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		dayTripManagerOnly,
 		dayTripManagerOnlyReason,
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
+		handlingLevel: normalizedHandlingLevel,
 		inFoster: stored.inFoster ?? false,
 		isolationStatus: stored.isolationStatus ?? 'none',
 		isolationStartDate: stored.isolationStartDate ? toDate(stored.isolationStartDate) : null,
@@ -551,6 +561,10 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 
 export async function archiveDog(id: string) {
 	return updateDog(id, { status: 'adopted' });
+}
+
+export async function returnDog(id: string) {
+	return updateDog(id, { status: 'active' });
 }
 
 export async function deleteDog(id: string) {
