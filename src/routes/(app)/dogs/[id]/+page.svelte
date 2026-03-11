@@ -32,6 +32,7 @@
 	} from '$lib/utils/dates';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import { energyLabel, compatibilityLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 	let dog: Dog | null = null;
@@ -48,6 +49,8 @@
 	let toDateFilter = '';
 	let stoolFromDate = '';
 	let stoolToDateFilter = '';
+	let confirmAction: 'archive' | 'delete' | null = null;
+	let confirmBusy = false;
 
 	const today = new Date();
 
@@ -64,7 +67,10 @@
 				dog.dayTripStatus,
 				dog.isolationStatus,
 				dog.dayTripIneligibleReason,
+				dog.dayTripManagerOnly,
+				dog.dayTripManagerOnlyReason,
 				dog.dayTripNotes,
+				role,
 				today
 			)
 		: { eligible: false, status: 'ineligible' as const, reasons: [] };
@@ -75,7 +81,11 @@
 				? 'whiteboard-trip-pill-yellow'
 				: 'whiteboard-trip-pill-red';
 	$: dayTripBadgeText =
-		dayTripEligibility.status === 'ineligible' ? 'Ineligible for day trips' : 'Eligible for day trips';
+		dayTripEligibility.status === 'ineligible'
+			? 'Ineligible for day trips'
+			: dayTripEligibility.status === 'difficult'
+				? 'Adults only day trips'
+				: 'Eligible for day trips';
 	$: daysSinceLastTrip = dog?.lastDayTripDate ? daysSince(dog.lastDayTripDate, today) : null;
 	$: currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 	$: nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -89,7 +99,7 @@
 			return startedAt ? startedAt >= currentMonthStart && startedAt < nextMonthStart : false;
 		})
 		.reduce((sum, log) => sum + dayTripHours(log), 0);
-	$: ineligibleReason = dog?.dayTripIneligibleReason ?? 'behavior';
+	$: ineligibleReason = dog?.dayTripIneligibleReason ?? null;
 	$: isBehaviorIneligible =
 		Boolean(dog) &&
 		dog.dayTripStatus === 'ineligible' &&
@@ -105,7 +115,27 @@
 		dog.dayTripStatus === 'ineligible' &&
 		dog.isolationStatus === 'none' &&
 		ineligibleReason === 'other';
+	$: isUnknownIneligible =
+		Boolean(dog) &&
+		dog.dayTripStatus === 'ineligible' &&
+		dog.isolationStatus === 'none' &&
+		ineligibleReason === null;
+	$: managerOnlyReason = dog?.dayTripManagerOnlyReason ?? null;
+	$: isManagerOnly = Boolean(dog) && dog.dayTripManagerOnly === true && dog.isolationStatus === 'none';
 	$: dayTripReasonNote = dog?.dayTripNotes?.trim() ?? '';
+	$: managerOnlyNote = !isManagerOnly
+		? ''
+		: managerOnlyReason === 'behavior'
+			? dayTripReasonNote
+				? `Manager only (behavior): ${dayTripReasonNote}`
+				: 'Manager only (behavior)'
+			: managerOnlyReason === 'medical'
+				? dayTripReasonNote
+					? `Manager only (medical): ${dayTripReasonNote}`
+					: 'Manager only (medical)'
+				: dayTripReasonNote
+					? `Manager only: ${dayTripReasonNote}`
+					: 'Manager only';
 	$: difficultWhiteboardNote = dayTripReasonNote ? `Adults only: ${dayTripReasonNote}` : 'Adults only';
 	$: activeTrip = dayTripLogs.find((log) => !log.endedAt) ?? null;
 	$: adoptionAvailability = dog ? getAdoptionAvailability(dog) : null;
@@ -120,9 +150,9 @@
 		: 'Unavailable';
 	$: adoptionToneClass = adoptionAvailability?.state === 'available' ? 'whiteboard-alert-ok' : 'whiteboard-alert-warn';
 	$: whiteboardStatusTagClass = dog
-		? dog.isolationStatus !== 'none' || dog.dayTripStatus === 'ineligible'
+		? dog.isolationStatus !== 'none' || dayTripEligibility.status === 'ineligible' || isManagerOnly
 			? 'whiteboard-tag-red'
-			: dog.dayTripStatus === 'difficult'
+			: dayTripEligibility.status === 'difficult'
 				? 'whiteboard-tag-yellow'
 				: 'whiteboard-tag-green'
 		: 'whiteboard-tag-green';
@@ -131,13 +161,21 @@
 			? 'Day Trip'
 			: dog.isolationStatus !== 'none'
 				? 'Isolation'
-				: isBehaviorIneligible
-					? 'Staff Only'
+				: isManagerOnly
+					? managerOnlyNote
+					: isBehaviorIneligible
+						? dayTripReasonNote
+							? `Behavior hold: ${dayTripReasonNote}`
+							: 'Behavior hold'
 					: isMedicalIneligible
 						? dayTripReasonNote
 							? `Medical hold: ${dayTripReasonNote}`
 							: 'Medical hold'
 						: isOtherIneligible
+							? dayTripReasonNote
+								? `Day trip hold: ${dayTripReasonNote}`
+								: 'Day trip hold'
+						: isUnknownIneligible
 							? dayTripReasonNote
 								? `Day trip hold: ${dayTripReasonNote}`
 								: 'Day trip hold'
@@ -148,7 +186,9 @@
 	$: whiteboardNoteToneClass =
 		whiteboardNote === 'Day Trip'
 			? 'whiteboard-note-blue'
-			: dog && !dog.isOutOnDayTrip && (dog.isolationStatus !== 'none' || dog.dayTripStatus === 'ineligible')
+			: dog &&
+				  !dog.isOutOnDayTrip &&
+				  (dog.isolationStatus !== 'none' || dog.dayTripStatus === 'ineligible' || isManagerOnly)
 				? 'whiteboard-note-red'
 				: dog && !dog.isOutOnDayTrip && dog.dayTripStatus === 'difficult'
 					? 'whiteboard-note-yellow'
@@ -218,7 +258,6 @@
 
 	async function handleArchive() {
 		if (!dog) return;
-		if (!confirm('Archive this dog?')) return;
 		await archiveDog(dog.id);
 		toast.success('Dog archived.');
 		await loadAll();
@@ -226,10 +265,34 @@
 
 	async function handleDelete() {
 		if (!dog) return;
-		if (!confirm('Permanently delete this dog?')) return;
 		await deleteDog(dog.id);
 		toast.success('Dog deleted.');
 		window.location.href = '/dogs';
+	}
+
+	function closeConfirmModal() {
+		if (confirmBusy) return;
+		confirmAction = null;
+	}
+
+	async function handleConfirmAction() {
+		if (!confirmAction || !dog || confirmBusy) return;
+		confirmBusy = true;
+		const action = confirmAction;
+		try {
+			if (action === 'archive') {
+				await handleArchive();
+				confirmAction = null;
+				return;
+			}
+			await handleDelete();
+			confirmAction = null;
+		} catch (error) {
+			console.error(error);
+			toast.error(action === 'archive' ? 'Unable to archive dog.' : 'Unable to delete dog.');
+		} finally {
+			confirmBusy = false;
+		}
 	}
 
 	async function handleLogBath() {
@@ -685,16 +748,53 @@
 
 		{#if canEdit}
 			<div class="flex flex-wrap gap-3">
-				<button class="rounded-full border border-ink-200 px-4 py-2 text-xs" on:click={handleArchive}>
+				<button class="rounded-full border border-ink-200 px-4 py-2 text-xs" on:click={() => (confirmAction = 'archive')}>
 					Archive Dog
 				</button>
-				<button class="rounded-full border border-rose-200 px-4 py-2 text-xs text-rose-600" on:click={handleDelete}>
+				<button class="rounded-full border border-rose-200 px-4 py-2 text-xs text-rose-600" on:click={() => (confirmAction = 'delete')}>
 					Delete Dog
 				</button>
 			</div>
 		{/if}
 	</section>
 {/if}
+
+<Modal
+	open={confirmAction !== null}
+	title={confirmAction === 'archive' ? 'Archive Dog' : 'Delete Dog'}
+	placement="top"
+	onClose={closeConfirmModal}
+>
+	{#if confirmAction === 'archive'}
+		<p class="text-sm text-ink-700">Archive {dog?.name ?? 'this dog'}? You can still find archived dogs in the roster with archived records shown.</p>
+	{:else if confirmAction === 'delete'}
+		<p class="text-sm text-ink-700">Delete {dog?.name ?? 'this dog'} permanently? This cannot be undone.</p>
+	{/if}
+	<div slot="footer" class="flex justify-end gap-2">
+		<button
+			class="rounded-full border border-ink-200 px-4 py-2 text-xs"
+			disabled={confirmBusy}
+			on:click={closeConfirmModal}
+		>
+			Cancel
+		</button>
+		<button
+			class={`rounded-full px-4 py-2 text-xs text-white ${
+				confirmAction === 'delete' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-ink-900 hover:bg-ink-800'
+			}`}
+			disabled={confirmBusy}
+			on:click={handleConfirmAction}
+		>
+			{#if confirmBusy}
+				Working...
+			{:else if confirmAction === 'archive'}
+				Archive Dog
+			{:else}
+				Delete Dog
+			{/if}
+		</button>
+	</div>
+</Modal>
 
 <style>
 	.dog-detail-status {

@@ -72,6 +72,8 @@ export interface Dog {
 	vaccinatedDate: DateValue | null;
 	dayTripStatus: DayTripStatus;
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
+	dayTripManagerOnly: boolean;
+	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	dayTripNotes: string | null;
 	inFoster: boolean;
 	isolationStatus: IsolationStatus;

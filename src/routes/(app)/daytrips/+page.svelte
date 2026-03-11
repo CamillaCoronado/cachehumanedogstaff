@@ -1,9 +1,11 @@
 <script lang="ts">
 	import toast from 'svelte-french-toast';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
+	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
+	import { resolveRole } from '$lib/utils/permissions';
 	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs } from '$lib/data/dogs';
-	import type { DayTripLog, Dog } from '$lib/types';
+	import type { DayTripLog, Dog, UserRole } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 
 	const now = new Date();
@@ -26,6 +28,7 @@
 	$: activeDogs = dogs
 		.filter((dog) => dog.status === 'active')
 		.sort((a, b) => a.name.localeCompare(b.name));
+	$: role = resolveRole($authProfile, $localRole as UserRole);
 
 	$: monthStart = (() => {
 		const [year, month] = monthFilter.split('-').map(Number);
@@ -103,7 +106,10 @@
 			dog.dayTripStatus,
 			dog.isolationStatus,
 			dog.dayTripIneligibleReason,
+			dog.dayTripManagerOnly,
+			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
+			role,
 			new Date()
 		);
 	}

@@ -911,6 +911,8 @@
 			vaccinatedDate: isVaccinated ? vaccinatedDate : null,
 			dayTripStatus: 'eligible',
 			dayTripIneligibleReason: null,
+			dayTripManagerOnly: false,
+			dayTripManagerOnlyReason: null,
 			dayTripNotes: null,
 			inFoster,
 			isolationStatus: 'none',

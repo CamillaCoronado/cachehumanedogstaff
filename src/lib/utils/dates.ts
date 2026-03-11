@@ -1,5 +1,5 @@
 import { differenceInDays, differenceInMonths, differenceInYears, format, getDay, isSameDay, startOfDay } from 'date-fns';
-import type { DateValue, DayTripIneligibleReason, DayTripStatus, IsolationStatus } from '$lib/types';
+import type { DateValue, DayTripIneligibleReason, DayTripStatus, IsolationStatus, UserRole } from '$lib/types';
 
 const MIN_DAYS_AFTER_SURGERY_FOR_BATH = 10;
 
@@ -100,7 +100,10 @@ export function checkDayTripEligibility(
 	dayTripStatus: DayTripStatus,
 	isolationStatus: IsolationStatus,
 	dayTripIneligibleReason: DayTripIneligibleReason | null | undefined,
+	dayTripManagerOnly: boolean | null | undefined,
+	dayTripManagerOnlyReason: DayTripIneligibleReason | null | undefined,
 	dayTripNotes: string | null,
+	actorRole: UserRole | null | undefined = null,
 	today = new Date()
 ): DayTripEligibility {
 	const reasons: string[] = [];
@@ -108,8 +111,11 @@ export function checkDayTripEligibility(
 	const hasIntake = intake !== null && !Number.isNaN(intake.getTime());
 	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
 	const hasTripReason = trimmedTripNotes.length > 0;
-	const ineligibleReason = dayTripIneligibleReason ?? 'behavior';
-	const manuallyBlocked = dayTripStatus === 'ineligible' && isolationStatus === 'none';
+	const ineligibleReason = dayTripIneligibleReason ?? 'other';
+	const managerOnlyReason = dayTripManagerOnlyReason ?? 'other';
+	const requiresManagerOnly = dayTripManagerOnly === true;
+	const manuallyBlocked =
+		dayTripStatus === 'ineligible' && isolationStatus === 'none' && ineligibleReason === 'other';
 
 	if (isolationStatus === 'sick') {
 		reasons.push('In isolation: Sick');
@@ -130,12 +136,24 @@ export function checkDayTripEligibility(
 	}
 
 	if (manuallyBlocked) {
-		if (ineligibleReason === 'medical') {
-			reasons.push(hasTripReason ? `Medical hold: ${trimmedTripNotes}` : 'Medical hold');
-		} else if (ineligibleReason === 'other') {
-			reasons.push(hasTripReason ? `Day trips blocked: ${trimmedTripNotes}` : 'Day trips blocked');
+		reasons.push(hasTripReason ? `Day trips blocked: ${trimmedTripNotes}` : 'Day trips blocked');
+	}
+
+	if (requiresManagerOnly && isolationStatus === 'none') {
+		if (managerOnlyReason === 'behavior') {
+			reasons.push(
+				hasTripReason
+					? `Manager only due to behavior: ${trimmedTripNotes}`
+					: 'Manager only due to behavior'
+			);
+		} else if (managerOnlyReason === 'medical') {
+			reasons.push(
+				hasTripReason
+					? `Manager only for medical needs: ${trimmedTripNotes}`
+					: 'Manager only for medical needs'
+			);
 		} else {
-			reasons.push(hasTripReason ? `Behavior check: ${trimmedTripNotes}` : 'Behavior check is on. Add why.');
+			reasons.push(hasTripReason ? `Manager only: ${trimmedTripNotes}` : 'Manager only');
 		}
 	}
 
@@ -143,13 +161,17 @@ export function checkDayTripEligibility(
 		reasons.push(hasTripReason ? `Difficult: ${trimmedTripNotes}` : 'Difficult dog - adults only');
 	}
 
-	const hasBlockingReason = reasons.some((reason) => !reason.startsWith('Difficult:') && reason !== 'Difficult dog - adults only');
-	const eligible = !hasBlockingReason;
+	void actorRole;
+	const blockedByRequirements = !hasIntake || !isVaccinated || !isFixed;
+	const blockedByStatus = isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly;
+	const eligible = !(blockedByRequirements || blockedByStatus);
 
 	let status: DayTripStatus = 'ineligible';
 	if (isolationStatus !== 'none') {
 		status = 'ineligible';
 	} else if (manuallyBlocked) {
+		status = 'ineligible';
+	} else if (requiresManagerOnly) {
 		status = 'ineligible';
 	} else if (dayTripStatus === 'difficult') {
 		status = 'difficult';

@@ -135,6 +135,8 @@
 			vaccinatedDate: null,
 			dayTripStatus: 'eligible',
 			dayTripIneligibleReason: null,
+			dayTripManagerOnly: false,
+			dayTripManagerOnlyReason: null,
 			dayTripNotes: null,
 			inFoster: false,
 			isolationStatus: 'none',
@@ -205,7 +207,10 @@
 			dog.dayTripStatus,
 			dog.isolationStatus,
 			dog.dayTripIneligibleReason,
+			dog.dayTripManagerOnly,
+			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
+			role,
 			today
 		);
 	}
@@ -247,11 +252,12 @@
 		return 'status-pill-red';
 	}
 
-	function tripLabel(status: Dog['dayTripStatus'], notes: string | null | undefined) {
-		if (status === 'eligible') return 'Day Trip: Eligible';
+	function tripLabel(status: Dog['dayTripStatus'], notes: string | null | undefined, managerOnly: boolean) {
+		if (status === 'eligible') return managerOnly ? 'Day Trip: Manager only' : 'Day Trip: Eligible';
 		if (status === 'difficult') {
 			const reason = notes?.trim() ?? '';
-			return reason ? `Day Trip: Adults only - ${reason}` : 'Day Trip: Adults only';
+			const base = reason ? `Day Trip: Adults only - ${reason}` : 'Day Trip: Adults only';
+			return managerOnly ? `${base} (manager only)` : base;
 		}
 		return 'Day Trip: Ineligible';
 	}
@@ -320,12 +326,16 @@
 				else if (normalized.includes('must be vaccinated')) priority = 90;
 				else if (normalized.includes('must be spayed/neutered')) priority = 85;
 				else if (normalized.includes('must have intake date')) priority = 80;
+				else if (normalized.includes('manager only')) priority = 76;
 				else if (normalized.includes('behavior check')) priority = 75;
 				else if (normalized.includes('difficult')) priority = 60;
+				const managerOnlyNotice = normalized.includes('manager only');
+				const infoTone =
+					normalized.includes('difficult') || (managerOnlyNotice && tripEligibility.eligible);
 
 				items.push({
 					label: reason,
-					tone: normalized.includes('difficult') ? 'info' : 'blocked',
+					tone: infoTone ? 'info' : 'blocked',
 					priority
 				});
 			}
@@ -587,7 +597,7 @@
 									{adoptionLabel(dog)}
 								</span>
 								<span class={`status-pill ${tripPillClass(tripEligibility.status)}`}>
-									{tripLabel(tripEligibility.status, dog.dayTripNotes)}
+									{tripLabel(tripEligibility.status, dog.dayTripNotes, dog.dayTripManagerOnly ?? false)}
 								</span>
 							</div>
 

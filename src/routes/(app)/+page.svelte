@@ -74,9 +74,9 @@
 	$: managerOnlyDogs = activeDogs
 		.filter(
 			(dog) =>
-				dog.dayTripStatus === 'difficult' ||
-				(dog.dayTripStatus === 'ineligible' &&
-					(dog.dayTripIneligibleReason ?? 'behavior') === 'behavior')
+				dog.dayTripManagerOnly === true &&
+				dog.isolationStatus === 'none' &&
+				dog.isOutOnDayTrip === false
 		)
 		.slice(0, 4);
 
