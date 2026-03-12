@@ -640,7 +640,7 @@
 					bind:value={search}
 				/>
 			</div>
-			<details class="dogs-filters-drawer">
+			<details class="dogs-filters-drawer" open>
 				<summary class="dogs-filters-summary typewriter">filters and sort</summary>
 				<div class="dogs-filters-body">
 						<div class="dogs-sort-group" role="group" aria-label="Sort dogs">
@@ -791,7 +791,7 @@
 								<p><span>Sex</span><strong class="card-fact-value">{sexLabel(dog.sex)}</strong></p>
 							</div>
 
-							<details class="card-kennel-section">
+							<details class="card-kennel-section" open>
 								<summary>Meet & Greet</summary>
 								<div class="kennel-section-body">
 									<div class="card-facts">
@@ -806,7 +806,7 @@
 								</div>
 							</details>
 
-							<details class="card-kennel-section">
+							<details class="card-kennel-section" open>
 								<summary>
 									<span class="summary-label">Pending items <span class="dog-details-count">{cardPendingItems.length}</span></span>
 								</summary>
@@ -1819,26 +1819,13 @@
 			background: transparent;
 		}
 
-		.dogs-filters-summary {
-			display: none;
-		}
-
 		.dogs-filters-body {
-			display: grid !important;
 			gap: 0.44rem;
 			padding: 0;
 		}
 
 		.card-kennel-section {
 			border-radius: 0.82rem;
-		}
-
-		.card-kennel-section > summary {
-			display: none;
-		}
-
-		.card-kennel-section .kennel-section-body {
-			display: grid !important;
 		}
 
 		.card-status-icons {

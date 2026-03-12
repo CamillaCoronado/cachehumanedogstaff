@@ -136,6 +136,33 @@ function normalizeKennelAssignment(value: string | null | undefined) {
 	return value?.trim() ?? '';
 }
 
+// Returns all name variants for a dog: "Buddy (Max)" → ["buddy", "max"]
+function dogNameVariants(name: string): string[] {
+	const lower = name.trim().toLowerCase();
+	const match = lower.match(/^(.+?)\s*\((.+)\)$/);
+	if (match) return [match[1].trim(), match[2].trim()];
+	return [lower];
+}
+
+// When ASM and manually-entered dogs represent the same animal, keep the ASM copy.
+function deduplicateAgainstAsm(dogs: Dog[]): Dog[] {
+	const asmDogs = dogs.filter((d) => d.origin === 'ASM');
+	const nonAsmDogs = dogs.filter((d) => d.origin !== 'ASM');
+
+	// Build a set of every name variant that exists in ASM dogs
+	const asmNames = new Set<string>();
+	for (const dog of asmDogs) {
+		for (const v of dogNameVariants(dog.name)) asmNames.add(v);
+	}
+
+	// Drop non-ASM dogs whose name (or parenthetical alias) already exists in ASM
+	const kept = nonAsmDogs.filter(
+		(dog) => !dogNameVariants(dog.name).some((v) => asmNames.has(v))
+	);
+
+	return [...asmDogs, ...kept];
+}
+
 function applyFosterHousingRules(dog: Dog): Dog {
 	if (!dog.inFoster) {
 		const trimmed = normalizeKennelAssignment(dog.outdoorKennelAssignment);
@@ -481,13 +508,14 @@ export async function listDogs() {
 	const ref = dogsCollectionRef();
 	if (ref) {
 		const snapshot = await getDocs(ref);
-		return snapshot.docs.map((docSnap) =>
+		const dogs = snapshot.docs.map((docSnap) =>
 			deserializeDog({ id: docSnap.id, ...(docSnap.data() as StoredDog) })
 		);
+		return deduplicateAgainstAsm(dogs);
 	}
 
 	const stored = readJson<StoredDog[]>(DOGS_KEY, []);
-	return stored.map(deserializeDog);
+	return deduplicateAgainstAsm(stored.map(deserializeDog));
 }
 
 export async function getDog(id: string) {

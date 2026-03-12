@@ -926,7 +926,7 @@
 		{#if canEdit}
 			<div class="flex flex-wrap gap-3">
 				<button class="rounded-full border border-ink-200 px-4 py-2 text-xs" on:click={() => (confirmAction = 'archive')}>
-					Archive Dog
+					Mark as Adopted
 				</button>
 				<button class="rounded-full border border-rose-200 px-4 py-2 text-xs text-rose-600" on:click={() => (confirmAction = 'delete')}>
 					Delete Dog
@@ -938,12 +938,12 @@
 
 <Modal
 	open={confirmAction !== null}
-	title={confirmAction === 'archive' ? 'Archive Dog' : 'Delete Dog'}
+	title={confirmAction === 'archive' ? 'Mark as Adopted' : 'Delete Dog'}
 	placement="top"
 	onClose={closeConfirmModal}
 >
 	{#if confirmAction === 'archive'}
-		<p class="text-sm text-ink-700">Archive {dog?.name ?? 'this dog'}? You can still find archived dogs in the roster with archived records shown.</p>
+		<p class="text-sm text-ink-700">Mark {dog?.name ?? 'this dog'} as adopted? They'll be removed from the active roster and appear in recently adopted.</p>
 	{:else if confirmAction === 'delete'}
 		<p class="text-sm text-ink-700">Delete {dog?.name ?? 'this dog'} permanently? This cannot be undone.</p>
 	{/if}
@@ -965,7 +965,7 @@
 			{#if confirmBusy}
 				Working...
 			{:else if confirmAction === 'archive'}
-				Archive Dog
+				Mark as Adopted
 			{:else}
 				Delete Dog
 			{/if}

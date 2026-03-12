@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
 import { initializeApp, getApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, type Firestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 import { env } from '$env/dynamic/public';
 
@@ -42,7 +42,7 @@ let storage: FirebaseStorage | null = null;
 if (browser && firebaseEnabled) {
 	firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 	auth = getAuth(firebaseApp);
-	db = getFirestore(firebaseApp);
+	db = initializeFirestore(firebaseApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
 	storage = getStorage(firebaseApp);
 }
 

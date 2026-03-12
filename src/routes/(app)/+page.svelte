@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { format, startOfDay } from 'date-fns';
 	import { addFeedingLog, endDayTrip, listAllDayTripLogs, listDogs, listFeedingLogs, updateDog } from '$lib/data/dogs';
+	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import { readJson, writeJson } from '$lib/utils/storage';
-	import type { DayTripLog, Dog, FeedingLog, MealTime } from '$lib/types';
+	import { onMount } from 'svelte';
+	import { writable } from 'svelte/store';
+	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
 
 	type CleaningShift = 'morning' | 'evening';
 	type TodayActionId = 'feeding' | 'cleaning' | 'movement' | 'slack';
@@ -26,16 +29,26 @@
 		checklistHref?: string;
 	}
 
+	interface AttentionItem {
+		dogId: string;
+		dogName: string;
+		type: 'bath' | 'daytrip' | 'playgroup';
+		days: number;
+	}
+
 	const CLEANING_COMPLETIONS_KEY = 'shelter.cleaningCompletions.v1';
 	const today = startOfDay(new Date());
-	const weatherLabel = '☁ 80°';
+	let weatherIcon = '';
+	let weatherTemp = '';
 
 	let loading = true;
 	let errorMessage = '';
-	let shift: MealTime = new Date().getHours() < 12 ? 'am' : 'pm';
-	let cleaningShift: CleaningShift = shift === 'am' ? 'morning' : 'evening';
+	const shift = writable<MealTime>(new Date().getHours() < 12 ? 'am' : 'pm');
+	let cleaningShift: CleaningShift = 'morning';
 
 	let activeDogs: Dog[] = [];
+	let recentlyAdopted: Dog[] = [];
+	let playgroupSessions: PlaygroupSession[] = [];
 	let dayTripLogs: DayTripLog[] = [];
 	let feedingLogsByDog: Record<string, FeedingLog[]> = {};
 	let cleaningCompletions: Record<string, CompletionRecord> = {};
@@ -58,6 +71,34 @@
 		}
 	}
 
+	onMount(() => {
+		void fetchWeather();
+	});
+
+	async function fetchWeather() {
+		// Cache Humane Society — 2370 W 200 N, Logan, UT
+		try {
+			const url = `https://api.open-meteo.com/v1/forecast?latitude=41.736656&longitude=-111.891390&current=temperature_2m,weather_code&temperature_unit=fahrenheit&forecast_days=1`;
+			const res = await fetch(url);
+			const data = await res.json();
+			const temp = Math.round(data.current.temperature_2m);
+			const code = data.current.weather_code as number;
+			weatherIcon =
+				code === 0 ? '☀️' :
+				code <= 2 ? '🌤️' :
+				code === 3 ? '☁️' :
+				code <= 48 ? '🌫️' :
+				code <= 67 ? '🌧️' :
+				code <= 77 ? '🌨️' :
+				code <= 82 ? '🌦️' :
+				'⛈️';
+			weatherTemp = `${temp}°`;
+		} catch {
+			weatherIcon = '';
+			weatherTemp = '';
+		}
+	}
+
 	$: todayKey = format(today, 'yyyy-MM-dd');
 	$: dashboardTimestamp = new Intl.DateTimeFormat('en-US', {
 		weekday: 'short',
@@ -66,7 +107,7 @@
 		hour: 'numeric',
 		minute: '2-digit'
 	}).format(new Date());
-	$: cleaningShift = shift === 'am' ? 'morning' : 'evening';
+	$: cleaningShift = $shift === 'am' ? 'morning' : 'evening';
 	$: completion = cleaningCompletions[`${todayKey}-${cleaningShift}`];
 	$: completedTaskIds = new Set(completion?.completedTaskIds ?? []);
 	$: openTripByDog = buildOpenTripMap(dayTripLogs);
@@ -100,19 +141,19 @@
 
 	$: feedingTargets = activeDogs.filter((dog) => !isSameCalendarDay(dog.surgeryDate, today));
 	$: feedingDone =
-		feedingTargets.length > 0 && feedingTargets.every((dog) => hasFeedingLogForShift(dog.id, shift));
+		feedingTargets.length > 0 && feedingTargets.every((dog) => hasFeedingLogForShift(dog.id, $shift));
 	$: cleaningDone = hasAnyTask(
-		shift === 'am'
+		$shift === 'am'
 			? ['am-cleaner-clean-kennels', 'am-shared-scrub-kennels']
 			: ['pm-cleaner-hose-sanitize', 'pm-shared-scrub-kennels']
 	);
 	$: movementDone =
-		shift === 'am'
+		$shift === 'am'
 			? hasAnyTask(['am-shared-take-dogs-out'])
 			: dogsOut.length === 0 || hasAnyTask(['pm-cleaner-bring-dogs-in', 'pm-shared-bring-dogs-in']);
 	$: slackDone = Array.from(completedTaskIds).some((taskId) => taskId.includes('slack'));
 	$: todayItems =
-		shift === 'am'
+		$shift === 'am'
 			? [
 					{ id: 'feeding', label: 'Feeding (AM)', done: feedingDone },
 					{ id: 'cleaning', label: 'Cleaning (AM)', done: cleaningDone, checklistHref: '/cleaning' },
@@ -125,7 +166,7 @@
 					{ id: 'movement', label: 'Bring Dogs In @ 4:15', done: movementDone },
 					{ id: 'slack', label: 'Slack Update (PM)', done: slackDone }
 				];
-	$: needsAttention = buildNeedsAttention().slice(0, 4);
+	$: attentionItems = buildAttentionItems(playgroupSessions);
 
 	function buildOpenTripMap(logs: DayTripLog[]) {
 		return logs.reduce<Record<string, DayTripLog>>((map, log) => {
@@ -179,7 +220,7 @@
 	function todayItemBullet(id: TodayActionId) {
 		if (id === 'feeding') return '🥣';
 		if (id === 'cleaning') return '🧽';
-		if (id === 'movement') return shift === 'am' ? '🚶' : '🚪';
+		if (id === 'movement') return $shift === 'am' ? '🚶' : '🚪';
 		return '💬';
 	}
 
@@ -197,29 +238,55 @@
 		return `${days} day${days === 1 ? '' : 's'}`;
 	}
 
-	function buildNeedsAttention() {
-		const lines: string[] = [];
+	function buildAttentionItems(sessions: PlaygroupSession[]): AttentionItem[] {
+		const items: AttentionItem[] = [];
 
-		const bathDue = activeDogs
-			.map((dog) => ({ dog, days: daysSince(dog.lastBathDate, today) }))
-			.filter((entry) => entry.days !== null && entry.days >= 6)
-			.sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
-
-		for (const entry of bathDue.slice(0, 2)) {
-			lines.push(`${entry.dog.name} - bath ${entry.days} days`);
+		// Last playgroup date per dog
+		const lastPgMs: Record<string, number> = {};
+		for (const s of sessions) {
+			const t = toDate(s.date)?.getTime();
+			if (!t) continue;
+			for (const id of s.dogIds) {
+				if (!lastPgMs[id] || t > lastPgMs[id]) lastPgMs[id] = t;
+			}
 		}
 
-		const tripDue = activeDogs
-			.filter((dog) => !dog.isOutOnDayTrip)
-			.map((dog) => ({ dog, days: daysSince(dog.lastDayTripDate, today) }))
-			.filter((entry) => entry.days !== null && entry.days >= 14)
-			.sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
+		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none');
 
-		for (const entry of tripDue.slice(0, 2)) {
-			lines.push(`${entry.dog.name} - day trip ${dayGapLabel(entry.days ?? 0)}`);
+		// Bath overdue: >= 7 days since last bath (or intake if never bathed)
+		for (const dog of shelterDogs) {
+			const intakeDays = daysSince(dog.intakeDate, today) ?? 0;
+			const bathDays = daysSince(dog.lastBathDate, today);
+			const days = bathDays ?? (intakeDays >= 7 ? intakeDays : null);
+			if (days !== null && days >= 7) {
+				items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days });
+			}
 		}
 
-		return lines;
+		// Day trip overdue: eligible, not out, >= 14 days since last trip (or intake if never)
+		for (const dog of activeDogs) {
+			if (dog.isOutOnDayTrip || dog.dayTripStatus === 'ineligible' || dog.isolationStatus !== 'none') continue;
+			const intakeDays = daysSince(dog.intakeDate, today) ?? 0;
+			const tripDays = daysSince(dog.lastDayTripDate, today);
+			const days = tripDays ?? (intakeDays >= 14 ? intakeDays : null);
+			if (days !== null && days >= 14) {
+				items.push({ dogId: dog.id, dogName: dog.name, type: 'daytrip', days });
+			}
+		}
+
+		// Playgroup overdue: dog-friendly, not fostered/isolated, >= 10 days since last (or intake)
+		for (const dog of shelterDogs) {
+			if (dog.inFoster || dog.goodWithDogs === 'no') continue;
+			const intakeDays = daysSince(dog.intakeDate, today) ?? 0;
+			const lastMs = lastPgMs[dog.id] ?? null;
+			const pgDays = lastMs !== null ? (daysSince(new Date(lastMs), today) ?? null) : null;
+			const days = pgDays ?? (intakeDays >= 10 ? intakeDays : null);
+			if (days !== null && days >= 10) {
+				items.push({ dogId: dog.id, dogName: dog.name, type: 'playgroup', days });
+			}
+		}
+
+		return items.sort((a, b) => b.days - a.days);
 	}
 
 	function actionPending(id: TodayActionId) {
@@ -271,26 +338,26 @@
 	}
 
 	function primaryCleaningTaskId() {
-		return shift === 'am' ? 'am-cleaner-clean-kennels' : 'pm-cleaner-hose-sanitize';
+		return $shift === 'am' ? 'am-cleaner-clean-kennels' : 'pm-cleaner-hose-sanitize';
 	}
 
 	function primaryMovementTaskId() {
-		return shift === 'am' ? 'am-shared-take-dogs-out' : 'pm-cleaner-bring-dogs-in';
+		return $shift === 'am' ? 'am-shared-take-dogs-out' : 'pm-cleaner-bring-dogs-in';
 	}
 
 	function primarySlackTaskId() {
-		return shift === 'am' ? 'am-cleaner-slack' : 'pm-cleaner-slack';
+		return $shift === 'am' ? 'am-cleaner-slack' : 'pm-cleaner-slack';
 	}
 
 	async function markFeedingComplete() {
-		const targets = feedingTargets.filter((dog) => !hasFeedingLogForShift(dog.id, shift));
+		const targets = feedingTargets.filter((dog) => !hasFeedingLogForShift(dog.id, $shift));
 		await Promise.all(
 			targets.map((dog) =>
 				addFeedingLog(
 					dog.id,
 					{
 						date: today,
-						mealTime: shift,
+						mealTime: $shift,
 						amountEaten: 'all',
 						notes: 'Logged from dashboard'
 					},
@@ -354,7 +421,7 @@
 			}
 
 			if (actionId === 'movement') {
-				if (shift === 'pm' && dogsOut.length > 0) {
+				if ($shift === 'pm' && dogsOut.length > 0) {
 					await markAllDogsBackIn();
 					await loadBoard();
 				} else {
@@ -382,15 +449,25 @@
 			const active = dogs
 				.filter((dog) => dog.status === 'active')
 				.sort((a, b) => a.name.localeCompare(b.name));
+			recentlyAdopted = dogs
+				.filter((dog) => dog.status === 'adopted' && !dog.permanentFoster)
+				.sort((a, b) => {
+					const aTime = toDate(a.updatedAt)?.getTime() ?? 0;
+					const bTime = toDate(b.updatedAt)?.getTime() ?? 0;
+					return bTime - aTime;
+				})
+				.slice(0, 5);
 
-			const [tripLogs, feedingEntries] = await Promise.all([
+			const [tripLogs, feedingEntries, pgSessions] = await Promise.all([
 				listAllDayTripLogs(),
-				Promise.all(active.map(async (dog) => [dog.id, await listFeedingLogs(dog.id)] as const))
+				Promise.all(active.map(async (dog) => [dog.id, await listFeedingLogs(dog.id)] as const)),
+				listPlaygroupSessions()
 			]);
 
 			activeDogs = active;
 			dayTripLogs = tripLogs;
 			feedingLogsByDog = Object.fromEntries(feedingEntries);
+			playgroupSessions = pgSessions;
 			cleaningCompletions = readJson<Record<string, CompletionRecord>>(CLEANING_COMPLETIONS_KEY, {});
 		} catch (error) {
 			console.error(error);
@@ -408,34 +485,12 @@
 	<header class="planner-head">
 		<p class="planner-datestamp">
 			{dashboardTimestamp}
-			<span class="planner-weather">{weatherLabel}</span>
+			{#if weatherTemp}
+				<span class="planner-weather">
+					<span class="planner-weather-icon">{weatherIcon}</span>{weatherTemp}
+				</span>
+			{/if}
 		</p>
-		<div class="planner-controls" aria-label="Dashboard controls">
-			<button type="button" class="planner-control planner-control-label">Filter</button>
-			<button
-				type="button"
-				class="planner-control planner-control-arrow"
-				on:click={() => (shift = 'am')}
-				aria-label="Show AM shift"
-			>
-				‹
-			</button>
-			<button
-				type="button"
-				class="planner-control planner-control-today"
-				on:click={() => (shift = new Date().getHours() < 12 ? 'am' : 'pm')}
-			>
-				Today
-			</button>
-			<button
-				type="button"
-				class="planner-control planner-control-arrow"
-				on:click={() => (shift = 'pm')}
-				aria-label="Show PM shift"
-			>
-				›
-			</button>
-		</div>
 	</header>
 
 	{#if errorMessage}
@@ -476,13 +531,6 @@
 					</div>
 				{/each}
 			</div>
-			<button type="button" class="planner-add-row">
-				<span>Add section</span>
-				<span class="planner-add-icons" aria-hidden="true">
-					<span class="planner-add-dot">+</span>
-					<span class="planner-add-caret">⌃</span>
-				</span>
-			</button>
 		</section>
 
 		<section class="planner-list planner-list-rose">
@@ -538,13 +586,6 @@
 					{/each}
 				{/if}
 			</div>
-			<button type="button" class="planner-add-row">
-				<span>Add section</span>
-				<span class="planner-add-icons" aria-hidden="true">
-					<span class="planner-add-dot">+</span>
-					<span class="planner-add-caret">⌃</span>
-				</span>
-			</button>
 		</section>
 
 		<section class="planner-list planner-list-cyan">
@@ -570,6 +611,61 @@
 				{/if}
 			</div>
 		</section>
+
+		<section class="planner-list planner-list-amber">
+			<div class="planner-list-head">
+				<h2>Needs Attention</h2>
+				<span class="planner-pill planner-pill-amber">{attentionItems.length}</span>
+			</div>
+			<div class="planner-items">
+				{#if loading}
+					<p class="planner-empty-row">Loading...</p>
+				{:else if attentionItems.length === 0}
+					<p class="planner-empty-row">All caught up!</p>
+				{:else}
+					{#each attentionItems as item}
+						<a class="planner-row planner-row-link" href="/dogs/{item.dogId}">
+							<span class="planner-row-main">
+								<span class="planner-bullet">
+									{#if item.type === 'bath'}🛁{:else if item.type === 'daytrip'}🚗{:else}🐶{/if}
+								</span>
+								<span class="planner-row-text">{item.dogName}</span>
+							</span>
+							<span class="attention-tag attention-tag-{item.type}">
+								{item.type === 'bath' ? 'bath' : item.type === 'daytrip' ? 'trip' : 'playgroup'} · {dayGapLabel(item.days)}
+							</span>
+						</a>
+					{/each}
+				{/if}
+			</div>
+		</section>
+
+		<section class="planner-list planner-list-sage">
+			<div class="planner-list-head">
+				<h2>Recently Adopted</h2>
+				<span class="planner-pill planner-pill-sage">{recentlyAdopted.length}</span>
+			</div>
+			<div class="planner-items">
+				{#if loading}
+					<p class="planner-empty-row">Loading...</p>
+				{:else if recentlyAdopted.length === 0}
+					<p class="planner-empty-row">No recent adoptions.</p>
+				{:else}
+					{#each recentlyAdopted as dog}
+						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
+							<span class="planner-row-main">
+								{#if dog.photoUrl}
+									<img class="adopted-thumb" src={dog.photoUrl} alt={dog.name} />
+								{:else}
+									<span class="planner-bullet">🏠</span>
+								{/if}
+								<span class="planner-row-text">{dog.name}</span>
+							</span>
+						</a>
+					{/each}
+				{/if}
+			</div>
+		</section>
 	</div>
 
 	<button type="button" class="planner-fab" aria-label="Add board item">+</button>
@@ -582,7 +678,6 @@
 		gap: 0.62rem;
 		padding: 0.66rem 0.66rem 0.84rem;
 		border-radius: 1rem;
-		border: 1px solid #d3dbe6;
 		background:
 			radial-gradient(40rem 20rem at 100% -25%, rgba(57, 142, 193, 0.05) 0%, transparent 62%),
 			linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
@@ -611,10 +706,18 @@
 	}
 
 	.planner-weather {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
 		font-family: var(--font-ui);
-		font-size: 0.96rem;
+		font-size: 1.3rem;
 		font-weight: 600;
 		color: #6c7581;
+	}
+
+	.planner-weather-icon {
+		font-style: normal;
+		color: initial;
 	}
 
 	.planner-controls {
@@ -640,18 +743,71 @@
 		line-height: 1;
 	}
 
-	.planner-control-arrow {
-		padding: 0;
-		font-size: 1rem;
+	.planner-shift-toggle {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		width: 4.4rem;
+		height: 1.72rem;
+		padding: 0.18rem;
+		border: 1px solid #c8d4e2;
+		border-radius: 999px;
+		background: #eef3f9;
+		cursor: pointer;
+		transition: background 180ms ease, border-color 180ms ease;
 	}
 
-	.planner-control-label,
-	.planner-control-today {
-		min-width: 3.25rem;
+	.planner-shift-am {
+		background: #e8f3fd;
+		border-color: #a8cce8;
 	}
 
-	.planner-control-today {
-		background: #f1f4f8;
+	.planner-shift-pm {
+		background: #f0ecf8;
+		border-color: #c0aee0;
+	}
+
+	.planner-shift-pip {
+		position: absolute;
+		left: 0.18rem;
+		width: 1.9rem;
+		height: 1.32rem;
+		border-radius: 999px;
+		background: #ffffff;
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+		transition: transform 180ms ease;
+	}
+
+	.planner-shift-pip-right {
+		transform: translateX(2.12rem);
+	}
+
+	.planner-shift-label {
+		position: relative;
+		flex: 1;
+		text-align: center;
+		font-family: var(--font-ui);
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		line-height: 1;
+		pointer-events: none;
+	}
+
+	.planner-shift-am .planner-shift-label-am {
+		color: #2378b5;
+	}
+
+	.planner-shift-am .planner-shift-label-pm {
+		color: #8fa3b8;
+	}
+
+	.planner-shift-pm .planner-shift-label-am {
+		color: #9b8db8;
+	}
+
+	.planner-shift-pm .planner-shift-label-pm {
+		color: #6344a8;
 	}
 
 	.planner-error {
@@ -675,9 +831,8 @@
 		flex-direction: column;
 		gap: 0.42rem;
 		padding: 0.58rem 0.5rem 0.52rem;
-		border: 1px solid rgba(79, 96, 117, 0.16);
 		border-radius: 0.92rem;
-		min-height: 24.4rem;
+		min-height: 0;
 	}
 
 	.planner-list-sand {
@@ -694,6 +849,14 @@
 
 	.planner-list-cyan {
 		background: linear-gradient(180deg, #daeff0 0%, #d4ebed 100%);
+	}
+
+	.planner-list-amber {
+		background: linear-gradient(180deg, #faecd4 0%, #f5e6cb 100%);
+	}
+
+	.planner-list-sage {
+		background: linear-gradient(180deg, #ddeedd 0%, #d7e9d7 100%);
 	}
 
 	.planner-list-head {
@@ -742,6 +905,14 @@
 		background: #46a8b5;
 	}
 
+	.planner-pill-amber {
+		background: #b87828;
+	}
+
+	.planner-pill-sage {
+		background: #5a9e68;
+	}
+
 	.planner-items {
 		display: grid;
 		gap: 0.36rem;
@@ -767,6 +938,15 @@
 	.planner-row-click {
 		text-align: left;
 		cursor: pointer;
+	}
+
+	.planner-row-link {
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.planner-row-link:hover {
+		background: rgba(255, 255, 255, 0.7);
 	}
 
 	.planner-row-click:disabled {
@@ -850,44 +1030,41 @@
 		color: #5f6976;
 	}
 
-	.planner-add-row {
-		margin-top: auto;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		width: 100%;
-		padding: 0.14rem 0;
-		border: 0;
-		background: transparent;
-		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-		font-size: 2rem;
-		font-weight: 500;
-		letter-spacing: 0.01em;
-		color: #666d76;
-		text-align: left;
+	.adopted-thumb {
+		width: 2rem;
+		height: 2rem;
+		border-radius: 0.25rem;
+		object-fit: cover;
+		flex-shrink: 0;
 	}
 
-	.planner-add-icons {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.34rem;
-	}
-
-	.planner-add-dot {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 1.24rem;
-		height: 1.24rem;
-		border: 1px solid rgba(105, 116, 128, 0.32);
+	.attention-tag {
+		flex-shrink: 0;
+		padding: 0.14rem 0.38rem;
 		border-radius: 999px;
-		font-size: 0.84rem;
+		font-family: var(--font-ui);
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
 	}
 
-	.planner-add-caret {
-		font-size: 0.9rem;
-		opacity: 0.62;
+	.attention-tag-bath {
+		background: rgba(80, 120, 180, 0.14);
+		color: #3a6090;
 	}
+
+	.attention-tag-daytrip {
+		background: rgba(180, 100, 60, 0.14);
+		color: #8a4820;
+	}
+
+	.attention-tag-playgroup {
+		background: rgba(90, 150, 90, 0.14);
+		color: #3a6e3a;
+	}
+
+
 
 	.planner-fab {
 		position: absolute;
@@ -934,13 +1111,5 @@
 			gap: 0.3rem 0.56rem;
 		}
 
-		.planner-controls {
-			width: 100%;
-		}
-
-		.planner-control-label,
-		.planner-control-today {
-			flex: 1 1 0;
-		}
 	}
 </style>

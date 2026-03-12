@@ -6,6 +6,7 @@
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
+	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 
 	type TabItem = {
 		href: string;
@@ -37,6 +38,13 @@
 	let previousTabIndex = 0;
 	let turnDirection: 'forward' | 'backward' = 'forward';
 	let mobileNavOpen = false;
+	let asmAttempted = false;
+	let asmSyncing = false;
+	let asmSyncedAt: string | null = null;
+	let asmError: string | null = null;
+	let asmChanges: SyncChange[] = [];
+	let asmLogVisible = false;
+	let asmLogTimer: ReturnType<typeof setTimeout> | null = null;
 
 	onMount(() => {
 		initAuthListener();
@@ -45,6 +53,32 @@
 
 	$: if ($authReady && !$authUser) {
 		goto('/login');
+	}
+
+	$: if ($authReady && $authUser && !asmAttempted) {
+		asmAttempted = true;
+		asmSyncing = true;
+		void syncAnimalsFromASM()
+			.then((result) => {
+				asmSyncedAt = new Intl.DateTimeFormat('en-US', {
+					hour: 'numeric',
+					minute: '2-digit',
+					hour12: true
+				}).format(new Date());
+				if (result.changes.length > 0) {
+					asmChanges = result.changes;
+					asmLogVisible = true;
+					if (asmLogTimer) clearTimeout(asmLogTimer);
+					asmLogTimer = setTimeout(() => { asmLogVisible = false; }, 15000);
+				}
+			})
+			.catch((err: unknown) => {
+				asmError = err instanceof Error ? err.message : 'Sync failed';
+				console.error('[ASM sync]', asmError);
+			})
+			.finally(() => {
+				asmSyncing = false;
+			});
 	}
 
 	$: currentPath = $page.url.pathname;
@@ -141,6 +175,26 @@
 								<h1 class="board-title">{activeTab.label}</h1>
 							{/if}
 						</div>
+						{#if asmSyncing}
+							<span class="sync-badge sync-badge-loading" title="Syncing dogs from ASM…">
+								<svg class="sync-spinner" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="28" stroke-dashoffset="10"/></svg>
+								<span class="sync-label">Syncing</span>
+							</span>
+						{:else if asmSyncedAt}
+							<button
+								class="sync-badge sync-badge-done {asmChanges.length > 0 ? 'sync-badge-clickable' : ''}"
+								title={asmChanges.length > 0 ? 'Click to view changes' : 'Dogs synced from ASM'}
+								on:click={() => { if (asmChanges.length > 0) asmLogVisible = !asmLogVisible; }}
+							>
+								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5 6.5-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+								<span class="sync-label">Synced {asmSyncedAt}{asmChanges.length > 0 ? ` · ${asmChanges.length} change${asmChanges.length !== 1 ? 's' : ''}` : ''}</span>
+							</button>
+						{:else if asmError}
+							<span class="sync-badge sync-badge-error">
+								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v5M8 11v1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+								<span class="sync-label">Sync failed</span>
+							</span>
+						{/if}
 					</div>
 					<div class="topbar-meta">
 						<p class="board-meta whiteboard-hand erase-marker-blue">{todayLabel} {shiftLabel}</p>
@@ -165,6 +219,29 @@
 						</div>
 					</div>
 				</header>
+
+				{#if asmLogVisible && asmChanges.length > 0}
+					<div class="sync-log" role="log" aria-live="polite">
+						<div class="sync-log-header">
+							<span class="sync-log-title">ASM Sync — {asmChanges.length} dog{asmChanges.length !== 1 ? 's' : ''} updated</span>
+							<button class="sync-log-close" aria-label="Dismiss" on:click={() => { asmLogVisible = false; }}>
+								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+							</button>
+						</div>
+						<ul class="sync-log-list">
+							{#each asmChanges as change}
+								<li class="sync-log-item">
+									<span class="sync-log-name">{change.name}</span>
+									{#if change.isNew}
+										<span class="sync-log-tag sync-log-tag-new">New</span>
+									{:else}
+										<span class="sync-log-fields">{change.fields.join(', ')}</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
 
 				<div class="app-layout">
 					<nav id="primary-tabs" class={`tab-strip ${mobileNavOpen ? 'tab-strip-open' : ''}`} aria-label="Primary">
@@ -373,6 +450,161 @@
 		display: flex;
 		align-items: center;
 		gap: 0.68rem;
+	}
+
+	.sync-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.18rem 0.48rem 0.18rem 0.32rem;
+		border-radius: 999px;
+		font-family: var(--font-ui);
+		font-size: 0.65rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.sync-badge svg {
+		width: 0.78rem;
+		height: 0.78rem;
+		flex-shrink: 0;
+	}
+
+	.sync-badge-loading {
+		background: rgba(1, 107, 165, 0.09);
+		color: var(--layout-primary);
+		border: 1px solid rgba(1, 107, 165, 0.2);
+	}
+
+	.sync-badge-done {
+		background: rgba(59, 175, 43, 0.1);
+		color: #2a8c1a;
+		border: 1px solid rgba(59, 175, 43, 0.22);
+	}
+
+	.sync-badge-error {
+		background: rgba(200, 50, 30, 0.08);
+		color: #b83220;
+		border: 1px solid rgba(200, 50, 30, 0.22);
+	}
+
+	.sync-badge-clickable {
+		cursor: pointer;
+	}
+
+	.sync-badge-clickable:hover {
+		background: rgba(59, 175, 43, 0.18);
+	}
+
+	.sync-spinner {
+		animation: spin 900ms linear infinite;
+		transform-origin: center;
+	}
+
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
+
+	.sync-log {
+		position: fixed;
+		top: 3.8rem;
+		right: 0.85rem;
+		z-index: 30;
+		width: min(22rem, calc(100vw - 1.4rem));
+		background: rgba(255, 255, 255, 0.98);
+		border: 1px solid #c8d8e8;
+		border-radius: 0.85rem;
+		box-shadow: 0 12px 32px rgba(12, 34, 55, 0.18);
+		overflow: hidden;
+		animation: logSlideIn 160ms ease-out;
+	}
+
+	@keyframes logSlideIn {
+		from { opacity: 0; transform: translateY(-6px); }
+		to   { opacity: 1; transform: translateY(0); }
+	}
+
+	.sync-log-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.6rem 0.7rem 0.5rem;
+		border-bottom: 1px solid #dce8f2;
+		background: rgba(59, 175, 43, 0.07);
+	}
+
+	.sync-log-title {
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: #1e6b15;
+	}
+
+	.sync-log-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.3rem;
+		height: 1.3rem;
+		border: 0;
+		border-radius: 0.36rem;
+		background: transparent;
+		color: #6a8090;
+		flex-shrink: 0;
+	}
+
+	.sync-log-close:hover {
+		background: rgba(0,0,0,0.06);
+	}
+
+	.sync-log-close svg {
+		width: 0.72rem;
+		height: 0.72rem;
+	}
+
+	.sync-log-list {
+		margin: 0;
+		padding: 0.38rem 0;
+		list-style: none;
+		max-height: 16rem;
+		overflow-y: auto;
+	}
+
+	.sync-log-item {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		padding: 0.28rem 0.7rem;
+		font-family: var(--font-ui);
+		font-size: 0.7rem;
+	}
+
+	.sync-log-item:not(:last-child) {
+		border-bottom: 1px solid #edf3f8;
+	}
+
+	.sync-log-name {
+		font-weight: 700;
+		color: var(--layout-ink);
+		flex-shrink: 0;
+	}
+
+	.sync-log-tag-new {
+		font-size: 0.6rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		padding: 0.1rem 0.38rem;
+		border-radius: 999px;
+		background: rgba(1, 107, 165, 0.1);
+		color: var(--layout-primary);
+		border: 1px solid rgba(1, 107, 165, 0.2);
+	}
+
+	.sync-log-fields {
+		color: var(--layout-muted);
+		font-size: 0.67rem;
+		min-width: 0;
 	}
 
 	.board-meta {

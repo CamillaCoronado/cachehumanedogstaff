@@ -78,6 +78,7 @@ export interface Dog {
 	dayTripNotes: string | null;
 	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;
+	permanentFoster?: boolean;
 	isolationStatus: IsolationStatus;
 	isolationStartDate: DateValue | null;
 	status: DogStatus;

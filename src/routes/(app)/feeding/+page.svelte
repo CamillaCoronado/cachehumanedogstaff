@@ -6,7 +6,7 @@
 	import { formatDate, isSameCalendarDay, isSurgeryToday } from '$lib/utils/dates';
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import { isPuppyFood, isOwnFood, isNormalFood, foodTypeTone, foodTypeInstruction, foodTypeLabel } from '$lib/utils/feeding';
+	import { isPuppyFood, isOwnFood, isNormalFood, foodTypeTone, foodTypeInstruction, foodTypeLabel, estimateFoodAmountPerMeal } from '$lib/utils/feeding';
 
 	type RunId = number | 'puppy' | 'rock';
 	const MAX_DOGS_PER_RUN = 2;
@@ -284,7 +284,9 @@
 
 	function foodAmountLabel(dog: Dog) {
 		const value = dog.foodAmount?.trim();
-		return value || '—';
+		if (value) return value;
+		const estimated = estimateFoodAmountPerMeal({ weightLbs: dog.weightLbs, dateOfBirth: dog.dateOfBirth, foodType: dog.foodType });
+		return estimated || '—';
 	}
 
 	function hasSupplements(dog: Dog) {
@@ -1034,11 +1036,12 @@
 	.feeding-kennel-cell {
 		display: grid;
 		align-content: start;
-		gap: 0.07rem;
+		gap: 0.04rem;
 		border: 1px solid #c5d2e1;
 		background: rgba(255, 255, 255, 0.98);
-		padding: 0.2rem 0.26rem;
+		padding: 0.18rem 0.22rem;
 		border-radius: 0.16rem;
+		overflow: hidden;
 	}
 
 	.feeding-kennel-special {
@@ -1047,17 +1050,18 @@
 	}
 
 	.feeding-run-label {
-		font-size: clamp(0.68rem, 1.8vw, 0.78rem);
+		font-size: clamp(0.54rem, 1.4vw, 0.64rem);
 		font-weight: 700;
 		letter-spacing: 0.09em;
 		text-transform: uppercase;
 		color: #7086a3;
+		line-height: 1;
 	}
 
 	.feeding-run-entry {
 		margin: 0;
-		font-size: clamp(0.72rem, 2.2vw, 0.82rem);
-		line-height: 1.08;
+		font-size: clamp(0.6rem, 1.6vw, 0.7rem);
+		line-height: 1.15;
 		color: #1f3248;
 		white-space: nowrap;
 		overflow: hidden;
@@ -1076,13 +1080,13 @@
 
 	.feeding-run-kind {
 		font-family: var(--font-typewriter);
-		letter-spacing: 0.04em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
 		color: #4a6079;
 	}
 
 	.feeding-run-divider {
-		padding-inline: 0.08rem;
+		padding-inline: 0.05rem;
 		color: #7890ad;
 	}
 
@@ -1536,7 +1540,7 @@
 		}
 
 		.feeding-kennel-map {
-			--kennel-row: 5rem;
+			--kennel-row: 5.5rem;
 			--kennel-gap: 2rem;
 		}
 
