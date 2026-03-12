@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { format, startOfDay } from 'date-fns';
-	import { addFeedingLog, endDayTrip, listAllDayTripLogs, listDogs, listFeedingLogs, updateDog } from '$lib/data/dogs';
+	import { addFeedingLog, endDayTrip, listAllDayTripLogs, listAllFeedingLogsForToday, listDogs, updateDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
@@ -458,15 +458,15 @@
 				})
 				.slice(0, 5);
 
-			const [tripLogs, feedingEntries, pgSessions] = await Promise.all([
+			const [tripLogs, feedingByDog, pgSessions] = await Promise.all([
 				listAllDayTripLogs(),
-				Promise.all(active.map(async (dog) => [dog.id, await listFeedingLogs(dog.id)] as const)),
+				listAllFeedingLogsForToday(),
 				listPlaygroupSessions()
 			]);
 
 			activeDogs = active;
 			dayTripLogs = tripLogs;
-			feedingLogsByDog = Object.fromEntries(feedingEntries);
+			feedingLogsByDog = feedingByDog;
 			playgroupSessions = pgSessions;
 			cleaningCompletions = readJson<Record<string, CompletionRecord>>(CLEANING_COMPLETIONS_KEY, {});
 		} catch (error) {
@@ -533,7 +533,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-rose">
+		<section class="planner-list planner-list-rose" class:planner-list-empty={!loading && dogsOut.length === 0}>
 			<div class="planner-list-head">
 				<h2>Day Trips</h2>
 				<span class="planner-pill planner-pill-rose">{dogsOut.length}</span>
@@ -564,7 +564,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-lilac">
+		<section class="planner-list planner-list-lilac" class:planner-list-empty={!loading && managerOnlyDogs.length === 0}>
 			<div class="planner-list-head">
 				<h2>Manager Only</h2>
 				<span class="planner-pill planner-pill-lilac">{managerOnlyDogs.length}</span>
@@ -588,7 +588,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-cyan">
+		<section class="planner-list planner-list-cyan" class:planner-list-empty={!loading && isolationDogs.length === 0}>
 			<div class="planner-list-head">
 				<h2>Isolation</h2>
 				<span class="planner-pill planner-pill-cyan">{isolationDogs.length}</span>
@@ -612,7 +612,34 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-amber">
+		<section class="planner-list planner-list-sky" class:planner-list-empty={!loading && fosterDogs.length === 0}>
+			<div class="planner-list-head">
+				<h2>In Foster</h2>
+				<span class="planner-pill planner-pill-sky">{fosterDogs.length}</span>
+			</div>
+			<div class="planner-items">
+				{#if loading}
+					<p class="planner-empty-row">Loading...</p>
+				{:else if fosterDogs.length === 0}
+					<p class="planner-empty-row">No dogs in foster.</p>
+				{:else}
+					{#each fosterDogs as dog}
+						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
+							<span class="planner-row-main">
+								{#if dog.photoUrl}
+									<img class="adopted-thumb" src={dog.photoUrl} alt={dog.name} />
+								{:else}
+									<span class="planner-bullet">🏡</span>
+								{/if}
+								<span class="planner-row-text">{dog.name}</span>
+							</span>
+						</a>
+					{/each}
+				{/if}
+			</div>
+		</section>
+
+		<section class="planner-list planner-list-amber" class:planner-list-empty={!loading && attentionItems.length === 0}>
 			<div class="planner-list-head">
 				<h2>Needs Attention</h2>
 				<span class="planner-pill planner-pill-amber">{attentionItems.length}</span>
@@ -640,7 +667,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sage">
+		<section class="planner-list planner-list-sage" class:planner-list-empty={!loading && recentlyAdopted.length === 0}>
 			<div class="planner-list-head">
 				<h2>Recently Adopted</h2>
 				<span class="planner-pill planner-pill-sage">{recentlyAdopted.length}</span>
@@ -835,6 +862,10 @@
 		min-height: 0;
 	}
 
+	.planner-list-empty {
+		order: 10;
+	}
+
 	.planner-list-sand {
 		background: linear-gradient(180deg, #efe6d9 0%, #ece4d8 100%);
 	}
@@ -849,6 +880,14 @@
 
 	.planner-list-cyan {
 		background: linear-gradient(180deg, #daeff0 0%, #d4ebed 100%);
+	}
+
+	.planner-list-sky {
+		background: linear-gradient(180deg, #daeaf7 0%, #d4e4f2 100%);
+	}
+
+	.planner-pill-sky {
+		background: #3a7eb8;
 	}
 
 	.planner-list-amber {

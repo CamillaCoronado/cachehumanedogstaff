@@ -11,7 +11,7 @@ import type {
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { toDate, toDateString } from '$lib/utils/dates';
 import { db } from '$lib/firebase/config';
-import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
+import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 
 const DOGS_KEY = 'shelter.dogs';
 const NOTES_KEY = 'shelter.behavioralNotes';
@@ -671,6 +671,43 @@ export async function addBehavioralNote(dogId: string, note: string, profile?: U
 	stored[dogId] = list;
 	writeJson(NOTES_KEY, stored);
 	return entry;
+}
+
+export async function listAllFeedingLogsForToday(today = new Date()): Promise<Record<string, FeedingLog[]>> {
+	const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+	const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+
+	if (db) {
+		const snapshot = await getDocs(
+			query(
+				collectionGroup(db, 'feedingLogs'),
+				where('date', '>=', dayStart.toISOString()),
+				where('date', '<', dayEnd.toISOString())
+			)
+		);
+		const byDog: Record<string, FeedingLog[]> = {};
+		for (const docSnap of snapshot.docs) {
+			const dogId = docSnap.ref.parent.parent?.id;
+			if (!dogId) continue;
+			const log = deserializeFeedingLog({ id: docSnap.id, ...(docSnap.data() as StoredFeedingLog) });
+			(byDog[dogId] ??= []).push(log);
+		}
+		return byDog;
+	}
+
+	// localStorage fallback
+	const stored = readJson<LogMap<StoredFeedingLog>>(FEEDING_KEY, {});
+	const byDog: Record<string, FeedingLog[]> = {};
+	for (const [dogId, logs] of Object.entries(stored)) {
+		const dayLogs = logs
+			.map(deserializeFeedingLog)
+			.filter((log) => {
+				const t = toDate(log.date)?.getTime() ?? 0;
+				return t >= dayStart.getTime() && t < dayEnd.getTime();
+			});
+		if (dayLogs.length > 0) byDog[dogId] = dayLogs;
+	}
+	return byDog;
 }
 
 export async function listFeedingLogs(dogId: string) {
