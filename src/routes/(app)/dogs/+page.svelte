@@ -791,7 +791,7 @@
 								<p><span>Sex</span><strong class="card-fact-value">{sexLabel(dog.sex)}</strong></p>
 							</div>
 
-							<details class="card-kennel-section" open>
+							<details class="card-kennel-section">
 								<summary>Meet & Greet</summary>
 								<div class="kennel-section-body">
 									<div class="card-facts">
@@ -806,7 +806,7 @@
 								</div>
 							</details>
 
-							<details class="card-kennel-section" open>
+							<details class="card-kennel-section">
 								<summary>
 									<span class="summary-label">Pending items <span class="dog-details-count">{cardPendingItems.length}</span></span>
 								</summary>
