@@ -98,5 +98,10 @@ service cloud.firestore {
     match /{path=**}/dayTripLogs/{logId} {
       allow read: if isAuthenticated();
     }
+
+    // Supports collectionGroup('feedingLogs') query used by dashboard to check today's feedings.
+    match /{path=**}/feedingLogs/{logId} {
+      allow read: if isAuthenticated();
+    }
   }
 }

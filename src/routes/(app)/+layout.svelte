@@ -1,7 +1,11 @@
 <script lang="ts">
+	import { dev } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { injectAnalytics } from '@vercel/analytics/sveltekit';
+
+	injectAnalytics({ mode: dev ? 'development' : 'production' });
 	import { authReady, authUser, authProfile, initAuthListener } from '$lib/stores/auth';
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
