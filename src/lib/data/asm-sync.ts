@@ -10,6 +10,7 @@ export type SyncChange = {
 
 export type SyncResult = {
 	changes: SyncChange[];
+	archived: number;
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -211,10 +212,10 @@ function defaultStoredFields(now: string) {
  * - For brand-new dogs, sensible defaults are written so the app can render them immediately.
  * - Skips unchanged dogs — only writes to Firestore if an ASM field actually changed.
  * - Batches writes in chunks of 499 to stay under Firestore's 500-op limit.
- * - Does NOT automatically archive dogs removed from ASM — call markStaleAsmDogsArchived()
- *   separately if you want that behaviour.
+ * - Automatically archives (marks as 'adopted') any ASM-synced dogs that no longer
+ *   appear in the ASM response (i.e. were adopted, transferred, or deceased).
  *
- * Returns a SyncResult describing what was added or changed.
+ * Returns a SyncResult describing what was added, changed, or archived.
  */
 export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	if (!db) throw new Error('Firestore not available');
@@ -279,13 +280,17 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		await batch.commit();
 	}
 
+	const currentAsmIds = new Set(dogs.map((a) => a.ID));
+	const archived = await markStaleAsmDogsArchived(currentAsmIds);
+
 	return {
 		changes: pending.map(({ animal, isNew, changedFields }) => ({
 			id: String(animal.ID),
 			name: animal.ANIMALNAME ?? `Dog ${animal.ID}`,
 			isNew,
 			fields: changedFields
-		}))
+		})),
+		archived
 	};
 }
 

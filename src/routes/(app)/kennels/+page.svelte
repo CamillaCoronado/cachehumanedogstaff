@@ -771,12 +771,12 @@
 		display: grid;
 		grid-template-columns: repeat(17, minmax(0, 1fr));
 		grid-template-rows:
-			var(--kennel-row)
-			var(--kennel-row)
+			minmax(var(--kennel-row), auto)
+			minmax(var(--kennel-row), auto)
 			var(--kennel-gap)
-			var(--kennel-row)
+			minmax(var(--kennel-row), auto)
 			var(--kennel-gap)
-			var(--kennel-row);
+			minmax(var(--kennel-row), auto);
 		column-gap: 0;
 		row-gap: 0;
 		position: relative;
@@ -991,7 +991,7 @@
 	@media (max-width: 640px) {
 		.kennel-map {
 			grid-template-columns: repeat(4, minmax(0, 1fr));
-			grid-template-rows: repeat(var(--mobile-rows), var(--kennel-row));
+			grid-template-rows: repeat(var(--mobile-rows), minmax(var(--kennel-row), auto));
 			row-gap: 0;
 		}
 

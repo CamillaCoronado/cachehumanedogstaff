@@ -69,7 +69,7 @@
 					minute: '2-digit',
 					hour12: true
 				}).format(new Date());
-				if (result.changes.length > 0) {
+				if (result.changes.length > 0 || result.archived > 0) {
 					asmChanges = result.changes;
 					asmLogVisible = true;
 					if (asmLogTimer) clearTimeout(asmLogTimer);
