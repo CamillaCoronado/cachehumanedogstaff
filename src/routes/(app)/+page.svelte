@@ -702,6 +702,7 @@
 	.planner-dashboard {
 		position: relative;
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.62rem;
 		padding: 0.66rem 0.66rem 0.84rem;
 		border-radius: 1rem;
@@ -850,6 +851,7 @@
 
 	.planner-columns {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.58rem;
 	}
 
