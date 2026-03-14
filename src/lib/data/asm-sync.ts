@@ -314,7 +314,13 @@ export async function markStaleAsmDogsArchived(currentAsmIds: Set<number>): Prom
 	for (let i = 0; i < staleDocs.length; i += BATCH_SIZE) {
 		const batch = writeBatch(db);
 		for (const staleDoc of staleDocs.slice(i, i + BATCH_SIZE)) {
-			batch.set(staleDoc.ref, { status: 'adopted', _lastSyncedAt: new Date().toISOString() }, { merge: true });
+			batch.set(staleDoc.ref, {
+				status: 'adopted',
+				outdoorKennelAssignment: '',
+				isOutOnDayTrip: false,
+				currentDayTripStartedAt: null,
+				_lastSyncedAt: new Date().toISOString()
+			}, { merge: true });
 		}
 		await batch.commit();
 	}

@@ -588,7 +588,12 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 }
 
 export async function archiveDog(id: string) {
-	return updateDog(id, { status: 'adopted' });
+	return updateDog(id, {
+		status: 'adopted',
+		outdoorKennelAssignment: '',
+		isOutOnDayTrip: false,
+		currentDayTripStartedAt: null
+	});
 }
 
 export async function returnDog(id: string) {
