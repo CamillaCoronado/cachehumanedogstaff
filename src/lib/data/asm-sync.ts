@@ -237,10 +237,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 	const allAnimals: AsmAnimal[] = await res.json();
 
-	// DEBUG: dump complete raw Petal record
-	const petal = allAnimals.find((a) => (a.ANIMALNAME ?? '').toLowerCase().includes('petal'));
-	if (petal) console.log('[ASM DEBUG] Petal raw:', JSON.stringify(petal));
-
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
 		(a) =>
