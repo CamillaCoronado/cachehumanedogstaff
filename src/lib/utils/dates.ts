@@ -14,7 +14,15 @@ const MIN_DAYS_AFTER_SURGERY_FOR_BATH = 10;
 export function toDate(value: DateValue | string | null | undefined): Date | null {
 	if (!value) return null;
 	if (value instanceof Date) return value;
-	if (typeof value === 'string') return new Date(value);
+	if (typeof value === 'string') {
+		// Date-only strings (YYYY-MM-DD) must be parsed as local midnight, not UTC midnight,
+		// otherwise timezone offsets shift the date by one day in US timezones.
+		if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+			const [y, m, d] = value.split('-').map(Number);
+			return new Date(y, m - 1, d);
+		}
+		return new Date(value);
+	}
 	if (typeof (value as { toDate?: () => Date }).toDate === 'function') {
 		return (value as { toDate: () => Date }).toDate();
 	}
