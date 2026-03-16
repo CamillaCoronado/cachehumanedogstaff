@@ -235,6 +235,13 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 	const allAnimals: AsmAnimal[] = await res.json();
 
+	// DEBUG: log all non-empty fields for Petal to find transfer name
+	const petal = allAnimals.find((a) => (a.ANIMALNAME ?? '').toLowerCase().includes('petal'));
+	if (petal) {
+		const nonEmpty = Object.entries(petal as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== 0 && !Array.isArray(v));
+		console.log('[ASM DEBUG] Petal non-empty fields:', Object.fromEntries(nonEmpty));
+	}
+
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
 		(a) =>
