@@ -13,7 +13,7 @@
 		IsolationStatus,
 		PottyTrainedStatus
 	} from '$lib/types';
-	import { isMondayOrThursday, formatDate, toDate } from '$lib/utils/dates';
+	import { formatDate, toDate } from '$lib/utils/dates';
 	import { estimateFoodAmountPerMeal } from '$lib/utils/feeding';
 	import { deleteDogPhotoByUrl, uploadDogPhotoDataUrl } from '$lib/firebase/storage';
 	import { getStorageUploadErrorMessage } from '$lib/firebase/errors';
@@ -22,7 +22,6 @@
 	export let disabled = false;
 	const dispatch = createEventDispatcher();
 
-	let surgeryError = '';
 	let suggestedFoodAmount = '';
 	let lastAutoFoodAmount = '';
 	let photoUploadError = '';
@@ -121,16 +120,13 @@
 		const date = dateValue ? new Date(dateValue) : null;
 		const next = { ...value, [field]: date } as Dog;
 		value = field === 'dateOfBirth' ? maybeAutofillFoodAmount(value, next) : next;
-		if (field === 'surgeryDate') {
-			surgeryError = date && !isMondayOrThursday(date) ? 'Surgery must be scheduled on Monday or Thursday.' : '';
-		}
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleDateTimeChange(field: keyof Dog, dateValue: string) {
 		const date = dateValue ? new Date(dateValue) : null;
 		value = { ...value, [field]: date } as Dog;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleInput(field: keyof Dog, newValue: string) {
@@ -143,12 +139,12 @@
 				lastAutoFoodAmount = suggestedFoodAmount;
 			}
 		}
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleCheckbox(field: keyof Dog, checked: boolean) {
 		value = { ...value, [field]: checked } as Dog;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleOwnFoodChange(checked: boolean) {
@@ -157,13 +153,13 @@
 			hasOwnFood: checked,
 			transitionToHills: checked ? (value.transitionToHills ?? null) : null
 		} as Dog;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleTransitionToHillsSelect(newValue: string) {
 		const transitionToHills = newValue === 'yes' ? true : newValue === 'no' ? false : null;
 		value = { ...value, transitionToHills } as Dog;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleSelect(field: keyof Dog, newValue: string) {
@@ -177,13 +173,13 @@
 						? (value.dayTripManagerOnly ? null : (value.dayTripIneligibleReason ?? 'other'))
 						: null
 			} as Dog;
-			dispatch('change', { value, valid: !surgeryError });
+			dispatch('change', { value, valid: true });
 			return;
 		}
 
 		const next = { ...value, [field]: newValue } as Dog;
 		value = field === 'foodType' ? maybeAutofillFoodAmount(value, next) : next;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	async function handlePhotoUpload(event: Event) {
@@ -217,7 +213,7 @@
 				mimeType: file.type
 			});
 			value = { ...value, photoUrl: uploadedUrl } as Dog;
-			dispatch('change', { value, valid: !surgeryError });
+			dispatch('change', { value, valid: true });
 			if (previousPhotoUrl && previousPhotoUrl !== uploadedUrl) {
 				try {
 					await deleteDogPhotoByUrl(previousPhotoUrl);
@@ -247,7 +243,7 @@
 			photoUploading = false;
 		}
 		value = { ...value, photoUrl: null } as Dog;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function readFileAsDataUrl(file: File) {
@@ -300,7 +296,7 @@
 			handlingLevel: checked ? 'manager_only' : value.handlingLevel
 		};
 		value = next;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleManagerOnlyReasonSelect(reason: DayTripIneligibleReason) {
@@ -313,7 +309,7 @@
 			handlingLevel: 'manager_only'
 		};
 		value = next;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function handleIneligibleReasonSelect(reason: DayTripIneligibleReason) {
@@ -322,7 +318,7 @@
 			dayTripStatus: 'ineligible',
 			dayTripIneligibleReason: reason
 		} as Dog;
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function parseWeightLbs(input: string): number | null {
@@ -334,7 +330,7 @@
 	function handleWeightInput(input: string) {
 		const next = { ...value, weightLbs: parseWeightLbs(input) } as Dog;
 		value = maybeAutofillFoodAmount(value, next);
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function maybeAutofillFoodAmount(previous: Dog, next: Dog): Dog {
@@ -380,21 +376,21 @@
 			next[index] = new Date(dateValue);
 		}
 		value = { ...value, reentryDates: normalizeReentryDates(next) };
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function addReentryDate() {
 		const seed = toDate(value.intakeDate) ?? new Date();
 		const next = [...(value.reentryDates ?? []), seed];
 		value = { ...value, reentryDates: normalizeReentryDates(next) };
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function removeReentryDate(index: number) {
 		const next = [...(value.reentryDates ?? [])];
 		next.splice(index, 1);
 		value = { ...value, reentryDates: normalizeReentryDates(next) };
-		dispatch('change', { value, valid: !surgeryError });
+		dispatch('change', { value, valid: true });
 	}
 
 	function normalizeReentryDates(values: Array<DateValue | string | null | undefined>) {
@@ -869,16 +865,13 @@
 		<label class="form-label typewriter">Surgery Date</label>
 		<input
 			type="date"
-			class={`form-input ${surgeryError ? 'form-input-error' : ''}`}
+			class="form-input"
 			disabled={disabled}
 			value={toDate(value.surgeryDate)?.toISOString().slice(0, 10) ?? ''}
 			on:change={(event) => handleDateChange('surgeryDate', event.currentTarget.value)}
 		/>
 		{#if value.surgeryDate}
 			<p class="form-hint">Currently: {formatDate(value.surgeryDate)}</p>
-		{/if}
-		{#if surgeryError}
-			<p class="form-error">{surgeryError}</p>
 		{/if}
 	</div>
 

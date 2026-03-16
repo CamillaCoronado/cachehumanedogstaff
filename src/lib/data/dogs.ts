@@ -591,6 +591,7 @@ export async function archiveDog(id: string) {
 	return updateDog(id, {
 		status: 'adopted',
 		outdoorKennelAssignment: '',
+		inFoster: false,
 		isOutOnDayTrip: false,
 		currentDayTripStartedAt: null
 	});

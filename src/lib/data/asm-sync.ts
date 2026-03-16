@@ -317,6 +317,7 @@ export async function markStaleAsmDogsArchived(currentAsmIds: Set<number>): Prom
 			batch.set(staleDoc.ref, {
 				status: 'adopted',
 				outdoorKennelAssignment: '',
+				inFoster: false,
 				isOutOnDayTrip: false,
 				currentDayTripStartedAt: null,
 				_lastSyncedAt: new Date().toISOString()

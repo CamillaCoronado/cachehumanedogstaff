@@ -450,7 +450,7 @@
 				.filter((dog) => dog.status === 'active')
 				.sort((a, b) => a.name.localeCompare(b.name));
 			recentlyAdopted = dogs
-				.filter((dog) => dog.status === 'adopted' && !dog.permanentFoster)
+				.filter((dog) => dog.status === 'adopted' && !dog.permanentFoster && !dog.inFoster)
 				.sort((a, b) => {
 					const aTime = toDate(a.updatedAt)?.getTime() ?? 0;
 					const bTime = toDate(b.updatedAt)?.getTime() ?? 0;
