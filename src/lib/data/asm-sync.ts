@@ -94,6 +94,8 @@ interface AsmAnimal {
 	DECEASEDDATE: string | null;
 	BROUGHTINBYOWNERNAME: string | null;
 	ORIGINALOWNERNAME: string | null;
+	// 1 = transferred in from another organization
+	ISTRANSFER: number;
 	[key: string]: unknown;
 }
 
@@ -163,7 +165,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		pottyTrained: normalizeHouseTrained(animal.ISHOUSETRAINED),
 		energyLevel: normalizeEnergy(animal.ENERGYLEVEL),
 		photoUrl,
-		origin: animal.BROUGHTINBYOWNERNAME || animal.ORIGINALOWNERNAME || 'ASM',
+		origin: animal.BROUGHTINBYOWNERNAME || animal.ORIGINALOWNERNAME || (animal.ISTRANSFER === 1 ? 'Transfer' : 'ASM'),
 		inFoster,
 		permanentFoster: isPermanentFoster,
 		// Permanent fosters won't return to shelter — archive them
@@ -232,15 +234,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		throw new Error(`ASM proxy error ${res.status}${detail ? `: ${detail}` : ''}`);
 	}
 	const allAnimals: AsmAnimal[] = await res.json();
-
-	// DEBUG: log all origin-related field values for Petal
-	const petal = allAnimals.find((a) => (a.ANIMALNAME ?? '').toLowerCase().includes('petal'));
-	if (petal) {
-		const p = petal as Record<string, unknown>;
-		const originKeys = Object.keys(p).filter(k => k.toLowerCase().includes('transfer') || k.toLowerCase().includes('origin') || k.toLowerCase().includes('brought'));
-		const originValues = Object.fromEntries(originKeys.map(k => [k, p[k]]));
-		console.log('[ASM DEBUG] Petal origin field values:', JSON.stringify(originValues, null, 2));
-	}
 
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
