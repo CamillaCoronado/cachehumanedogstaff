@@ -40,6 +40,7 @@ export interface Dog {
 	hasOwnFood?: boolean;
 	transitionToHills?: boolean | null;
 	origin: string;
+	color?: string;
 	markings?: string;
 	hiddenComments?: string;
 	description?: string;

@@ -661,7 +661,7 @@
 										<p><span>Breed:</span> <strong class="detail-value">{dog.breed || 'Unknown'}</strong></p>
 										<p><span>Estimated Birthday:</span> <strong class="detail-value">{formatDate(dog.dateOfBirth)}</strong></p>
 										<p><span>Age:</span> <strong class="detail-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
-										<p><span>Color:</span> <strong class="detail-value">Unknown</strong></p>
+										<p><span>Color:</span> <strong class="detail-value">{dog.color || '—'}</strong></p>
 										<p><span>Sex:</span> <strong class="detail-value">{sexLabel(dog.sex)}</strong></p>
 										<p><span>Weight:</span> <strong class="detail-value">{dog.weightLbs ? `${dog.weightLbs} lbs` : 'Unknown'}</strong></p>
 										<p><span>Energy:</span> <strong class="detail-value">{energyLabel(dog.energyLevel)}</strong></p>

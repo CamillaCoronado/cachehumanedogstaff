@@ -16,6 +16,7 @@ export type SyncResult = {
 const FIELD_LABELS: Record<string, string> = {
 	name: 'Name',
 	breed: 'Breed',
+	color: 'Color',
 	sex: 'Sex',
 	markings: 'Markings',
 	description: 'Notes',
@@ -52,6 +53,7 @@ interface AsmAnimal {
 	ANIMALNAME: string;
 	SPECIESNAME: string;
 	BREEDNAME: string;
+	BASECOLOURNAME: string;
 	SEXNAME: string;
 	DISPLAYLOCATIONNAME: string;
 	SHELTERCODE: string;
@@ -142,6 +144,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 	return {
 		name: animal.ANIMALNAME ?? '',
 		breed: animal.BREEDNAME ?? '',
+		color: animal.BASECOLOURNAME ?? '',
 		sex: normalizeSex(animal.SEXNAME),
 		// outdoorKennelAssignment intentionally omitted — managed by app only
 		markings: animal.MARKINGS ?? '',
