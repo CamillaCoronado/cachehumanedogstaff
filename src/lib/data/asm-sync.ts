@@ -233,6 +233,15 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 	const allAnimals: AsmAnimal[] = await res.json();
 
+	// DEBUG: log all origin-related field values for Petal
+	const petal = allAnimals.find((a) => (a.ANIMALNAME ?? '').toLowerCase().includes('petal'));
+	if (petal) {
+		const p = petal as Record<string, unknown>;
+		const originKeys = Object.keys(p).filter(k => k.toLowerCase().includes('transfer') || k.toLowerCase().includes('origin') || k.toLowerCase().includes('brought'));
+		const originValues = Object.fromEntries(originKeys.map(k => [k, p[k]]));
+		console.log('[ASM DEBUG] Petal origin field values:', JSON.stringify(originValues, null, 2));
+	}
+
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
 		(a) =>
