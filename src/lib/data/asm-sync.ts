@@ -275,6 +275,8 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			const docId = String(animal.ID);
 			const ref = doc(db, 'dogs', docId);
 			const asmFields = asmToStoredFields(animal, now);
+			// Don't overwrite a manually-set origin with an empty value from ASM.
+			if (!asmFields.origin) delete (asmFields as Record<string, unknown>).origin;
 			if (isNew) {
 				batch.set(ref, { id: docId, ...defaultStoredFields(now), ...asmFields }, { merge: true });
 			} else {

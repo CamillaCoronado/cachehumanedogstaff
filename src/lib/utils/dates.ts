@@ -21,6 +21,12 @@ export function toDate(value: DateValue | string | null | undefined): Date | nul
 			const [y, m, d] = value.split('-').map(Number);
 			return new Date(y, m - 1, d);
 		}
+		// ISO strings previously saved as UTC midnight (T00:00:00) represent date-only values;
+		// extract the date portion and parse as local midnight to avoid the same off-by-one.
+		const utcMidnight = value.match(/^(\d{4})-(\d{2})-(\d{2})T00:00:00/);
+		if (utcMidnight) {
+			return new Date(Number(utcMidnight[1]), Number(utcMidnight[2]) - 1, Number(utcMidnight[3]));
+		}
 		return new Date(value);
 	}
 	if (typeof (value as { toDate?: () => Date }).toDate === 'function') {
