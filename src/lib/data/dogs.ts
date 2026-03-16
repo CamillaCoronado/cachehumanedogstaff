@@ -144,10 +144,16 @@ function dogNameVariants(name: string): string[] {
 	return [lower];
 }
 
+// ASM-synced dogs always have purely numeric document IDs (String(animal.ID)).
+// Manually-created dogs have UUID-style IDs.
+function isAsmDog(dog: Dog) {
+	return /^\d+$/.test(dog.id);
+}
+
 // When ASM and manually-entered dogs represent the same animal, keep the ASM copy.
 function deduplicateAgainstAsm(dogs: Dog[]): Dog[] {
-	const asmDogs = dogs.filter((d) => d.origin === 'ASM');
-	const nonAsmDogs = dogs.filter((d) => d.origin !== 'ASM');
+	const asmDogs = dogs.filter(isAsmDog);
+	const nonAsmDogs = dogs.filter((d) => !isAsmDog(d));
 
 	// Build a set of every name variant that exists in ASM dogs
 	const asmNames = new Set<string>();

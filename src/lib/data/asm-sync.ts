@@ -42,7 +42,8 @@ const FIELD_LABELS: Record<string, string> = {
 	photoUrl: 'Photo',
 	inFoster: 'Foster',
 	status: 'Status',
-	asmShelterCode: 'Shelter code'
+	asmShelterCode: 'Shelter code',
+	origin: 'Origin'
 };
 
 // Raw shape returned by ASM API (ALL_CAPS field names)
@@ -91,6 +92,8 @@ interface AsmAnimal {
 	// Non-zero = animal has left shelter. 2 = foster, 1 = adoption, 3 = transfer, etc.
 	ACTIVEMOVEMENTTYPE: number;
 	DECEASEDDATE: string | null;
+	TRANSFERFROMNAME: string | null;
+	ORIGINALOWNERNAME: string | null;
 	[key: string]: unknown;
 }
 
@@ -160,6 +163,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		pottyTrained: normalizeHouseTrained(animal.ISHOUSETRAINED),
 		energyLevel: normalizeEnergy(animal.ENERGYLEVEL),
 		photoUrl,
+		origin: animal.TRANSFERFROMNAME || animal.ORIGINALOWNERNAME || '',
 		inFoster,
 		permanentFoster: isPermanentFoster,
 		// Permanent fosters won't return to shelter — archive them
@@ -179,7 +183,7 @@ function defaultStoredFields(now: string) {
 		dietaryNotes: '',
 		hasOwnFood: false,
 		transitionToHills: null,
-		origin: 'ASM',
+		origin: '',
 		outdoorKennelAssignment: '',
 		hiddenComments: '',
 		warningNotes: '',
