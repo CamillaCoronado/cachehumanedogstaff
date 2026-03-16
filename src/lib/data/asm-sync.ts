@@ -96,6 +96,8 @@ interface AsmAnimal {
 	ORIGINALOWNERNAME: string | null;
 	// 1 = transferred in from another organization
 	ISTRANSFER: number;
+	// "Transfer In", "Owner Surrender", "Stray", etc.
+	ENTRYTYPENAME: string | null;
 	[key: string]: unknown;
 }
 
@@ -165,7 +167,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		pottyTrained: normalizeHouseTrained(animal.ISHOUSETRAINED),
 		energyLevel: normalizeEnergy(animal.ENERGYLEVEL),
 		photoUrl,
-		origin: animal.BROUGHTINBYOWNERNAME || animal.ORIGINALOWNERNAME || (animal.ISTRANSFER === 1 ? 'Transfer' : 'ASM'),
+		origin: animal.BROUGHTINBYOWNERNAME || animal.ORIGINALOWNERNAME || animal.ENTRYTYPENAME || 'ASM',
 		inFoster,
 		permanentFoster: isPermanentFoster,
 		// Permanent fosters won't return to shelter — archive them
@@ -235,12 +237,9 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 	const allAnimals: AsmAnimal[] = await res.json();
 
-	// DEBUG: log all non-empty fields for Petal to find transfer name
+	// DEBUG: dump complete raw Petal record
 	const petal = allAnimals.find((a) => (a.ANIMALNAME ?? '').toLowerCase().includes('petal'));
-	if (petal) {
-		const nonEmpty = Object.entries(petal as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== 0 && !Array.isArray(v));
-		console.log('[ASM DEBUG] Petal non-empty fields:', Object.fromEntries(nonEmpty));
-	}
+	if (petal) console.log('[ASM DEBUG] Petal raw:', JSON.stringify(petal));
 
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
