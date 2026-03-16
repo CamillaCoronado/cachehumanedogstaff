@@ -37,6 +37,7 @@ interface StoredDog {
 	hasOwnFood?: boolean;
 	transitionToHills?: boolean | null;
 	origin?: string;
+	color?: string;
 	markings?: string;
 	hiddenComments?: string;
 	description?: string;
@@ -298,6 +299,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		hasOwnFood: stored.hasOwnFood ?? false,
 		transitionToHills: typeof stored.transitionToHills === 'boolean' ? stored.transitionToHills : null,
 		origin: stored.origin ?? '',
+		color: stored.color ?? '',
 		markings: stored.markings ?? '',
 		hiddenComments: stored.hiddenComments ?? '',
 		description: stored.description ?? '',
