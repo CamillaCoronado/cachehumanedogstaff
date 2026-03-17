@@ -203,7 +203,7 @@
 		  isManagerHandlingOnly ||
 		  isStaffHandlingOnly
 			? 'whiteboard-tag-red'
-			: dayTripEligibility.status === 'difficult'
+			: dayTripEligibility.status === 'difficult' || stripHasCarefulWarning
 				? 'whiteboard-tag-yellow'
 				: 'whiteboard-tag-green'
 		: 'whiteboard-tag-green';
