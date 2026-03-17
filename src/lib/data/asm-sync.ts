@@ -292,8 +292,19 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 
 	const currentAsmIds = new Set(dogs.map((a) => a.ID));
-	const currentAsmNames = new Set(dogs.map((a) => (a.ANIMALNAME ?? '').toLowerCase()));
-	const archived = await markStaleAsmDogsArchived(currentAsmIds, currentAsmNames);
+	// Dogs ASM explicitly reports as adopted/transferred/deceased — use shelter code
+	// to match Firestore docs that may not have asmId (e.g. manually added and later found in ASM)
+	const adoptedShelterCodes = new Set(
+		allAnimals
+			.filter(
+				(a) =>
+					(a.SPECIESNAME ?? '').toLowerCase() === 'dog' &&
+					((a.ACTIVEMOVEMENTTYPE > 0 && a.ACTIVEMOVEMENTTYPE !== 2) || Boolean(a.DECEASEDDATE))
+			)
+			.map((a) => a.SHELTERCODE)
+			.filter(Boolean) as string[]
+	);
+	const archived = await markStaleAsmDogsArchived(currentAsmIds, adoptedShelterCodes);
 
 	return {
 		changes: pending.map(({ animal, isNew, changedFields }) => ({
@@ -311,21 +322,19 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
  * ASM response. Only affects docs that have an `asmId` field (i.e. were synced from ASM).
  * Safe to call after syncAnimalsFromASM().
  */
-export async function markStaleAsmDogsArchived(currentAsmIds: Set<number>, currentAsmNames?: Set<string>): Promise<number> {
+export async function markStaleAsmDogsArchived(
+	currentAsmIds: Set<number>,
+	adoptedShelterCodes: Set<string> = new Set()
+): Promise<number> {
 	if (!db) throw new Error('Firestore not available');
 
 	const snapshot = await getDocs(collection(db, 'dogs'));
 	const staleDocs = snapshot.docs.filter((d) => {
 		const data = d.data();
-		if (data.status === 'adopted') return false;
 		const asmId = data.asmId as number | undefined;
-		// ASM-linked doc: archive if no longer in ASM response
-		if (asmId !== undefined) return !currentAsmIds.has(asmId);
-		// Manually-added doc: archive if name no longer appears in any current ASM shelter dog
-		if (currentAsmNames) {
-			const name = (data.name ?? '').toLowerCase();
-			return name.length > 0 && !currentAsmNames.has(name);
-		}
+		const shelterCode = data.asmShelterCode as string | undefined;
+		if (asmId !== undefined && !currentAsmIds.has(asmId)) return true;
+		if (shelterCode && adoptedShelterCodes.has(shelterCode)) return true;
 		return false;
 	});
 

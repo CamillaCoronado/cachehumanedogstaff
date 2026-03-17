@@ -277,7 +277,7 @@
 				? 'whiteboard-note-red'
 				: dog &&
 					  !dog.isOutOnDayTrip &&
-					  dog.dayTripStatus === 'difficult'
+					  (dog.dayTripStatus === 'difficult' || stripHasCarefulWarning)
 					? 'whiteboard-note-yellow'
 					: '';
 
@@ -687,7 +687,7 @@
 								<details class="kennel-section">
 									<summary>Behavior & Home Fit</summary>
 									<div class="kennel-section-body kennel-facts">
-										<p><span>Description:</span> <strong class="detail-note">{dog.dietaryNotes || dog.dayTripNotes || 'No additional profile notes logged yet.'}</strong></p>
+										<p><span>Description:</span> <strong class="detail-note">{dog.description || 'No additional profile notes logged yet.'}</strong></p>
 										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
 										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
 										<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
