@@ -7,7 +7,7 @@
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
 	import { listDogs, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
-	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
+	import type { Dog, DayTripStatus, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -512,10 +512,10 @@
 		return sortDir === 'asc' ? ' ↑' : ' ↓';
 	}
 
-	function photoStripeClass(dog: Dog): string {
+	function photoStripeClass(dog: Dog, tripStatus: DayTripStatus): string {
 		const level = dogHandlingLevel(dog);
 		if (level === 'manager_only') return 'card-stripe-red';
-		if (level === 'staff_only') return 'card-stripe-yellow';
+		if (level === 'staff_only' || tripStatus === 'ineligible' || tripStatus === 'difficult') return 'card-stripe-yellow';
 		return 'card-stripe-green';
 	}
 
@@ -721,7 +721,7 @@
 							<header class="dog-card-header">
 								<div class="card-photo-wrap">
 									<div class="card-photo-frame">
-										<div class={`card-photo-stripe ${photoStripeClass(dog)}`} aria-hidden="true"></div>
+										<div class={`card-photo-stripe ${photoStripeClass(dog, tripEligibility.status)}`} aria-hidden="true"></div>
 										{#if dog.photoUrl}
 											<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true" />
 										{:else}
