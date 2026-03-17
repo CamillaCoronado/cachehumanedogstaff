@@ -240,13 +240,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 	const allAnimals: AsmAnimal[] = await res.json();
 
-	// DEBUG: check if Milo/Daisy appear in ASM response
-	['milo', 'daisy'].forEach(name => {
-		const found = allAnimals.find(a => (a.ANIMALNAME ?? '').toLowerCase() === name);
-		if (found) console.log(`[ASM DEBUG] ${name} in response: ACTIVEMOVEMENTTYPE=${found.ACTIVEMOVEMENTTYPE}, DECEASEDDATE=${found.DECEASEDDATE}, ID=${found.ID}`);
-		else console.log(`[ASM DEBUG] ${name} NOT in ASM response`);
-	});
-
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
 		(a) =>
@@ -258,14 +251,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	// 3. Fetch existing docs to diff against
 	const snapshot = await getDocs(collection(db, 'dogs'));
 	const existingDocs = new Map(snapshot.docs.map((d) => [d.id, d.data()]));
-
-	// DEBUG: check Milo/Daisy asmId in Firestore
-	snapshot.docs.forEach(d => {
-		const name = (d.data().name ?? '').toLowerCase();
-		if (name === 'milo' || name === 'daisy') {
-			console.log(`[ASM DEBUG] Firestore ${name}: id=${d.id}, asmId=${d.data().asmId}, status=${d.data().status}`);
-		}
-	});
 
 	const now = new Date().toISOString();
 	const BATCH_SIZE = 499;
@@ -307,7 +292,8 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 
 	const currentAsmIds = new Set(dogs.map((a) => a.ID));
-	const archived = await markStaleAsmDogsArchived(currentAsmIds);
+	const currentAsmNames = new Set(dogs.map((a) => (a.ANIMALNAME ?? '').toLowerCase()));
+	const archived = await markStaleAsmDogsArchived(currentAsmIds, currentAsmNames);
 
 	return {
 		changes: pending.map(({ animal, isNew, changedFields }) => ({
@@ -325,13 +311,22 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
  * ASM response. Only affects docs that have an `asmId` field (i.e. were synced from ASM).
  * Safe to call after syncAnimalsFromASM().
  */
-export async function markStaleAsmDogsArchived(currentAsmIds: Set<number>): Promise<number> {
+export async function markStaleAsmDogsArchived(currentAsmIds: Set<number>, currentAsmNames?: Set<string>): Promise<number> {
 	if (!db) throw new Error('Firestore not available');
 
 	const snapshot = await getDocs(collection(db, 'dogs'));
 	const staleDocs = snapshot.docs.filter((d) => {
-		const asmId = d.data().asmId as number | undefined;
-		return asmId !== undefined && !currentAsmIds.has(asmId);
+		const data = d.data();
+		if (data.status === 'adopted') return false;
+		const asmId = data.asmId as number | undefined;
+		// ASM-linked doc: archive if no longer in ASM response
+		if (asmId !== undefined) return !currentAsmIds.has(asmId);
+		// Manually-added doc: archive if name no longer appears in any current ASM shelter dog
+		if (currentAsmNames) {
+			const name = (data.name ?? '').toLowerCase();
+			return name.length > 0 && !currentAsmNames.has(name);
+		}
+		return false;
 	});
 
 	if (staleDocs.length === 0) return 0;
