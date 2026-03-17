@@ -514,8 +514,8 @@
 
 	function photoStripeClass(dog: Dog, tripStatus: DayTripStatus): string {
 		const level = dogHandlingLevel(dog);
-		if (level === 'manager_only') return 'card-stripe-red';
-		if (level === 'staff_only' || tripStatus === 'ineligible' || tripStatus === 'difficult') return 'card-stripe-yellow';
+		if (level === 'manager_only' || level === 'staff_only') return 'card-stripe-red';
+		if (tripStatus === 'ineligible' || tripStatus === 'difficult') return 'card-stripe-yellow';
 		return 'card-stripe-green';
 	}
 
