@@ -133,7 +133,8 @@
 		.filter((dog) => dog.isolationStatus !== 'none')
 		.sort((a, b) => a.name.localeCompare(b.name))
 		.slice(0, 4);
-	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster).sort((a, b) => a.name.localeCompare(b.name));
+	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster && !dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
+	$: incomingDogs = activeDogs.filter((dog) => dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
 
 	$: surgeryAlerts = activeDogs
 		.filter((dog) => isSameCalendarDay(dog.surgeryDate, today))
@@ -639,7 +640,34 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-amber" class:planner-list-empty={!loading && attentionItems.length === 0}>
+		<section class="planner-list planner-list-steel" class:planner-list-empty={!loading && incomingDogs.length === 0}>
+		<div class="planner-list-head">
+			<h2>Incoming</h2>
+			<span class="planner-pill planner-pill-steel">{incomingDogs.length}</span>
+		</div>
+		<div class="planner-items">
+			{#if loading}
+				<p class="planner-empty-row">Loading...</p>
+			{:else if incomingDogs.length === 0}
+				<p class="planner-empty-row">No incoming transfers.</p>
+			{:else}
+				{#each incomingDogs as dog}
+					<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
+						<span class="planner-row-main">
+							{#if dog.photoUrl}
+								<img class="adopted-thumb" src={dog.photoUrl} alt={dog.name} />
+							{:else}
+								<span class="planner-bullet">🚛</span>
+							{/if}
+							<span class="planner-row-text">{dog.name}</span>
+						</span>
+					</a>
+				{/each}
+			{/if}
+		</div>
+	</section>
+
+	<section class="planner-list planner-list-amber planner-list-attention" class:planner-list-empty={!loading && attentionItems.length === 0}>
 			<div class="planner-list-head">
 				<h2>Needs Attention</h2>
 				<span class="planner-pill planner-pill-amber">{attentionItems.length}</span>
@@ -868,6 +896,10 @@
 		order: 10;
 	}
 
+	.planner-list-attention:not(.planner-list-empty) {
+		order: 9;
+	}
+
 	.planner-list-sand {
 		background: linear-gradient(180deg, #efe6d9 0%, #ece4d8 100%);
 	}
@@ -898,6 +930,10 @@
 
 	.planner-list-sage {
 		background: linear-gradient(180deg, #ddeedd 0%, #d7e9d7 100%);
+	}
+
+	.planner-list-steel {
+		background: linear-gradient(180deg, #dde6f0 0%, #d4dfe9 100%);
 	}
 
 	.planner-list-head {
@@ -952,6 +988,10 @@
 
 	.planner-pill-sage {
 		background: #5a9e68;
+	}
+
+	.planner-pill-steel {
+		background: #4a7a9e;
 	}
 
 	.planner-items {

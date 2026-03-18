@@ -80,6 +80,7 @@ export interface Dog {
 	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;
 	permanentFoster?: boolean;
+	isIncoming?: boolean;
 	isolationStatus: IsolationStatus;
 	isolationStartDate: DateValue | null;
 	status: DogStatus;

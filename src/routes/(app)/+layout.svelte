@@ -47,6 +47,7 @@
 	let asmSyncedAt: string | null = null;
 	let asmError: string | null = null;
 	let asmChanges: SyncChange[] = [];
+	let asmLocationNames: string[] = [];
 	let asmLogVisible = false;
 	let asmLogTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -69,6 +70,7 @@
 					minute: '2-digit',
 					hour12: true
 				}).format(new Date());
+				asmLocationNames = result.locationNames;
 				if (result.changes.length > 0 || result.archived > 0) {
 					asmChanges = result.changes;
 					asmLogVisible = true;
@@ -186,9 +188,9 @@
 							</span>
 						{:else if asmSyncedAt}
 							<button
-								class="sync-badge sync-badge-done {asmChanges.length > 0 ? 'sync-badge-clickable' : ''}"
-								title={asmChanges.length > 0 ? 'Click to view changes' : 'Dogs synced from ASM'}
-								on:click={() => { if (asmChanges.length > 0) asmLogVisible = !asmLogVisible; }}
+								class="sync-badge sync-badge-done sync-badge-clickable"
+								title="Click to view sync details"
+								on:click={() => { asmLogVisible = !asmLogVisible; }}
 							>
 								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5 6.5-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 								<span class="sync-label">Synced {asmSyncedAt}{asmChanges.length > 0 ? ` · ${asmChanges.length} change${asmChanges.length !== 1 ? 's' : ''}` : ''}</span>
@@ -224,7 +226,7 @@
 					</div>
 				</header>
 
-				{#if asmLogVisible && asmChanges.length > 0}
+				{#if asmLogVisible}
 					<div class="sync-log" role="log" aria-live="polite">
 						<div class="sync-log-header">
 							<span class="sync-log-title">ASM Sync — {asmChanges.length} dog{asmChanges.length !== 1 ? 's' : ''} updated</span>
@@ -244,6 +246,12 @@
 								</li>
 							{/each}
 						</ul>
+					{#if asmLocationNames.length > 0}
+						<div class="sync-log-locations">
+							<span class="sync-log-locations-label">ASM locations:</span>
+							<span class="sync-log-locations-list">{asmLocationNames.join(' · ')}</span>
+						</div>
+					{/if}
 					</div>
 				{/if}
 
@@ -609,6 +617,22 @@
 		color: var(--layout-muted);
 		font-size: 0.67rem;
 		min-width: 0;
+	}
+
+	.sync-log-locations {
+		padding: 0.4rem 0.72rem;
+		border-top: 1px solid #edf3f8;
+		font-size: 0.67rem;
+	}
+
+	.sync-log-locations-label {
+		font-weight: 700;
+		color: var(--layout-ink);
+		margin-right: 0.3rem;
+	}
+
+	.sync-log-locations-list {
+		color: var(--layout-muted);
 	}
 
 	.board-meta {

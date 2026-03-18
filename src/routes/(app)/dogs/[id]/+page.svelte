@@ -201,9 +201,10 @@
 		? dog.isolationStatus !== 'none' ||
 		  isManagerOnly ||
 		  isManagerHandlingOnly ||
-		  isStaffHandlingOnly
+		  isStaffHandlingOnly ||
+		  stripHasCarefulWarning
 			? 'whiteboard-tag-red'
-			: dayTripEligibility.status === 'difficult' || stripHasCarefulWarning
+			: dayTripEligibility.status === 'difficult'
 				? 'whiteboard-tag-yellow'
 				: 'whiteboard-tag-green'
 		: 'whiteboard-tag-green';
@@ -273,11 +274,12 @@
 				  (dog.isolationStatus !== 'none' ||
 						isManagerOnly ||
 						isManagerHandlingOnly ||
-						isStaffHandlingOnly)
+						isStaffHandlingOnly ||
+						stripHasCarefulWarning)
 				? 'whiteboard-note-red'
 				: dog &&
 					  !dog.isOutOnDayTrip &&
-					  (dog.dayTripStatus === 'difficult' || stripHasCarefulWarning)
+					  dog.dayTripStatus === 'difficult'
 					? 'whiteboard-note-yellow'
 					: '';
 
@@ -1429,7 +1431,7 @@
 	}
 
 	.whiteboard-tag-red {
-		background: linear-gradient(135deg, #ee8e8a 0%, #e57470 100%);
+		background: linear-gradient(135deg, #e04848 0%, #c93333 100%);
 	}
 
 	.whiteboard-alert {

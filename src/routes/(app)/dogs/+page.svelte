@@ -7,7 +7,7 @@
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
 	import { listDogs, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
-	import type { Dog, DayTripStatus, PlaygroupSession, UserRole } from '$lib/types';
+	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -35,6 +35,18 @@
 	let search = '';
 	let viewMode: 'active' | 'all' | 'archived' = 'active';
 	let fosterOnly = false;
+	let incomingOnly = false;
+	let expandedPill = new Map<string, 'handling' | 'adoption' | 'trip'>();
+
+	function togglePill(dogId: string, pill: 'handling' | 'adoption' | 'trip') {
+		if (expandedPill.get(dogId) === pill) {
+			expandedPill.delete(dogId);
+		} else {
+			expandedPill.set(dogId, pill);
+		}
+		expandedPill = expandedPill;
+	}
+	let stripeFilter: 'all' | 'green' | 'yellow' | 'red' = 'all';
 	let sortKey: 'name' | 'days' | 'age' | 'weight' = 'days';
 	let sortDir: 'asc' | 'desc' = 'asc';
 	let showAddModal = false;
@@ -48,7 +60,8 @@
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
-	$: activeCount = dogs.filter((dog) => dog.status === 'active').length;
+	$: activeCount = dogs.filter((dog) => dog.status === 'active' && !dog.isIncoming).length;
+	$: incomingCount = dogs.filter((dog) => dog.status === 'active' && dog.isIncoming).length;
 	$: capacityReached = activeCount >= capacity;
 	$: availableSpots = Math.max(0, capacity - activeCount);
 	$: filteredDogs = dogs
@@ -58,6 +71,8 @@
 			dog.status === 'active'
 		)
 		.filter((dog) => fosterOnly ? dog.inFoster : true)
+		.filter((dog) => incomingOnly ? dog.isIncoming : true)
+		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
 		const direction = sortDir === 'asc' ? 1 : -1;
@@ -512,11 +527,17 @@
 		return sortDir === 'asc' ? ' ↑' : ' ↓';
 	}
 
-	function photoStripeClass(dog: Dog, tripStatus: DayTripStatus): string {
+	function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
 		const level = dogHandlingLevel(dog);
-		if (level === 'manager_only' || level === 'staff_only') return 'card-stripe-red';
-		if (tripStatus === 'ineligible' || tripStatus === 'difficult') return 'card-stripe-yellow';
-		return 'card-stripe-green';
+		if (level === 'manager_only' || level === 'staff_only') return 'red';
+		const tripStatus = getTripEligibility(dog).status;
+		if (tripStatus === 'ineligible') return 'red';
+		if (tripStatus === 'difficult') return 'yellow';
+		return 'green';
+	}
+
+	function photoStripeClass(dog: Dog): string {
+		return `card-stripe-${dogStripeColor(dog)}`;
 	}
 
 	function handlingColorClass(level: Dog['handlingLevel']): string {
@@ -600,7 +621,7 @@
 		<section class="dogs-control-strip" aria-label="Roster controls">
 			<div class="dogs-summary-row">
 				<div class="dogs-title-wrap">
-					<p class="dogs-board-sub marker-line marker-blue-line">{activeCount}/{capacity} active dogs</p>
+					<p class="dogs-board-sub marker-line marker-blue-line">{activeCount}/{capacity} current{#if incomingCount > 0}<span class="incoming-count-badge">{incomingCount} incoming</span>{/if}</p>
 					<p class="dogs-capacity-note marker-line marker-muted">
 						{#if capacityReached}
 							capacity full
@@ -692,6 +713,31 @@
 					>
 						foster only
 					</button>
+					<button
+						class={`sort-chip ${incomingOnly ? 'sort-chip-active' : ''}`}
+						on:click={() => (incomingOnly = !incomingOnly)}
+					>
+						incoming only
+					</button>
+				</div>
+				<div class="archived-filter-group" role="group" aria-label="Filter by status color">
+					<span class="control-label typewriter">status</span>
+					<button
+						class={`sort-chip stripe-chip ${stripeFilter === 'all' ? 'sort-chip-active' : ''}`}
+						on:click={() => (stripeFilter = 'all')}
+					>all</button>
+					<button
+						class={`sort-chip stripe-chip stripe-chip-green ${stripeFilter === 'green' ? 'sort-chip-active' : ''}`}
+						on:click={() => (stripeFilter = stripeFilter === 'green' ? 'all' : 'green')}
+					><span class="stripe-dot stripe-dot-green"></span> green</button>
+					<button
+						class={`sort-chip stripe-chip stripe-chip-yellow ${stripeFilter === 'yellow' ? 'sort-chip-active' : ''}`}
+						on:click={() => (stripeFilter = stripeFilter === 'yellow' ? 'all' : 'yellow')}
+					><span class="stripe-dot stripe-dot-yellow"></span> yellow</button>
+					<button
+						class={`sort-chip stripe-chip stripe-chip-red ${stripeFilter === 'red' ? 'sort-chip-active' : ''}`}
+						on:click={() => (stripeFilter = stripeFilter === 'red' ? 'all' : 'red')}
+					><span class="stripe-dot stripe-dot-red"></span> red</button>
 				</div>
 			</div>
 			</details>
@@ -706,176 +752,183 @@
 				<div class="dogs-card-grid">
 					{#each sortedDogs as dog}
 						{@const tripEligibility = getTripEligibility(dog)}
+					{@const expandedPillType = expandedPill.get(dog.id) ?? null}
 						{@const bathDue = isBathDue(dog)}
 						{@const effectiveHandlingLevel = dogHandlingLevel(dog)}
 						{@const lastPlaygroupDate = lastPlaygroupByDogId[dog.id] ?? null}
 						{@const cardPendingItems = pendingItems(dog, tripEligibility, bathDue, lastPlaygroupDate)}
 						<div
-							class={`dog-card dog-card-clickable ${dog.isOutOnDayTrip ? 'dog-card-trip' : ''} ${dog.inFoster ? 'dog-card-foster' : ''} ${dog.status !== 'active' ? 'dog-card-archived' : ''}`}
+							class={`dog-card dog-card-clickable ${dog.isOutOnDayTrip ? 'dog-card-trip' : ''} ${dog.inFoster ? 'dog-card-foster' : ''} ${dog.isIncoming ? 'dog-card-incoming' : ''} ${dog.status !== 'active' ? 'dog-card-archived' : ''}`}
 							role="link"
 							tabindex="0"
 							aria-label={`Open ${dog.name} profile`}
 							on:click={(event) => handleCardClick(event, dog.id)}
 							on:keydown={(event) => handleCardKeydown(event, dog.id)}
 						>
-							<header class="dog-card-header">
-								<div class="card-photo-wrap">
-									<div class="card-photo-frame">
-										<div class={`card-photo-stripe ${photoStripeClass(dog, tripEligibility.status)}`} aria-hidden="true"></div>
-										{#if dog.photoUrl}
-											<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true" />
+							<div class="dog-card-body">
+								<header class="dog-card-header">
+									<div class="card-photo-wrap">
+										<div class="card-photo-frame">
+											<div class={`card-photo-stripe ${photoStripeClass(dog)}`} aria-hidden="true"></div>
+											{#if dog.photoUrl}
+												<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true" />
+											{:else}
+												<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>
+											{/if}
+										</div>
+									</div>
+									<div class="dog-card-headline">
+										<a class="dog-name-link" href={`/dogs/${dog.id}`}>{dog.name}</a>
+										{#if dog.breed}<p class="dog-breed">{dog.breed}</p>{/if}
+										<p class="dog-kennel typewriter">kennel: {dog.outdoorKennelAssignment || 'unassigned'}</p>
+									</div>
+									{#if dog.status !== 'active'}
+										<span class="days-tag days-tag-archived typewriter">Adopted</span>
+									{:else}
+										<span class="days-tag typewriter">{daysSince(dog.intakeDate, today) ?? 0} days</span>
+									{/if}
+								</header>
+								<div class="card-status-icons" role="group" aria-label="Dog status">
+									<button class={`card-status-pill ${handlingColorClass(effectiveHandlingLevel)} ${expandedPillType === 'handling' ? 'pill-active' : ''}`} on:click|stopPropagation={() => togglePill(dog.id, 'handling')} aria-pressed={expandedPillType === 'handling'} aria-label="Handling level">
+										<span class="card-pill-icon" aria-hidden="true">
+											<svg viewBox="0 0 24 24" fill="none">
+												{#if effectiveHandlingLevel === 'manager_only'}
+													<path d="M4 18h16l-1.2-8.6-4.8 3.8L12 7l-2 6.2-4.8-3.8z"></path>
+												{:else if effectiveHandlingLevel === 'staff_only'}
+													<rect x="4.2" y="5.3" width="15.6" height="13.4" rx="2.2"></rect>
+													<path d="M8.4 10.1h7.2"></path>
+													<path d="M8.4 13.8h7.2"></path>
+												{:else}
+													<path d="M12 20.2s-6.4-4.1-8.4-7c-2-2.8-.9-6.6 2.2-7.2 2-.4 3.3.7 4.2 1.9.9-1.2 2.2-2.3 4.2-1.9 3.1.6 4.2 4.4 2.2 7.2-2 2.9-8.4 7-8.4 7z"></path>
+												{/if}
+											</svg>
+										</span>
+									</button>
+									<button class={`card-status-pill ${adoptionColorClass(dog)} ${expandedPillType === 'adoption' ? 'pill-active' : ''}`} on:click|stopPropagation={() => togglePill(dog.id, 'adoption')} aria-pressed={expandedPillType === 'adoption'} aria-label="Adoption status">
+										<span class="card-pill-icon" aria-hidden="true">
+											<svg viewBox="0 0 24 24" fill="none">
+												<path d="M3.5 10.2 12 3l8.5 7.2"></path>
+												<path d="M5.5 9.3V20h13V9.3"></path>
+												<path d="M10 20v-5.3h4V20"></path>
+											</svg>
+										</span>
+									</button>
+									<button class={`card-status-pill ${tripColorClass(tripEligibility.status)} ${expandedPillType === 'trip' ? 'pill-active' : ''}`} on:click|stopPropagation={() => togglePill(dog.id, 'trip')} aria-pressed={expandedPillType === 'trip'} aria-label="Day trip status">
+										<span class="card-pill-icon" aria-hidden="true">
+											<svg viewBox="0 0 24 24" fill="none">
+												<circle cx="12" cy="12" r="3.5"></circle>
+												<path d="M12 2.9v2.6"></path>
+												<path d="M12 18.5v2.6"></path>
+												<path d="M2.9 12h2.6"></path>
+												<path d="M18.5 12h2.6"></path>
+												<path d="m5.8 5.8 1.8 1.8"></path>
+												<path d="m16.4 16.4 1.8 1.8"></path>
+												<path d="m5.8 18.2 1.8-1.8"></path>
+												<path d="m16.4 7.6 1.8-1.8"></path>
+											</svg>
+										</span>
+									</button>
+								</div>
+								{#if expandedPillType}
+									<p class={`card-pill-reason ${expandedPillType === 'handling' ? handlingColorClass(effectiveHandlingLevel) : expandedPillType === 'adoption' ? adoptionColorClass(dog) : tripColorClass(tripEligibility.status)}`}>
+										{#if expandedPillType === 'handling'}{handlingLabel(effectiveHandlingLevel)}
+										{:else if expandedPillType === 'adoption'}{adoptionLabel(dog)}
+										{:else}{tripLabel(tripEligibility.status, dog.dayTripNotes, dog.dayTripManagerOnly ?? false)}
+										{/if}
+									</p>
+								{/if}
+
+								<div class="card-facts">
+									<p><span>Age</span><strong class="card-fact-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
+									<p><span>Sex</span><strong class="card-fact-value">{sexLabel(dog.sex)}</strong></p>
+								</div>
+
+								<details class="card-kennel-section">
+									<summary>Meet & Greet</summary>
+									<div class="kennel-section-body">
+										<div class="card-facts">
+											<p><span>Origin</span><strong class="card-fact-value">{dog.origin || 'Unknown'}</strong></p>
+											<p><span>Potty Trained</span><strong class="card-fact-value">{pottyLabel(dog.pottyTrained)}</strong></p>
+											<p><span>Good w/ Dogs</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
+											<p><span>Good w/ Cats</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
+											<p><span>Good w/ Kids</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
+											<p><span>Energy</span><strong class="card-fact-value">{energyLabel(dog.energyLevel)}</strong></p>
+											<p><span>Best Home</span><strong class="card-fact-value">{dog.idealHome || 'Not documented'}</strong></p>
+										</div>
+									</div>
+								</details>
+
+								<details class="card-kennel-section">
+									<summary>
+										<span class="summary-label">Pending items <span class="dog-details-count">{cardPendingItems.length}</span></span>
+									</summary>
+									<div class="kennel-section-body">
+										{#if cardPendingItems.length === 0}
+											<p class="next-action-empty">No pending items.</p>
 										{:else}
-											<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>
+											<ul class="next-action-list">
+												{#each cardPendingItems as item}
+													{@const dismissed = isItemDismissed(dog.id, item.label)}
+													<li class={`next-action-item ${actionItemClass(item.tone)} ${dismissed ? 'next-action-dismissed' : ''}`}>
+														<button
+															class={`pending-check-btn ${dismissed ? 'pending-check-done' : ''}`}
+															on:click|stopPropagation={() => toggleDismissItem(dog.id, item.label)}
+															aria-label={dismissed ? 'Mark as pending' : 'Mark as done'}
+															aria-pressed={dismissed}
+														>
+															{#if dismissed}
+																<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+																	<polyline points="3,8.5 6.5,12 13,4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+																</svg>
+															{/if}
+														</button>
+														<span class={`pending-item-label ${dismissed ? 'pending-item-done' : ''}`}>{item.label}</span>
+														{#if item.action === 'log_bath' && !dismissed}
+															<button
+																class="pending-inline-btn"
+																on:click|stopPropagation={() => handleLogBath(dog)}
+															>
+																log bath
+															</button>
+														{/if}
+													</li>
+												{/each}
+											</ul>
 										{/if}
 									</div>
-								</div>
-								<div class="dog-card-headline">
-									<a class="dog-name-link" href={`/dogs/${dog.id}`}>{dog.name}</a>
-									{#if dog.breed}<p class="dog-breed">{dog.breed}</p>{/if}
-									<p class="dog-kennel typewriter">kennel: {dog.outdoorKennelAssignment || 'unassigned'}</p>
-								</div>
-								{#if dog.status !== 'active'}
-								<span class="days-tag days-tag-archived typewriter">Adopted</span>
-							{:else}
-								<span class="days-tag typewriter">{daysSince(dog.intakeDate, today) ?? 0} days</span>
-							{/if}
-							</header>
+								</details>
 
-							<div class="card-status-icons" role="group" aria-label="Dog status">
-								<span class={`card-status-pill ${handlingColorClass(effectiveHandlingLevel)}`}>
-									<span class="card-pill-icon" aria-hidden="true">
-										<svg viewBox="0 0 24 24" fill="none">
-											{#if effectiveHandlingLevel === 'manager_only'}
-												<path d="M4 18h16l-1.2-8.6-4.8 3.8L12 7l-2 6.2-4.8-3.8z"></path>
-											{:else if effectiveHandlingLevel === 'staff_only'}
-												<rect x="4.2" y="5.3" width="15.6" height="13.4" rx="2.2"></rect>
-												<path d="M8.4 10.1h7.2"></path>
-												<path d="M8.4 13.8h7.2"></path>
-											{:else}
-												<path d="M12 20.2s-6.4-4.1-8.4-7c-2-2.8-.9-6.6 2.2-7.2 2-.4 3.3.7 4.2 1.9.9-1.2 2.2-2.3 4.2-1.9 3.1.6 4.2 4.4 2.2 7.2-2 2.9-8.4 7-8.4 7z"></path>
-											{/if}
-										</svg>
-									</span>
-									<span class="card-pill-label">{handlingLabel(effectiveHandlingLevel)}</span>
-								</span>
-								<span class={`card-status-pill ${adoptionColorClass(dog)}`}>
-									<span class="card-pill-icon" aria-hidden="true">
-										<svg viewBox="0 0 24 24" fill="none">
-											<path d="M3.5 10.2 12 3l8.5 7.2"></path>
-											<path d="M5.5 9.3V20h13V9.3"></path>
-											<path d="M10 20v-5.3h4V20"></path>
-										</svg>
-									</span>
-									<span class="card-pill-label">{adoptionLabel(dog)}</span>
-								</span>
-								<span class={`card-status-pill ${tripColorClass(tripEligibility.status)}`}>
-									<span class="card-pill-icon" aria-hidden="true">
-										<svg viewBox="0 0 24 24" fill="none">
-											<circle cx="12" cy="12" r="3.5"></circle>
-											<path d="M12 2.9v2.6"></path>
-											<path d="M12 18.5v2.6"></path>
-											<path d="M2.9 12h2.6"></path>
-											<path d="M18.5 12h2.6"></path>
-											<path d="m5.8 5.8 1.8 1.8"></path>
-											<path d="m16.4 16.4 1.8 1.8"></path>
-											<path d="m5.8 18.2 1.8-1.8"></path>
-											<path d="m16.4 7.6 1.8-1.8"></path>
-										</svg>
-									</span>
-									<span class="card-pill-label">{tripLabel(tripEligibility.status, dog.dayTripNotes, dog.dayTripManagerOnly ?? false)}</span>
-								</span>
-							</div>
-
-							<div class="card-facts">
-								<p><span>Age</span><strong class="card-fact-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
-								<p><span>Sex</span><strong class="card-fact-value">{sexLabel(dog.sex)}</strong></p>
-							</div>
-
-							<details class="card-kennel-section">
-								<summary>Meet & Greet</summary>
-								<div class="kennel-section-body">
-									<div class="card-facts">
-										<p><span>Origin</span><strong class="card-fact-value">{dog.origin || 'Unknown'}</strong></p>
-										<p><span>Potty Trained</span><strong class="card-fact-value">{pottyLabel(dog.pottyTrained)}</strong></p>
-										<p><span>Good w/ Dogs</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
-										<p><span>Good w/ Cats</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
-										<p><span>Good w/ Kids</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
-										<p><span>Energy</span><strong class="card-fact-value">{energyLabel(dog.energyLevel)}</strong></p>
-										<p><span>Best Home</span><strong class="card-fact-value">{dog.idealHome || 'Not documented'}</strong></p>
-									</div>
-								</div>
-							</details>
-
-							<details class="card-kennel-section">
-								<summary>
-									<span class="summary-label">Pending items <span class="dog-details-count">{cardPendingItems.length}</span></span>
-								</summary>
-								<div class="kennel-section-body">
-									{#if cardPendingItems.length === 0}
-										<p class="next-action-empty">No pending items.</p>
-									{:else}
-										<ul class="next-action-list">
-											{#each cardPendingItems as item}
-												{@const dismissed = isItemDismissed(dog.id, item.label)}
-												<li class={`next-action-item ${actionItemClass(item.tone)} ${dismissed ? 'next-action-dismissed' : ''}`}>
-													<button
-														class={`pending-check-btn ${dismissed ? 'pending-check-done' : ''}`}
-														on:click|stopPropagation={() => toggleDismissItem(dog.id, item.label)}
-														aria-label={dismissed ? 'Mark as pending' : 'Mark as done'}
-														aria-pressed={dismissed}
-													>
-														{#if dismissed}
-															<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-																<polyline points="3,8.5 6.5,12 13,4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-															</svg>
-														{/if}
-													</button>
-													<span class={`pending-item-label ${dismissed ? 'pending-item-done' : ''}`}>{item.label}</span>
-													{#if item.action === 'log_bath' && !dismissed}
-														<button
-															class="pending-inline-btn"
-															on:click|stopPropagation={() => handleLogBath(dog)}
-														>
-															log bath
-														</button>
-													{/if}
-												</li>
-											{/each}
-										</ul>
+								<div class="dog-status-list">
+									{#if isSurgeryToday(dog.surgeryDate, today)}
+										<span class="status-pill status-pill-yellow">Surgery Today</span>
+									{/if}
+									{#if dog.isOutOnDayTrip}
+										<span class="status-pill status-pill-blue">Out Right Now</span>
+									{/if}
+									{#if dog.inFoster}
+										<span class="status-pill status-pill-foster">In Foster</span>
 									{/if}
 								</div>
-							</details>
 
-							<div class="dog-status-list">
-								{#if isSurgeryToday(dog.surgeryDate, today)}
-									<span class="status-pill status-pill-yellow">Surgery Today</span>
-								{/if}
-								{#if dog.isOutOnDayTrip}
-									<span class="status-pill status-pill-blue">Out Right Now</span>
-								{/if}
-								{#if dog.inFoster}
-									<span class="status-pill status-pill-foster">In Foster</span>
-								{/if}
-							</div>
-
-							<div class="dog-actions">
-								{#if dog.status !== 'active'}
-									<button
-										class="action-btn action-btn-return"
-										on:click|stopPropagation={() => handleReturnDog(dog)}
-										disabled={!canEdit}
-									>
-										return to shelter
-									</button>
-								{:else}
-									<button
-										class="action-btn"
-										on:click={() => handleTripToggle(dog)}
-										disabled={!dog.isOutOnDayTrip && !tripEligibility.eligible}
-									>
-										{dog.isOutOnDayTrip ? 'mark returned' : 'send out'}
-									</button>
-								{/if}
+								<div class="dog-actions">
+									{#if dog.status !== 'active'}
+										<button
+											class="action-btn action-btn-return"
+											on:click|stopPropagation={() => handleReturnDog(dog)}
+											disabled={!canEdit}
+										>
+											return to shelter
+										</button>
+									{:else}
+										<button
+											class="action-btn"
+											on:click={() => handleTripToggle(dog)}
+											disabled={!dog.isOutOnDayTrip && !tripEligibility.eligible}
+										>
+											{dog.isOutOnDayTrip ? 'mark returned' : 'send out'}
+										</button>
+									{/if}
+								</div>
 							</div>
 						</div>
 					{/each}
@@ -960,6 +1013,19 @@
 		letter-spacing: 0.01em;
 		line-height: 1.04;
 		color: #303948;
+	}
+
+	.incoming-count-badge {
+		display: inline-block;
+		margin-left: 0.5rem;
+		padding: 0.1rem 0.5rem;
+		border-radius: 999px;
+		background: #d6e6f5;
+		color: #2a5a82;
+		font-size: 0.82rem;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		vertical-align: middle;
 	}
 
 	.dogs-capacity-note {
@@ -1147,6 +1213,24 @@
 		color: #1e4f72;
 	}
 
+	.stripe-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	.stripe-dot {
+		display: inline-block;
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.stripe-dot-green { background: #67bf90; }
+	.stripe-dot-yellow { background: #e8bb62; }
+	.stripe-dot-red { background: #e57470; }
+
 	.archived-filter-group {
 		display: flex;
 		flex-wrap: wrap;
@@ -1196,10 +1280,10 @@
 		border: 1px solid #d3dbe6;
 		border-radius: 0.92rem;
 		background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
-		padding: 0.78rem;
-		display: grid;
-		gap: 0.58rem;
+		display: flex;
+		flex-direction: column;
 		box-shadow: 0 8px 18px rgba(28, 50, 71, 0.06);
+		overflow: hidden;
 	}
 
 	.dog-card-clickable {
@@ -1225,10 +1309,20 @@
 		background: linear-gradient(180deg, #fef6ea 0%, #fbf0e3 100%);
 	}
 
+	.dog-card-incoming {
+		background: linear-gradient(180deg, #eaf1f9 0%, #e2ecf6 100%);
+	}
+
 	.dog-card-archived {
 		opacity: 0.55;
 		background: linear-gradient(180deg, #f5f7fa 0%, #f0f3f7 100%);
 		filter: grayscale(0.4);
+	}
+
+	.dog-card-body {
+		padding: 0.78rem;
+		display: grid;
+		gap: 0.58rem;
 	}
 
 	.dog-card-header {
@@ -1245,7 +1339,7 @@
 
 	.card-photo-frame {
 		position: relative;
-		width: 3.1rem;
+		width: 5rem;
 		aspect-ratio: 3 / 4;
 		border: 1px solid #d4deeb;
 		border-radius: 0.5rem;
@@ -1283,6 +1377,7 @@
 		z-index: 2;
 	}
 
+
 	.card-stripe-green {
 		background: linear-gradient(135deg, #79cfa1 0%, #67bf90 100%);
 	}
@@ -1292,7 +1387,7 @@
 	}
 
 	.card-stripe-red {
-		background: linear-gradient(135deg, #ee8e8a 0%, #e57470 100%);
+		background: linear-gradient(135deg, #e04848 0%, #c93333 100%);
 	}
 
 	.dog-name-link {
@@ -1357,8 +1452,9 @@
 	/* Card status icons (whiteboard-pill style) */
 	.card-status-icons {
 		display: flex;
-		flex-direction: column;
-		gap: 0.36rem;
+		flex-direction: row;
+		flex-wrap: wrap;
+		gap: 0.3rem 0.4rem;
 	}
 
 	.card-status-pill {
@@ -1369,6 +1465,10 @@
 		font-weight: 700;
 		line-height: 1.2;
 		color: #2f4a66;
+		cursor: pointer;
+		background: none;
+		border: none;
+		padding: 0;
 	}
 
 	.card-pill-icon {
@@ -1395,9 +1495,14 @@
 		fill: none;
 	}
 
-	.card-pill-label {
-		min-width: 0;
-		overflow-wrap: anywhere;
+	.card-status-pill.pill-active .card-pill-icon {
+		border-color: currentColor;
+	}
+
+	.card-pill-reason {
+		margin: 0;
+		font-size: 0.72rem;
+		font-weight: 600;
 	}
 
 	.card-pill-green {
@@ -1828,18 +1933,9 @@
 			border-radius: 0.82rem;
 		}
 
-		.card-status-icons {
-			flex-direction: row;
-			flex-wrap: wrap;
-			gap: 0.3rem 0.6rem;
-		}
 	}
 
-	@media (min-width: 980px) {
-		.dogs-card-grid {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
+	
 
 	@media (min-width: 1320px) {
 		.dogs-card-grid {

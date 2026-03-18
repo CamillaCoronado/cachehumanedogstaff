@@ -11,6 +11,7 @@ export type SyncChange = {
 export type SyncResult = {
 	changes: SyncChange[];
 	archived: number;
+	locationNames: string[]; // temporary: unique DISPLAYLOCATIONNAME values for discovery
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -136,6 +137,7 @@ function normalizeEnergy(value: number | undefined): 'low' | 'medium' | 'high' |
 function asmToStoredFields(animal: AsmAnimal, now: string) {
 	const inFoster = animal.ACTIVEMOVEMENTTYPE === 2;
 	const isPermanentFoster = animal.HASPERMANENTFOSTER === 1;
+	const isIncoming = (animal.DISPLAYLOCATIONNAME ?? '').toLowerCase().includes('incoming');
 	const photoUrl =
 		Array.isArray(animal.PHOTOURLS) && animal.PHOTOURLS.length > 0
 			? animal.PHOTOURLS[0]
@@ -172,6 +174,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		photoUrl,
 		origin: animal.BROUGHTINBYOWNERNAME || animal.ORIGINALOWNERNAME || animal.ENTRYTYPENAME || 'ASM',
 		inFoster,
+		isIncoming,
 		permanentFoster: isPermanentFoster,
 		// Permanent fosters won't return to shelter — archive them
 		status: isPermanentFoster ? 'adopted' : 'active',
@@ -306,6 +309,8 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	);
 	const archived = await markStaleAsmDogsArchived(currentAsmIds, adoptedShelterCodes);
 
+	const locationNames = [...new Set(allAnimals.map((a) => a.DISPLAYLOCATIONNAME).filter(Boolean))].sort();
+
 	return {
 		changes: pending.map(({ animal, isNew, changedFields }) => ({
 			id: String(animal.ID),
@@ -313,7 +318,8 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			isNew,
 			fields: changedFields
 		})),
-		archived
+		archived,
+		locationNames
 	};
 }
 

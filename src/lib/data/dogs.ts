@@ -75,6 +75,7 @@ interface StoredDog {
 	dayTripNotes: string | null;
 	handlingLevel?: DogHandlingLevel;
 	inFoster: boolean;
+	isIncoming?: boolean;
 	isolationStatus: 'none' | 'sick' | 'bite_quarantine';
 	isolationStartDate: string | null;
 	status: 'active' | 'adopted';
@@ -336,6 +337,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
 		handlingLevel: normalizedHandlingLevel,
 		inFoster: stored.inFoster ?? false,
+		isIncoming: stored.isIncoming ?? false,
 		isolationStatus: stored.isolationStatus ?? 'none',
 		isolationStartDate: stored.isolationStartDate ? toDate(stored.isolationStartDate) : null,
 		status: stored.status,
