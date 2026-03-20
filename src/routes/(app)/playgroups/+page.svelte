@@ -1,12 +1,13 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { format } from 'date-fns';
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
+	import { localRole } from '$lib/stores/role';
 	import { listDogs } from '$lib/data/dogs';
 	import { addPlaygroupSession, listPlaygroupSessions } from '$lib/data/playgroups';
 	import { formatDateTime, toDate } from '$lib/utils/dates';
-	import type { Dog, PlaygroupOutcome, PlaygroupSession } from '$lib/types';
+	import { canAccessPlaygroups, resolveRole } from '$lib/utils/permissions';
+	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
 
 	type DogReadiness = 'ready' | 'caution' | 'hold';
@@ -35,10 +36,17 @@
 	let manualDuration = '';
 	let manualNotes = '';
 	let manualDogIds: string[] = [];
+	let playgroupsLoaded = false;
 
-	onMount(async () => {
-		await refreshData();
-	});
+	$: role = resolveRole($authProfile, $localRole as UserRole);
+	$: canViewPlaygroups = canAccessPlaygroups(role);
+	$: if (canViewPlaygroups && !playgroupsLoaded) {
+		playgroupsLoaded = true;
+		void refreshData();
+	}
+	$: if (!canViewPlaygroups) {
+		loading = false;
+	}
 
 	$: activeDogs = dogs
 		.filter((dog) => dog.status === 'active')
@@ -250,27 +258,35 @@
 	}
 </script>
 
-<section class="playgroups-board" aria-label="Playgroups board">
-	<header class="playgroups-header">
-		<div class="playgroups-controls">
-			<input
-				class="playgroups-search typewriter"
-				placeholder="search dog name"
-				bind:value={search}
-			/>
-			<div class="stats-row typewriter">
-				<span class="stat-chip stat-ready">Ready: {readyDogs.length}</span>
-				<span class="stat-chip stat-caution">Caution: {cautionDogs.length}</span>
-				<span class="stat-chip stat-hold">Hold: {holdDogs.length}</span>
-				<span class="stat-chip">History: {history.length}</span>
-			</div>
+{#if !canViewPlaygroups}
+	<section class="playgroups-board" aria-label="Playgroups board">
+		<div class="playgroups-restricted panel panel-wide">
+			<h3>Manager only</h3>
+			<p class="panel-note typewriter">Playgroups are temporarily available only to manager and admin accounts.</p>
 		</div>
-	</header>
+	</section>
+{:else}
+	<section class="playgroups-board" aria-label="Playgroups board">
+		<header class="playgroups-header">
+			<div class="playgroups-controls">
+				<input
+					class="playgroups-search typewriter"
+					placeholder="search dog name"
+					bind:value={search}
+				/>
+				<div class="stats-row typewriter">
+					<span class="stat-chip stat-ready">Ready: {readyDogs.length}</span>
+					<span class="stat-chip stat-caution">Caution: {cautionDogs.length}</span>
+					<span class="stat-chip stat-hold">Hold: {holdDogs.length}</span>
+					<span class="stat-chip">History: {history.length}</span>
+				</div>
+			</div>
+		</header>
 
-	{#if loading}
-		<p class="playgroups-state marker-line marker-muted">Loading playgroups...</p>
-	{:else}
-		<div class="playgroups-grid">
+		{#if loading}
+			<p class="playgroups-state marker-line marker-muted">Loading playgroups...</p>
+		{:else}
+			<div class="playgroups-grid">
 			<section class="panel">
 				<div class="panel-head">
 					<h3>Dog List</h3>
@@ -450,9 +466,10 @@
 					</div>
 				{/if}
 			</section>
-		</div>
-	{/if}
-</section>
+			</div>
+		{/if}
+	</section>
+{/if}
 
 <style>
 	.playgroups-board {
@@ -534,6 +551,12 @@
 
 	.playgroups-state {
 		padding: 0.82rem;
+	}
+
+	.playgroups-restricted {
+		min-height: 10rem;
+		display: grid;
+		align-content: center;
 	}
 
 	.playgroups-grid {

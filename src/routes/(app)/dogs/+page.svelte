@@ -27,6 +27,7 @@
 	const BATH_DUE_DAYS = 7;
 	const ACTIVITY_WARNING_DAYS = 2;
 	const ACTIVITY_DUE_DAYS = 3;
+	const NEW_INTAKE_RED_MS = 24 * 60 * 60 * 1000;
 	const today = new Date();
 
 	let dogs: Dog[] = [];
@@ -527,12 +528,25 @@
 		return sortDir === 'asc' ? ' ↑' : ' ↓';
 	}
 
+	function isWithinNewIntakeWindow(dog: Dog) {
+		const intakeAt = toDate(dog.intakeDate)?.getTime() ?? 0;
+		const createdAt = toDate(dog.createdAt)?.getTime() ?? 0;
+		const baseline = Math.max(intakeAt, createdAt);
+		if (!baseline) return false;
+		return Date.now() - baseline < NEW_INTAKE_RED_MS;
+	}
+
 	function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
 		const level = dogHandlingLevel(dog);
-		if (level === 'manager_only' || level === 'staff_only') return 'red';
-		const tripStatus = getTripEligibility(dog).status;
-		if (tripStatus === 'ineligible') return 'red';
-		if (tripStatus === 'difficult') return 'yellow';
+		// Stripes are based on handling/day-trip risk rules, plus intake red flags.
+		// Intake dates from ASM are sometimes date-only, so createdAt keeps brand-new
+		// arrivals red for at least the first 24 hours in-app.
+		if (!dog.isVaccinated) return 'red';
+		if (isWithinNewIntakeWindow(dog)) return 'red';
+		if (level === 'manager_only') return 'red';
+		if (level === 'staff_only') return 'yellow';
+		if (dog.dayTripStatus === 'ineligible' && dog.isolationStatus === 'none') return 'red';
+		if (dog.dayTripStatus === 'difficult' && dog.isolationStatus === 'none') return 'yellow';
 		return 'green';
 	}
 
@@ -1946,6 +1960,9 @@
 	@media (max-width: 560px) {
 		.dogs-summary-row {
 			flex-wrap: wrap;
+		}
+		.dogs-search-input {
+			font-size: 1rem;
 		}
 	}
 </style>

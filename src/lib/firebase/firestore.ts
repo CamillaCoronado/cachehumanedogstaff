@@ -17,6 +17,19 @@ export async function hasAnyUserProfiles() {
 	return !snapshot.empty;
 }
 
+export async function listUserProfiles() {
+	if (!db) throw new Error('Firestore is not available.');
+	const usersRef = collection(db, 'users');
+	const snapshot = await getDocs(usersRef);
+	return snapshot.docs
+		.map((docSnap) => docSnap.data() as UserProfile)
+		.sort((first, second) => {
+			const firstLabel = (first.displayName || first.email || first.uid).toLowerCase();
+			const secondLabel = (second.displayName || second.email || second.uid).toLowerCase();
+			return firstLabel.localeCompare(secondLabel);
+		});
+}
+
 export async function createUserProfile(params: {
 	uid: string;
 	email: string;

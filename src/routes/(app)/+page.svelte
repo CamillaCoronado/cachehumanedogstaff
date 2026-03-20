@@ -723,7 +723,6 @@
 		</section>
 	</div>
 
-	<button type="button" class="planner-fab" aria-label="Add board item">+</button>
 </section>
 
 <style>
@@ -1147,33 +1146,22 @@
 
 
 
-	.planner-fab {
-		position: absolute;
-		right: 0.7rem;
-		bottom: 0.7rem;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 2.75rem;
-		height: 2.75rem;
-		border: 1px solid #2e84b7;
-		border-radius: 999px;
-		background: linear-gradient(180deg, #2f97d1 0%, #2b82b4 100%);
-		box-shadow: 0 10px 18px rgba(40, 103, 140, 0.3);
-		font-size: 1.5rem;
-		line-height: 1;
-		color: #ffffff;
-	}
 
 	@media (min-width: 760px) {
 		.planner-columns {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
+			display: block;
+			columns: 2;
+			column-gap: 0.58rem;
+		}
+		.planner-list {
+			break-inside: avoid;
+			margin-bottom: 0.58rem;
 		}
 	}
 
 	@media (min-width: 1180px) {
 		.planner-columns {
-			grid-template-columns: repeat(4, minmax(0, 1fr));
+			columns: 3;
 		}
 	}
 

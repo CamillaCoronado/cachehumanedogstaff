@@ -5,13 +5,12 @@ export type SyncChange = {
 	id: string;
 	name: string;
 	isNew: boolean;
+	isArchived: boolean;
 	fields: string[]; // human-readable field labels that changed
 };
 
 export type SyncResult = {
 	changes: SyncChange[];
-	archived: number;
-	locationNames: string[]; // temporary: unique DISPLAYLOCATIONNAME values for discovery
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -309,17 +308,25 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	);
 	const archived = await markStaleAsmDogsArchived(currentAsmIds, adoptedShelterCodes);
 
-	const locationNames = [...new Set(allAnimals.map((a) => a.DISPLAYLOCATIONNAME).filter(Boolean))].sort();
+	const archivedChanges: SyncChange[] = archived.map(({ id, name }) => ({
+		id,
+		name,
+		isNew: false,
+		isArchived: true,
+		fields: []
+	}));
 
 	return {
-		changes: pending.map(({ animal, isNew, changedFields }) => ({
-			id: String(animal.ID),
-			name: animal.ANIMALNAME ?? `Dog ${animal.ID}`,
-			isNew,
-			fields: changedFields
-		})),
-		archived,
-		locationNames
+		changes: [
+			...pending.map(({ animal, isNew, changedFields }) => ({
+				id: String(animal.ID),
+				name: animal.ANIMALNAME ?? `Dog ${animal.ID}`,
+				isNew,
+				isArchived: false,
+				fields: changedFields
+			})),
+			...archivedChanges
+		]
 	};
 }
 
@@ -331,20 +338,25 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 export async function markStaleAsmDogsArchived(
 	currentAsmIds: Set<number>,
 	adoptedShelterCodes: Set<string> = new Set()
-): Promise<number> {
+): Promise<{ id: string; name: string }[]> {
 	if (!db) throw new Error('Firestore not available');
 
 	const snapshot = await getDocs(collection(db, 'dogs'));
 	const staleDocs = snapshot.docs.filter((d) => {
 		const data = d.data();
+		if (data.status === 'adopted') return false;
+		// asmId field (number) — preferred match
 		const asmId = data.asmId as number | undefined;
+		// Fallback: numeric doc ID means this doc was created by ASM sync
+		const idAsNum = /^\d+$/.test(d.id) ? Number(d.id) : undefined;
+		const effectiveAsmId = asmId ?? idAsNum;
 		const shelterCode = data.asmShelterCode as string | undefined;
-		if (asmId !== undefined && !currentAsmIds.has(asmId)) return true;
+		if (effectiveAsmId !== undefined && !currentAsmIds.has(effectiveAsmId)) return true;
 		if (shelterCode && adoptedShelterCodes.has(shelterCode)) return true;
 		return false;
 	});
 
-	if (staleDocs.length === 0) return 0;
+	if (staleDocs.length === 0) return [];
 
 	const BATCH_SIZE = 499;
 	for (let i = 0; i < staleDocs.length; i += BATCH_SIZE) {
@@ -362,5 +374,5 @@ export async function markStaleAsmDogsArchived(
 		await batch.commit();
 	}
 
-	return staleDocs.length;
+	return staleDocs.map((d) => ({ id: d.id, name: (d.data().name as string | undefined) ?? d.id }));
 }

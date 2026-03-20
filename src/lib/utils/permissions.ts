@@ -4,6 +4,10 @@ export function canEditDogs(role: UserRole | null | undefined) {
 	return role === 'admin' || role === 'manager';
 }
 
+export function canAccessPlaygroups(role: UserRole | null | undefined) {
+	return role === 'admin' || role === 'manager';
+}
+
 export function roleLabel(role: UserRole | null | undefined) {
 	return role ?? 'staff';
 }

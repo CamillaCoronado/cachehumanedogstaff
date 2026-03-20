@@ -10,6 +10,7 @@
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
+	import { canAccessPlaygroups } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 
 	type TabItem = {
@@ -24,19 +25,20 @@
 			| 'cleaning'
 			| 'daytrips'
 			| 'playgroups'
-			| 'intake';
+			| 'admin';
 	};
 
-	const tabs: TabItem[] = [
+	const baseTabs: TabItem[] = [
 		{ href: '/', label: 'Dashboard', colorClass: 'tab-blue', icon: 'dashboard' },
 		{ href: '/dogs', label: 'Dogs', colorClass: 'tab-accent', icon: 'dogs' },
 		{ href: '/kennels', label: 'Kennels', colorClass: 'tab-green', icon: 'kennels' },
 		{ href: '/feeding', label: 'Feeding', colorClass: 'tab-blue', icon: 'feeding' },
 		{ href: '/cleaning', label: 'Cleaning', colorClass: 'tab-green', icon: 'cleaning' },
-		{ href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' },
-		{ href: '/playgroups', label: 'Playgroups', colorClass: 'tab-blue', icon: 'playgroups' },
-		{ href: '/intake', label: 'AI Intake', colorClass: 'tab-accent', icon: 'intake' }
+		{ href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' }
 	];
+	const playgroupsTab: TabItem = { href: '/playgroups', label: 'Playgroups', colorClass: 'tab-blue', icon: 'playgroups' };
+	const adminTab: TabItem = { href: '/admin', label: 'Admin', colorClass: 'tab-accent', icon: 'admin' };
+	let tabs: TabItem[] = baseTabs;
 
 	let loggingOut = false;
 	let previousTabIndex = 0;
@@ -47,13 +49,22 @@
 	let asmSyncedAt: string | null = null;
 	let asmError: string | null = null;
 	let asmChanges: SyncChange[] = [];
-	let asmLocationNames: string[] = [];
+	let asmLastChangedAt: string | null = null;
 	let asmLogVisible = false;
-	let asmLogTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const STORAGE_KEY = 'asm_last_changes';
 
 	onMount(() => {
 		initAuthListener();
 		previousTabIndex = resolveTabIndex(window.location.pathname);
+		try {
+			const stored = localStorage.getItem(STORAGE_KEY);
+			if (stored) {
+				const parsed = JSON.parse(stored) as { changes: SyncChange[]; changedAt: string };
+				asmChanges = parsed.changes;
+				asmLastChangedAt = parsed.changedAt;
+			}
+		} catch { /* ignore */ }
 	});
 
 	$: if ($authReady && !$authUser) {
@@ -70,12 +81,13 @@
 					minute: '2-digit',
 					hour12: true
 				}).format(new Date());
-				asmLocationNames = result.locationNames;
-				if (result.changes.length > 0 || result.archived > 0) {
+				if (result.changes.length > 0) {
 					asmChanges = result.changes;
+					asmLastChangedAt = asmSyncedAt;
+					try {
+						localStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: asmChanges, changedAt: asmLastChangedAt }));
+					} catch { /* ignore */ }
 					asmLogVisible = true;
-					if (asmLogTimer) clearTimeout(asmLogTimer);
-					asmLogTimer = setTimeout(() => { asmLogVisible = false; }, 15000);
 				}
 			})
 			.catch((err: unknown) => {
@@ -88,6 +100,13 @@
 	}
 
 	$: currentPath = $page.url.pathname;
+	$: isAdmin = $authProfile?.role === 'admin';
+	$: canViewPlaygroups = canAccessPlaygroups($authProfile?.role);
+	$: tabs = [
+		...baseTabs,
+		...(canViewPlaygroups ? [playgroupsTab] : []),
+		...(isAdmin ? [adminTab] : [])
+	];
 	$: currentTabIndex = resolveTabIndex(currentPath);
 	$: activeTab = tabs[currentTabIndex] ?? tabs.find((tab) => tab.href === '/') ?? tabs[0];
 	$: isDogDetailPage = currentPath.startsWith('/dogs/');
@@ -193,7 +212,7 @@
 								on:click={() => { asmLogVisible = !asmLogVisible; }}
 							>
 								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5 6.5-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-								<span class="sync-label">Synced {asmSyncedAt}{asmChanges.length > 0 ? ` · ${asmChanges.length} change${asmChanges.length !== 1 ? 's' : ''}` : ''}</span>
+								<span class="sync-label">Synced {asmSyncedAt}{asmChanges.length > 0 ? ` · ${asmChanges.length} update${asmChanges.length !== 1 ? 's' : ''}` : ''}</span>
 							</button>
 						{:else if asmError}
 							<span class="sync-badge sync-badge-error">
@@ -229,7 +248,7 @@
 				{#if asmLogVisible}
 					<div class="sync-log" role="log" aria-live="polite">
 						<div class="sync-log-header">
-							<span class="sync-log-title">ASM Sync — {asmChanges.length} dog{asmChanges.length !== 1 ? 's' : ''} updated</span>
+							<span class="sync-log-title">Last changes — {asmLastChangedAt ?? asmSyncedAt}</span>
 							<button class="sync-log-close" aria-label="Dismiss" on:click={() => { asmLogVisible = false; }}>
 								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
 							</button>
@@ -238,21 +257,17 @@
 							{#each asmChanges as change}
 								<li class="sync-log-item">
 									<span class="sync-log-name">{change.name}</span>
-									{#if change.isNew}
-										<span class="sync-log-tag sync-log-tag-new">New</span>
-									{:else}
-										<span class="sync-log-fields">{change.fields.join(', ')}</span>
-									{/if}
-								</li>
-							{/each}
-						</ul>
-					{#if asmLocationNames.length > 0}
-						<div class="sync-log-locations">
-							<span class="sync-log-locations-label">ASM locations:</span>
-							<span class="sync-log-locations-list">{asmLocationNames.join(' · ')}</span>
-						</div>
-					{/if}
-					</div>
+							{#if change.isArchived}
+								<span class="sync-log-tag sync-log-tag-archived">Marked adopted</span>
+							{:else if change.isNew}
+								<span class="sync-log-tag sync-log-tag-new">Added to shelter</span>
+							{:else}
+								<span class="sync-log-fields">Updated: {change.fields.join(', ')}</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+				</div>
 				{/if}
 
 				<div class="app-layout">
@@ -299,6 +314,10 @@
 											<circle cx="16" cy="10.2" r="2"></circle>
 											<path d="M4.7 18c.6-2.2 2.5-3.7 4.3-3.7s3.7 1.5 4.3 3.7"></path>
 											<path d="M14.4 17.5c.4-1.6 1.8-2.7 3.3-2.7 1.2 0 2.2.6 2.9 1.7"></path>
+										{:else if tab.icon === 'admin'}
+											<path d="M12 3.8 18.7 6.7v4.1c0 4.2-2.6 7.7-6.7 9.4C7.9 18.5 5.3 15 5.3 10.8V6.7z"></path>
+											<path d="M12 8.4v4.7"></path>
+											<circle cx="12" cy="15.8" r="0.8" fill="currentColor" stroke="none"></circle>
 										{:else}
 											<rect x="6" y="4.5" width="12" height="15" rx="2"></rect>
 											<path d="M9 4.5h6v2H9z"></path>
@@ -595,10 +614,23 @@
 		border-bottom: 1px solid #edf3f8;
 	}
 
+
 	.sync-log-name {
 		font-weight: 700;
 		color: var(--layout-ink);
 		flex-shrink: 0;
+	}
+
+	.sync-log-tag-archived {
+		font-size: 0.6rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		padding: 0.1rem 0.38rem;
+		border-radius: 999px;
+		background: rgba(180, 60, 30, 0.1);
+		color: #a0341a;
+		border: 1px solid rgba(180, 60, 30, 0.2);
 	}
 
 	.sync-log-tag-new {
@@ -617,22 +649,6 @@
 		color: var(--layout-muted);
 		font-size: 0.67rem;
 		min-width: 0;
-	}
-
-	.sync-log-locations {
-		padding: 0.4rem 0.72rem;
-		border-top: 1px solid #edf3f8;
-		font-size: 0.67rem;
-	}
-
-	.sync-log-locations-label {
-		font-weight: 700;
-		color: var(--layout-ink);
-		margin-right: 0.3rem;
-	}
-
-	.sync-log-locations-list {
-		color: var(--layout-muted);
 	}
 
 	.board-meta {

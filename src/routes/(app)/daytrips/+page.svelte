@@ -4,9 +4,9 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs } from '$lib/data/dogs';
+	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, updateDog } from '$lib/data/dogs';
 	import type { DayTripLog, Dog, UserRole } from '$lib/types';
-	import { checkDayTripEligibility, daysSince, formatDate, formatDateTime, toDate } from '$lib/utils/dates';
+	import { checkDayTripEligibility, daysSince, formatDateTime, toDate } from '$lib/utils/dates';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -16,6 +16,118 @@
 	let loading = true;
 	let monthFilter = defaultMonth;
 	let loaded = false;
+	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'import' = 'board';
+
+	// ── Import state ──
+	const MARCH_2026_DATA: { name: string; dates: string[] }[] = [
+		{ name: 'Archer',  dates: ['2026-03-05'] },
+		{ name: 'Birdie',  dates: ['2026-03-05', '2026-03-07'] },
+		{ name: 'Bubbles', dates: ['2026-03-12'] },
+		{ name: 'Chewy',   dates: ['2026-03-04'] },
+		{ name: 'Clover',  dates: ['2026-03-07'] },
+		{ name: 'Dougie',  dates: ['2026-03-12'] },
+		{ name: 'Drake',   dates: ['2026-03-12'] },
+		{ name: 'Finn',    dates: ['2026-03-04', '2026-03-05', '2026-03-07', '2026-03-10', '2026-03-12'] },
+		{ name: 'Fred',    dates: ['2026-03-07'] },
+		{ name: 'Giza',    dates: ['2026-03-07', '2026-03-12'] },
+		{ name: 'Kallion', dates: ['2026-03-05', '2026-03-06', '2026-03-11'] },
+		{ name: 'Lola',    dates: ['2026-03-07'] },
+		{ name: 'Newsie',  dates: ['2026-03-03'] },
+		{ name: 'Oreo',    dates: ['2026-03-11'] },
+		{ name: 'Piper',   dates: ['2026-03-07', '2026-03-12'] },
+		{ name: 'Remy',    dates: ['2026-03-07'] },
+		{ name: 'Summer',  dates: ['2026-03-03', '2026-03-06'] },
+		{ name: 'Thor',    dates: ['2026-03-07', '2026-03-09', '2026-03-10', '2026-03-11'] },
+		{ name: 'Uno',     dates: ['2026-03-11'] },
+		{ name: 'Walker',  dates: ['2026-03-03', '2026-03-04'] },
+		{ name: 'Willow',  dates: ['2026-03-04', '2026-03-06', '2026-03-07', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12'] },
+	];
+
+	interface ImportPreviewRow {
+		sheetName: string;
+		dogId: string | null;
+		dogName: string | null;
+		dates: string[];
+		tripCount: number;
+		matched: boolean;
+	}
+
+	let importPreview: ImportPreviewRow[] = [];
+	let importDryRunDone = false;
+	let importing = false;
+	let importDone = false;
+	let importLog: string[] = [];
+
+	function runDryRun() {
+		const activeLookup: Record<string, Dog> = {};
+		for (const dog of activeDogs) {
+			activeLookup[dog.name.toLowerCase().trim()] = dog;
+		}
+
+		importPreview = MARCH_2026_DATA.map((row) => {
+			const key = row.name.toLowerCase().trim();
+			const matched = activeLookup[key];
+			return {
+				sheetName: row.name,
+				dogId: matched?.id ?? null,
+				dogName: matched?.name ?? null,
+				dates: row.dates,
+				tripCount: row.dates.length,
+				matched: Boolean(matched)
+			};
+		});
+		importDryRunDone = true;
+		importDone = false;
+		importLog = [];
+	}
+
+	async function runImport() {
+		if (!importDryRunDone) return;
+		importing = true;
+		importLog = [];
+
+		const activeLookup: Record<string, Dog> = {};
+		for (const dog of activeDogs) {
+			activeLookup[dog.name.toLowerCase().trim()] = dog;
+		}
+
+		let totalCreated = 0;
+		let totalSkipped = 0;
+
+		for (const row of MARCH_2026_DATA) {
+			const dog = activeLookup[row.name.toLowerCase().trim()];
+			if (!dog) {
+				importLog = [...importLog, `⚠ Skipped "${row.name}" — no matching active dog`];
+				totalSkipped++;
+				continue;
+			}
+
+			const sortedDates = [...row.dates].sort();
+			for (const dateStr of sortedDates) {
+				const parts = dateStr.split('-').map(Number);
+				const tripDate = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0); // noon local time
+				await importHistoricalDayTrip(dog.id, tripDate, $authProfile);
+				totalCreated++;
+			}
+
+			// Update lastDayTripDate to the most recent imported date
+			const lastDateStr = sortedDates[sortedDates.length - 1];
+			const lp = lastDateStr.split('-').map(Number);
+			const lastDate = new Date(lp[0], lp[1] - 1, lp[2], 12, 0, 0);
+			await updateDog(dog.id, {
+				lastDayTripDate: lastDate,
+				isOutOnDayTrip: false,
+				currentDayTripStartedAt: null
+			});
+
+			importLog = [...importLog, `✓ ${dog.name} — ${row.dates.length} trip${row.dates.length === 1 ? '' : 's'} imported (${sortedDates.join(', ')})`];
+		}
+
+		importLog = [...importLog, ``, `Done: ${totalCreated} trips created, ${totalSkipped} dogs skipped.`];
+		importing = false;
+		importDone = true;
+		await refresh();
+	}
 
 	$: {
 		const canLoad = !firebaseEnabled || ($authReady && Boolean($authUser));
@@ -39,6 +151,7 @@
 	})();
 	$: monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
 	$: monthLabel = monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+	$: currentYear = monthStart.getFullYear();
 
 	$: monthlyLogs = logs.filter((log) => {
 		const startedAt = toDate(log.startedAt);
@@ -57,6 +170,11 @@
 
 	$: tripHoursByDog = monthlyLogs.reduce<Record<string, number>>((acc, log) => {
 		acc[log.dogId] = (acc[log.dogId] ?? 0) + durationHours(log);
+		return acc;
+	}, {});
+
+	$: allTimeTripsCountByDog = logs.reduce<Record<string, number>>((acc, log) => {
+		acc[log.dogId] = (acc[log.dogId] ?? 0) + 1;
 		return acc;
 	}, {});
 
@@ -91,11 +209,64 @@
 		.filter((d) => !d.isOutOnDayTrip && !getEligibility(d).eligible)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
+	$: dogStatsRows = activeDogs.slice().sort((a, b) => {
+		const aDays = daysSince(a.lastDayTripDate) ?? 9999;
+		const bDays = daysSince(b.lastDayTripDate) ?? 9999;
+		return bDays - aDays;
+	});
+
+	$: sortedMonthlyLogs = [...monthlyLogs]
+		.filter((log) => Boolean(log.endedAt))
+		.sort((a, b) => {
+			const aTime = toDate(a.startedAt)?.getTime() ?? 0;
+			const bTime = toDate(b.startedAt)?.getTime() ?? 0;
+			return bTime - aTime;
+		});
+
+	$: yearLogs = logs.filter((log) => {
+		const d = toDate(log.startedAt);
+		return d ? d.getFullYear() === currentYear : false;
+	});
+
+	$: yearlyStats = (() => {
+		const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+		const stats = MONTHS.map((name) => ({ name, trips: 0, hours: 0 }));
+		for (const log of yearLogs) {
+			const d = toDate(log.startedAt);
+			if (!d) continue;
+			stats[d.getMonth()].trips += 1;
+			stats[d.getMonth()].hours += durationHours(log);
+		}
+		return stats;
+	})();
+
+	$: yearTripTotal = yearLogs.length;
+	$: yearHourTotal = yearLogs.reduce((sum, log) => sum + durationHours(log), 0);
+
 	function durationHours(log: DayTripLog) {
 		const startedAt = toDate(log.startedAt);
 		const endedAt = toDate(log.endedAt) ?? new Date();
 		if (!startedAt) return 0;
 		return Math.max(0, (endedAt.getTime() - startedAt.getTime()) / 3_600_000);
+	}
+
+	function formatDuration(hours: number): string {
+		if (hours < 0.01) return '—';
+		const totalMins = Math.round(hours * 60);
+		const h = Math.floor(totalMins / 60);
+		const m = totalMins % 60;
+		if (h === 0) return `${m}m`;
+		return m === 0 ? `${h}h` : `${h}h ${m}m`;
+	}
+
+	function formatTime(d: Date | null): string {
+		if (!d) return '—';
+		return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+	}
+
+	function formatShortDate(d: Date | null): string {
+		if (!d) return '—';
+		return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
 	}
 
 	function getEligibility(dog: Dog) {
@@ -150,553 +321,1045 @@
 	}
 </script>
 
-<section class="daytrip-board">
-	<div class="daytrip-grid-board">
-		<div class="daytrip-hero">
-			<div>
-				<h2 class="daytrip-title">
-					{monthLabel} Trips: {monthlyTripCount} | Hours: {monthlyHourTotal.toFixed(1)}
-				</h2>
-				<p class="daytrip-sub whiteboard-hand erase-marker-blue">{outNowCount} dog(s) currently out on day trips</p>
+<section class="dt-page">
+	<div class="dt-grid">
+
+		<!-- Header -->
+		<div class="dt-header">
+			<div class="dt-header-top">
+				<div class="dt-header-info">
+					<h2 class="dt-title">Day Trips</h2>
+					<div class="dt-stats-row">
+						{#if outNowCount > 0}
+							<span class="dt-stat-chip dt-stat-chip-out typewriter">{outNowCount} out now</span>
+						{/if}
+						<span class="dt-stat-chip typewriter">{monthLabel} · {monthlyTripCount} trips · {monthlyHourTotal.toFixed(1)} hrs</span>
+					</div>
+				</div>
+				<div class="dt-header-controls">
+					<input type="month" class="dt-month-input typewriter" bind:value={monthFilter} />
+					<button class="dt-control-btn typewriter" on:click={refresh}>Refresh</button>
+				</div>
 			</div>
-			<div class="daytrip-controls">
-				<input type="month" class="month-input" bind:value={monthFilter} />
-				<button class="refresh-trip-btn typewriter" on:click={refresh}>
-					Refresh
-				</button>
-			</div>
+
+			<nav class="dt-tabs" aria-label="Day trip views">
+				<button class="dt-tab" class:dt-tab-active={activeTab === 'board'} on:click={() => activeTab = 'board'}>Board</button>
+				<button class="dt-tab" class:dt-tab-active={activeTab === 'log'} on:click={() => activeTab = 'log'}>Log</button>
+				<button class="dt-tab" class:dt-tab-active={activeTab === 'dogs'} on:click={() => activeTab = 'dogs'}>Dogs</button>
+				<button class="dt-tab" class:dt-tab-active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
+				<button class="dt-tab dt-tab-import" class:dt-tab-active={activeTab === 'import'} on:click={() => activeTab = 'import'}>Import</button>
+			</nav>
 		</div>
 
-		<div class="daytrip-sheet">
-			{#if loading}
-				<p class="daytrip-status whiteboard-hand">Loading trip board...</p>
-			{:else if activeDogs.length === 0}
-				<p class="daytrip-status whiteboard-hand">No active dogs found.</p>
-			{:else}
+		{#if loading}
+			<p class="dt-loading typewriter">Loading trip board...</p>
 
-				<!-- Mobile card layout -->
-				<div class="daytrip-mobile-list">
+		<!-- ───── BOARD ───── -->
+		{:else if activeTab === 'board'}
+			<div class="dt-board">
 
-					<!-- Out Now -->
-					<div class="trip-section">
-						<h3 class="trip-section-label">Out Now <span class="trip-section-count">({dogsOut.length})</span></h3>
-						{#if dogsOut.length === 0}
-							<p class="trip-section-empty typewriter">none out right now</p>
-						{:else}
-							{#each dogsOut as dog}
-								{@const openTrip = openTripByDog[dog.id]}
-								<article class="trip-card trip-card-out">
-									<header class="trip-card-header">
-										<div>
-											<p class="trip-name">{dog.name}</p>
-											<p class="trip-meta typewriter">Kennel: {dog.outdoorKennelAssignment || 'Unassigned'}</p>
-										</div>
-										<p class="trip-count whiteboard-hand erase-marker-red">{tripCountByDog[dog.id] ?? 0}</p>
-									</header>
-									<p class="trip-active-note whiteboard-hand">Out since {formatDateTime(openTrip?.startedAt ?? dog.currentDayTripStartedAt)}</p>
-									<button class="btn" on:click={() => toggleOut(dog)}>Mark Returned</button>
-								</article>
-							{/each}
-						{/if}
+				<!-- Eligible -->
+				<div class="dt-section dt-section-sage">
+					<div class="dt-section-head">
+						<h3 class="dt-section-title">Eligible</h3>
+						<span class="dt-section-count typewriter">{dogsEligible.length}</span>
 					</div>
-
-					<!-- Eligible -->
-					<div class="trip-section">
-						<h3 class="trip-section-label">Eligible <span class="trip-section-count">({dogsEligible.length})</span></h3>
-						{#if dogsEligible.length === 0}
-							<p class="trip-section-empty typewriter">none ready</p>
-						{:else}
-							{#each dogsEligible as dog}
-								{@const eligibility = getEligibility(dog)}
-								{@const days = daysSince(dog.lastDayTripDate)}
-								{@const overdue = days === null || days >= 14}
-								<article class="trip-card">
-									<header class="trip-card-header">
-										<div>
-											<p class="trip-name">{dog.name}</p>
-											<p class="trip-meta typewriter">Kennel: {dog.outdoorKennelAssignment || 'Unassigned'}</p>
+					{#if dogsEligible.length === 0}
+						<p class="dt-section-empty typewriter">none ready</p>
+					{:else}
+						{#each dogsEligible as dog}
+							{@const eligibility = getEligibility(dog)}
+							{@const days = daysSince(dog.lastDayTripDate)}
+							{@const overdue = days === null || days >= 14}
+							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
+							<div class="dt-row" class:dt-row-overdue={overdue}>
+								<div class="dt-row-main">
+									<div class="dt-row-info">
+										<p class="dt-row-name">{dog.name}</p>
+										<p class="dt-row-meta typewriter">Kennel {dog.outdoorKennelAssignment || '—'} · {days !== null ? `Last trip ${days}d ago` : 'No trips yet'}</p>
+										<div class="dt-row-pills">
+											<span class={`pill ${statusPillClass(eligibility.status)}`}>{eligibility.status === 'difficult' ? 'Difficult' : 'Eligible'}</span>
+											{#if overdue}<span class="pill pill-orange">overdue</span>{/if}
 										</div>
-										<p class="trip-count whiteboard-hand erase-marker-red">{tripCountByDog[dog.id] ?? 0}</p>
-									</header>
-									<div class="trip-row">
-										<span class={`pill ${statusPillClass(eligibility.status)}`}>
-											{eligibility.status === 'difficult' ? 'Difficult' : 'Eligible'}
-										</span>
-										{#if overdue}
-											<span class="pill pill-orange">overdue</span>
-										{/if}
-										<span class="trip-hours typewriter">{(tripHoursByDog[dog.id] ?? 0).toFixed(1)} hrs</span>
 									</div>
-									<p class="trip-idle typewriter">
-										{days !== null ? `Last trip: ${days} day${days === 1 ? '' : 's'} ago` : 'No trips yet'}
-									</p>
-									{#if eligibility.reasons.length > 0}
-										<p class="trip-warning">{eligibility.reasons[0]}</p>
-									{/if}
-									<button class="btn" on:click={() => toggleOut(dog)}>Send Out</button>
-								</article>
-							{/each}
-						{/if}
-					</div>
-
-					<!-- Not Eligible -->
-					<div class="trip-section">
-						<h3 class="trip-section-label">Not Eligible <span class="trip-section-count">({dogsIneligible.length})</span></h3>
-						{#if dogsIneligible.length === 0}
-							<p class="trip-section-empty typewriter">none</p>
-						{:else}
-							{#each dogsIneligible as dog}
-								{@const eligibility = getEligibility(dog)}
-								<article class="trip-card trip-card-ineligible">
-									<header class="trip-card-header">
-										<div>
-											<p class="trip-name">{dog.name}</p>
-											<p class="trip-meta typewriter">Kennel: {dog.outdoorKennelAssignment || 'Unassigned'}</p>
-										</div>
-									</header>
-									<div class="trip-row">
-										<span class="pill pill-red">Ineligible</span>
+									<div class="dt-row-aside">
+										<span class="dt-alltime-num whiteboard-hand erase-marker-red">{allTime}</span>
+										<span class="dt-alltime-label typewriter">trips</span>
 									</div>
-									{#if eligibility.reasons.length > 0}
-										<p class="trip-warning">{eligibility.reasons[0]}</p>
-									{/if}
-								</article>
-							{/each}
-						{/if}
-					</div>
-
+								</div>
+								{#if eligibility.reasons.length > 0}
+									<p class="dt-row-warning">{eligibility.reasons[0]}</p>
+								{/if}
+								<button class="board-control-btn board-control-btn-sm" on:click={() => toggleOut(dog)}>Send Out</button>
+							</div>
+						{/each}
+					{/if}
 				</div>
 
-				<!-- Desktop table layout -->
-				<div class="daytrip-table-wrap">
-					<table class="daytrip-table">
+				<!-- Out Now -->
+				<div class="dt-section dt-section-sky">
+					<div class="dt-section-head">
+						<h3 class="dt-section-title">Out Now</h3>
+						<span class="dt-section-count typewriter">{dogsOut.length}</span>
+					</div>
+					{#if dogsOut.length === 0}
+						<p class="dt-section-empty typewriter">none out right now</p>
+					{:else}
+						{#each dogsOut as dog}
+							{@const openTrip = openTripByDog[dog.id]}
+							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
+							<div class="dt-row dt-row-out">
+								<div class="dt-row-main">
+									<div class="dt-row-info">
+										<p class="dt-row-name">{dog.name}</p>
+										<p class="dt-row-meta typewriter">Kennel {dog.outdoorKennelAssignment || '—'} · Out since {formatDateTime(openTrip?.startedAt ?? dog.currentDayTripStartedAt)}</p>
+									</div>
+									<div class="dt-row-aside">
+										<span class="dt-alltime-num whiteboard-hand erase-marker-red">{allTime}</span>
+										<span class="dt-alltime-label typewriter">trips</span>
+									</div>
+								</div>
+								<button class="board-control-btn board-control-btn-sm" on:click={() => toggleOut(dog)}>Mark Returned</button>
+							</div>
+						{/each}
+					{/if}
+				</div>
+
+				<!-- Not Eligible -->
+				<div class="dt-section dt-section-sand dt-section-dim">
+					<div class="dt-section-head">
+						<h3 class="dt-section-title">Not Eligible</h3>
+						<span class="dt-section-count typewriter">{dogsIneligible.length}</span>
+					</div>
+					{#if dogsIneligible.length === 0}
+						<p class="dt-section-empty typewriter">none</p>
+					{:else}
+						{#each dogsIneligible as dog}
+							{@const eligibility = getEligibility(dog)}
+							<div class="dt-row dt-row-ineligible">
+								<div class="dt-row-main">
+									<div class="dt-row-info">
+										<p class="dt-row-name">{dog.name}</p>
+										<p class="dt-row-meta typewriter">Kennel {dog.outdoorKennelAssignment || '—'}</p>
+									</div>
+									<span class="pill pill-red">Ineligible</span>
+								</div>
+								{#if eligibility.reasons.length > 0}
+									<p class="dt-row-warning">{eligibility.reasons[0]}</p>
+								{/if}
+							</div>
+						{/each}
+					{/if}
+				</div>
+
+			</div>
+
+		<!-- ───── LOG ───── -->
+		{:else if activeTab === 'log'}
+			<div class="dt-panel">
+				<div class="dt-panel-head">
+					<div>
+						<p class="dt-panel-title">{monthLabel}</p>
+						<p class="dt-panel-sub typewriter">{sortedMonthlyLogs.length} completed trip{sortedMonthlyLogs.length === 1 ? '' : 's'} · {monthlyHourTotal.toFixed(1)} total hrs{outNowCount > 0 ? ` · ${outNowCount} in progress` : ''}</p>
+					</div>
+				</div>
+
+				{#if sortedMonthlyLogs.length === 0}
+					<p class="dt-panel-empty typewriter">No completed trips logged for {monthLabel}.</p>
+				{:else}
+					<div class="dt-table-wrap">
+						<table class="dt-table">
+							<thead>
+								<tr>
+									<th>Date</th>
+									<th>Dog</th>
+									<th>Time Out</th>
+									<th>Time In</th>
+									<th>Duration</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each sortedMonthlyLogs as log}
+									{@const startDate = toDate(log.startedAt)}
+									{@const endDate = toDate(log.endedAt)}
+									{@const dog = dogs.find(d => d.id === log.dogId)}
+									<tr>
+										<td class="td-muted typewriter">{formatShortDate(startDate)}</td>
+										<td class="td-name">
+											{#if dog}
+												<a href="/dogs/{dog.id}" class="dt-name-link">{dog.name}</a>
+											{:else}
+												<span class="td-muted">Unknown</span>
+											{/if}
+										</td>
+										<td class="td-muted typewriter">{formatTime(startDate)}</td>
+										<td class="td-muted typewriter">{formatTime(endDate)}</td>
+										<td class="td-strong typewriter">{formatDuration(durationHours(log))}</td>
+									</tr>
+								{/each}
+							</tbody>
+							<tfoot>
+								<tr class="dt-table-foot">
+									<td colspan="4" class="td-foot-label typewriter">Total</td>
+									<td class="td-strong typewriter">{formatDuration(monthlyHourTotal)}</td>
+								</tr>
+							</tfoot>
+						</table>
+					</div>
+				{/if}
+			</div>
+
+		<!-- ───── DOGS ───── -->
+		{:else if activeTab === 'dogs'}
+			<div class="dt-panel">
+				<div class="dt-panel-head">
+					<div>
+						<p class="dt-panel-title">All Dogs</p>
+						<p class="dt-panel-sub typewriter">Sorted by most overdue · {monthStart.toLocaleDateString('en-US', { month: 'short' })} stats shown for monthly columns</p>
+					</div>
+				</div>
+
+				<div class="dt-table-wrap">
+					<table class="dt-table">
 						<thead>
 							<tr>
-								<th class="py-3">Dog</th>
-								<th class="py-3 text-center">{monthStart.toLocaleDateString('en-US', { month: 'short' })} Trips</th>
-								<th class="py-3">Status</th>
-								<th class="py-3">Info</th>
-								<th class="py-3">Actions</th>
+								<th>Dog</th>
+								<th class="th-center">All-Time</th>
+								<th>Last Trip</th>
+								<th class="th-center">{monthStart.toLocaleDateString('en-US', { month: 'short' })} Trips</th>
+								<th class="th-center">{monthStart.toLocaleDateString('en-US', { month: 'short' })} Hrs</th>
+								<th>Status</th>
 							</tr>
 						</thead>
-
-						<!-- Out Now -->
 						<tbody>
-							<tr class="section-header-row">
-								<td colspan="5" class="section-header-cell">Out Now ({dogsOut.length})</td>
-							</tr>
-							{#if dogsOut.length === 0}
-								<tr><td colspan="5" class="section-empty-cell">none out right now</td></tr>
-							{:else}
-								{#each dogsOut as dog}
-									{@const openTrip = openTripByDog[dog.id]}
-									<tr>
-										<td class="py-4">
-											<p class="trip-table-name">{dog.name}</p>
-											<p class="trip-table-meta">Kennel: {dog.outdoorKennelAssignment || '—'}</p>
-										</td>
-										<td class="py-4 text-center">
-											<p class="trip-table-count">{tripCountByDog[dog.id] ?? 0}</p>
-											<p class="trip-table-hours">{(tripHoursByDog[dog.id] ?? 0).toFixed(1)} hrs</p>
-										</td>
-										<td class="py-4">
-											<div class="trip-tag">I'm on a day trip!</div>
-										</td>
-										<td class="py-4">
-											<p class="trip-table-meta">Out since {formatDateTime(openTrip?.startedAt ?? dog.currentDayTripStartedAt)}</p>
-										</td>
-										<td class="py-4">
-											<button class="btn" on:click={() => toggleOut(dog)}>Mark Returned</button>
-										</td>
-									</tr>
-								{/each}
-							{/if}
+							{#each dogStatsRows as dog}
+								{@const days = daysSince(dog.lastDayTripDate)}
+								{@const overdue = days === null || days >= 14}
+								{@const eligibility = getEligibility(dog)}
+								{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
+								<tr class:tr-overdue={overdue && eligibility.eligible && !dog.isOutOnDayTrip}>
+									<td class="td-name">
+										<a href="/dogs/{dog.id}" class="dt-name-link">{dog.name}</a>
+										{#if dog.isOutOnDayTrip}
+											<span class="dt-out-badge typewriter">out now</span>
+										{/if}
+									</td>
+									<td class="td-center">
+										<span class="dt-alltime-num whiteboard-hand erase-marker-red">{allTime}</span>
+									</td>
+									<td class="td-muted typewriter">
+										{#if days !== null}
+											{days}d ago{#if overdue && eligibility.eligible && !dog.isOutOnDayTrip}&thinsp;<span class="dt-overdue-flag">overdue</span>{/if}
+										{:else}
+											never
+										{/if}
+									</td>
+									<td class="td-center td-muted typewriter">{tripCountByDog[dog.id] ?? 0}</td>
+									<td class="td-center td-muted typewriter">{(tripHoursByDog[dog.id] ?? 0).toFixed(1)}</td>
+									<td>
+										{#if dog.isOutOnDayTrip}
+											<span class="dt-on-trip-tag">on trip</span>
+										{:else}
+											<span class={`pill pill-sm ${statusPillClass(eligibility.status)}`}>{eligibility.status === 'eligible' ? 'Eligible' : eligibility.status === 'difficult' ? 'Difficult' : 'Ineligible'}</span>
+										{/if}
+									</td>
+								</tr>
+							{/each}
 						</tbody>
-
-						<!-- Eligible -->
-						<tbody>
-							<tr class="section-header-row">
-								<td colspan="5" class="section-header-cell">Eligible ({dogsEligible.length})</td>
-							</tr>
-							{#if dogsEligible.length === 0}
-								<tr><td colspan="5" class="section-empty-cell">none ready</td></tr>
-							{:else}
-								{#each dogsEligible as dog}
-									{@const eligibility = getEligibility(dog)}
-									{@const days = daysSince(dog.lastDayTripDate)}
-									{@const overdue = days === null || days >= 14}
-									<tr>
-										<td class="py-4">
-											<p class="trip-table-name">{dog.name}</p>
-											<p class="trip-table-meta">Kennel: {dog.outdoorKennelAssignment || '—'} | Last trip: {days !== null ? `${days}d ago` : 'never'}</p>
-										</td>
-										<td class="py-4 text-center">
-											<p class="trip-table-count">{tripCountByDog[dog.id] ?? 0}</p>
-											<p class="trip-table-hours">{(tripHoursByDog[dog.id] ?? 0).toFixed(1)} hrs</p>
-										</td>
-										<td class="py-4">
-											<span class={`pill ${statusPillClass(eligibility.status)}`}>
-												{eligibility.status === 'difficult' ? 'Difficult' : 'Eligible'}
-											</span>
-											{#if eligibility.reasons.length > 0}
-												<p class="trip-warning mt-2">{eligibility.reasons[0]}</p>
-											{/if}
-										</td>
-										<td class="py-4">
-											{#if overdue}
-												<span class="pill pill-orange">overdue</span>
-											{/if}
-										</td>
-										<td class="py-4">
-											<button class="btn" on:click={() => toggleOut(dog)}>Send Out</button>
-										</td>
-									</tr>
-								{/each}
-							{/if}
-						</tbody>
-
-						<!-- Not Eligible -->
-						<tbody>
-							<tr class="section-header-row">
-								<td colspan="5" class="section-header-cell">Not Eligible ({dogsIneligible.length})</td>
-							</tr>
-							{#if dogsIneligible.length === 0}
-								<tr><td colspan="5" class="section-empty-cell">none</td></tr>
-							{:else}
-								{#each dogsIneligible as dog}
-									{@const eligibility = getEligibility(dog)}
-									<tr class="row-ineligible">
-										<td class="py-4">
-											<p class="trip-table-name">{dog.name}</p>
-											<p class="trip-table-meta">Kennel: {dog.outdoorKennelAssignment || '—'}</p>
-										</td>
-										<td></td>
-										<td class="py-4">
-											<span class="pill pill-red">Ineligible</span>
-										</td>
-										<td colspan="2" class="py-4">
-											{#if eligibility.reasons.length > 0}
-												<p class="trip-warning">{eligibility.reasons[0]}</p>
-											{/if}
-										</td>
-									</tr>
-								{/each}
-							{/if}
-						</tbody>
-
 					</table>
 				</div>
+			</div>
 
-			{/if}
-		</div>
+		<!-- ───── STATS ───── -->
+		{:else if activeTab === 'stats'}
+			<div class="dt-panel">
+				<div class="dt-panel-head">
+					<div>
+						<p class="dt-panel-title">{currentYear} Summary</p>
+						<p class="dt-panel-sub typewriter">{yearTripTotal} trips · {yearHourTotal.toFixed(1)} hrs total</p>
+					</div>
+				</div>
+
+				<div class="dt-table-wrap">
+					<table class="dt-table dt-table-stats">
+						<thead>
+							<tr>
+								<th>Month</th>
+								<th class="th-center">Trips</th>
+								<th class="th-center">Hours</th>
+								<th class="th-center">Avg per Trip</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each yearlyStats as month}
+								<tr class:tr-empty={month.trips === 0}>
+									<td class="td-month-name">{month.name}</td>
+									<td class="td-center typewriter">{month.trips > 0 ? month.trips : '—'}</td>
+									<td class="td-center typewriter">{month.hours > 0 ? month.hours.toFixed(1) : '—'}</td>
+									<td class="td-center typewriter">{month.trips > 0 ? formatDuration(month.hours / month.trips) : '—'}</td>
+								</tr>
+							{/each}
+						</tbody>
+						<tfoot>
+							<tr class="dt-table-foot">
+								<td class="td-foot-label typewriter">Total</td>
+								<td class="td-center typewriter">{yearTripTotal}</td>
+								<td class="td-center typewriter">{yearHourTotal.toFixed(1)}</td>
+								<td class="td-center typewriter">{yearTripTotal > 0 ? `${formatDuration(yearHourTotal / yearTripTotal)} avg` : '—'}</td>
+							</tr>
+						</tfoot>
+					</table>
+				</div>
+			</div>
+
+		<!-- ───── IMPORT ───── -->
+		{:else if activeTab === 'import'}
+			<div class="dt-panel dt-import-panel">
+				<div class="dt-panel-head">
+					<div>
+						<p class="dt-panel-title">Import March 2026 Data</p>
+						<p class="dt-panel-sub typewriter">One-time import from spreadsheet — 21 dogs, 44 trips</p>
+					</div>
+				</div>
+
+				<div class="dt-import-actions">
+					<button class="dt-import-btn" on:click={runDryRun} disabled={importing}>
+						Dry Run
+					</button>
+					{#if importDryRunDone && !importDone}
+						<button class="dt-import-btn dt-import-btn-go" on:click={runImport} disabled={importing}>
+							{importing ? 'Importing…' : 'Import Now'}
+						</button>
+					{/if}
+					{#if importDone}
+						<span class="dt-import-done typewriter">Import complete!</span>
+					{/if}
+				</div>
+
+				{#if importDryRunDone}
+					<div class="dt-import-preview">
+						<p class="dt-import-section-label typewriter">Preview</p>
+						<div class="dt-table-wrap">
+							<table class="dt-table dt-import-table">
+								<thead>
+									<tr>
+										<th>Spreadsheet Name</th>
+										<th>Matched Dog</th>
+										<th class="th-center">Trips</th>
+										<th>Dates</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each importPreview as row}
+										<tr class:dt-import-row-miss={!row.matched}>
+											<td class="typewriter">{row.sheetName}</td>
+											<td>
+												{#if row.matched}
+													<span class="dt-import-match">{row.dogName}</span>
+												{:else}
+													<span class="dt-import-miss typewriter">no match</span>
+												{/if}
+											</td>
+											<td class="td-center typewriter">{row.matched ? row.tripCount : '—'}</td>
+											<td class="dt-import-dates typewriter">
+												{#if row.matched}
+													{row.dates.map(d => d.replace('2026-0', '').replace('2026-', '')).join(', ')}
+												{:else}
+													—
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+								<tfoot>
+									<tr class="dt-table-foot">
+										<td class="td-foot-label typewriter">Total</td>
+										<td class="td-foot-label typewriter">{importPreview.filter(r => r.matched).length} matched</td>
+										<td class="td-center typewriter">{importPreview.filter(r => r.matched).reduce((s, r) => s + r.tripCount, 0)}</td>
+										<td></td>
+									</tr>
+								</tfoot>
+							</table>
+						</div>
+					</div>
+				{/if}
+
+				{#if importLog.length > 0}
+					<div class="dt-import-log">
+						<p class="dt-import-section-label typewriter">Import Log</p>
+						<pre class="dt-import-log-pre typewriter">{importLog.join('\n')}</pre>
+					</div>
+				{/if}
+
+				<div class="dt-import-note">
+					<p class="typewriter">Note: All trips will be logged with 00:00 duration (start = end time). Dogs marked adopted in Firestore will be skipped by the name matcher since they won't appear in the active dog list.</p>
+				</div>
+			</div>
+		{/if}
+
 	</div>
 </section>
 
 <style>
-	.daytrip-board {
+	/* ── Page ── */
+	.dt-page {
 		width: 100%;
 	}
 
-	.daytrip-grid-board {
-		border: 1px solid #d5e0ea;
-		background: rgba(255, 255, 255, 0.9);
-	}
-
-	.daytrip-hero {
-		padding: 0.82rem 0.78rem;
+	.dt-grid {
 		display: grid;
-		gap: 0.66rem;
-		border-bottom: 1px solid #d5e0ea;
+		gap: 0.58rem;
 	}
 
-	.daytrip-title {
-		margin-top: 0.44rem;
-		font-size: 1.34rem;
-		line-height: 1.08;
-		color: var(--marker-black);
-	}
-
-	.daytrip-sub {
-		margin-top: 0.28rem;
-		font-size: 0.86rem;
-	}
-
-	.daytrip-controls {
+	/* ── Header ── */
+	.dt-header {
 		display: grid;
-		gap: 0.34rem;
+		gap: 0.5rem;
+		padding: 0.08rem;
 	}
 
-	.month-input,
-	.refresh-trip-btn {
-		min-height: 2rem;
-		border: 1px solid #d5e0ea;
-		border-radius: 0.24rem;
-		padding: 0.28rem 0.58rem;
-		background: #ffffff;
-		color: var(--marker-black);
-	}
-
-	.month-input {
-		font-size: 1rem;
-	}
-
-	.refresh-trip-btn {
-		font-size: 0.72rem;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		font-weight: 700;
-		background: var(--sticky-yellow);
-	}
-
-	.daytrip-sheet {
-		padding: 0;
-	}
-
-	.daytrip-status {
-		font-size: 0.88rem;
-		color: var(--ink-soft);
-		padding: 0.72rem;
-	}
-
-	/* Sections */
-	.daytrip-mobile-list {
-		display: grid;
-		gap: 0;
-	}
-
-	.trip-section {
-		display: grid;
-		gap: 0.42rem;
-		padding: 0.72rem 0.78rem;
-		border-top: 1px solid #d5e0ea;
-	}
-
-	.trip-section-label {
-		font-family: var(--font-ui);
-		font-size: clamp(1.28rem, 5.8vw, 1.8rem);
-		font-weight: 400;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--marker-black);
-		line-height: 1.02;
-	}
-
-	.trip-section-count {
-		font-weight: 400;
-	}
-
-	.trip-section-empty {
-		font-size: 0.76rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--ink-soft);
-		padding: 0.3rem 0;
-	}
-
-	/* Cards */
-	.trip-card {
-		border: 1.5px solid #c7cfda;
-		border-radius: 0.25rem;
-		background: #ffffff;
-		padding: 0.52rem 0.56rem;
-	}
-
-	.trip-card-out {
-		border-color: #95bee1;
-		background: #f0f8ff;
-	}
-
-	.trip-card-ineligible {
-		opacity: 0.72;
-	}
-
-	.trip-card-header {
+	.dt-header-top {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 0.45rem;
-	}
-
-	.trip-name {
-		font-size: 1rem;
-		font-weight: 800;
-		color: var(--marker-black);
-		line-height: 1;
-	}
-
-	.trip-meta {
-		margin-top: 0.14rem;
-		font-size: 0.68rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--ink-soft);
-	}
-
-	.trip-count {
-		font-size: 1.3rem;
-		line-height: 1;
-		font-weight: 700;
-	}
-
-	.trip-row {
-		margin-top: 0.44rem;
-		display: flex;
-		align-items: center;
-		gap: 0.42rem;
+		gap: 0.6rem;
 		flex-wrap: wrap;
 	}
 
+	.dt-header-info {
+		display: grid;
+		gap: 0.22rem;
+	}
 
-	.trip-hours {
-		margin-left: auto;
+	.dt-title {
+		margin: 0;
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: clamp(1.45rem, 2.4vw, 2.05rem);
+		font-weight: 500;
+		letter-spacing: 0.01em;
+		line-height: 1.04;
+		color: #303948;
+	}
+
+	.dt-stats-row {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		flex-wrap: wrap;
+	}
+
+	.dt-stat-chip {
+		display: inline-flex;
+		align-items: center;
+		min-height: 1.72rem;
+		padding: 0.18rem 0.52rem;
+		border: 1px solid #d8e0ea;
+		border-radius: 0.52rem;
+		background: #f7f9fc;
+		font-size: 0.66rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		color: #4a5a6e;
+	}
+
+	.dt-stat-chip-out {
+		border-color: #b3d4c0;
+		background: #ecf7f0;
+		color: #2a6040;
+	}
+
+	.dt-header-controls {
+		display: flex;
+		gap: 0.3rem;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.dt-month-input {
+		min-height: 1.96rem;
+		border: 1px solid #d8e0ea;
+		border-radius: 0.52rem;
+		padding: 0.24rem 0.52rem;
+		background: #f7f9fc;
+		color: #2d3b4f;
+		font-size: 1rem;
+	}
+
+	.dt-control-btn {
+		display: inline-flex;
+		align-items: center;
+		min-height: 1.96rem;
+		border: 1px solid #cad7e8;
+		border-radius: 0.58rem;
+		padding: 0.24rem 0.66rem;
+		font-size: 0.63rem;
+		font-weight: 700;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		color: #2f435c;
+		background: #f4f8fd;
+		cursor: pointer;
+	}
+
+	.dt-control-btn:hover {
+		background: #eaf2fb;
+	}
+
+	/* ── Tabs ── */
+	.dt-tabs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+
+	.dt-tab {
+		min-height: 1.88rem;
+		border: 1px solid #d2dbe8;
+		border-radius: 0.52rem;
+		background: #ffffff;
+		padding: 0.26rem 0.68rem;
+		font-family: var(--font-ui);
+		font-size: 0.63rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: #2f425b;
+		cursor: pointer;
+	}
+
+	.dt-tab:hover {
+		background: #f4f8fd;
+	}
+
+	.dt-tab-active {
+		border-color: #2e84b7;
+		background: #e8f3ff;
+		color: #1e4f72;
+	}
+
+	/* ── Loading ── */
+	.dt-loading {
+		padding: 0.72rem 0.74rem;
+		border: 1px solid #d4dde8;
+		border-radius: 0.7rem;
+		background: #f8fbff;
+		font-size: 0.88rem;
+		color: var(--ink-soft);
+	}
+
+	/* ── Board ── */
+	.dt-board {
+		display: grid;
+		gap: 0.58rem;
+	}
+
+	.dt-section {
+		display: grid;
+		gap: 0.42rem;
+		border-radius: 0.92rem;
+		padding: 0.62rem 0.58rem 0.58rem;
+	}
+
+	/* Out Now — blue (#016aa5) tint */
+	.dt-section-sky {
+		background: linear-gradient(180deg, #ddeef8 0%, #d4e8f4 100%);
+	}
+
+	/* Eligible — green (#3aaf2a) tint */
+	.dt-section-sage {
+		background: linear-gradient(180deg, #ddf0d8 0%, #d5ebd0 100%);
+	}
+
+	/* Not Eligible — purple (#933980) tint */
+	.dt-section-sand {
+		background: linear-gradient(180deg, #f0e4ee 0%, #e9dde8 100%);
+	}
+
+	.dt-section-dim {
+		opacity: 0.82;
+	}
+
+	.dt-section-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.44rem;
+	}
+
+	.dt-section-title {
+		font-family: var(--font-ui);
+		font-size: 0.7rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #4a5a6e;
+		line-height: 1;
+	}
+
+	.dt-section-count {
+		font-size: 0.66rem;
+		font-weight: 700;
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
+		color: #ffffff;
+		background: rgba(50, 80, 110, 0.45);
+	}
+
+	.dt-section-empty {
 		font-size: 0.7rem;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: var(--ink-soft);
+		padding: 0.1rem 0;
 	}
 
-	.trip-warning {
-		margin-top: 0.38rem;
-		font-size: 0.76rem;
+	/* ── Rows (inside sections) ── */
+	.dt-row {
+		display: flex;
+		flex-direction: column;
+		gap: 0.36rem;
+		border: 1px solid rgba(96, 109, 123, 0.15);
+		border-radius: 0.36rem;
+		background: rgba(255, 255, 255, 0.56);
+		padding: 0.52rem 0.56rem;
+	}
+
+	.dt-row-out {
+		border-color: rgba(50, 120, 180, 0.22);
+		background: rgba(255, 255, 255, 0.7);
+	}
+
+	.dt-row-overdue {
+		border-color: rgba(200, 140, 50, 0.3);
+		background: rgba(255, 252, 244, 0.75);
+	}
+
+	.dt-row-ineligible {
+		opacity: 0.72;
+	}
+
+	.dt-row-main {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.dt-row-info {
+		min-width: 0;
+		flex: 1;
+		display: grid;
+		gap: 0.14rem;
+	}
+
+	.dt-row-name {
+		font-family: var(--font-ui);
+		font-size: 0.92rem;
+		font-weight: 700;
+		color: var(--marker-black);
+		line-height: 1;
+	}
+
+	.dt-row-meta {
+		font-size: 0.66rem;
+		letter-spacing: 0.04em;
+		color: var(--ink-soft);
+	}
+
+	.dt-row-pills {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		flex-wrap: wrap;
+		margin-top: 0.12rem;
+	}
+
+	.dt-row-aside {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.04rem;
+		flex-shrink: 0;
+	}
+
+	.dt-alltime-num {
+		font-size: 1.44rem;
+		line-height: 1;
+		font-weight: 700;
+	}
+
+	.dt-alltime-label {
+		font-size: 0.56rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--ink-soft);
+	}
+
+	.dt-row-warning {
+		font-size: 0.74rem;
 		color: var(--marker-red);
 		line-height: 1.2;
 	}
 
-	.trip-active-note,
-	.trip-idle {
-		margin-top: 0.35rem;
-		font-size: 0.78rem;
-		color: var(--ink-soft);
-	}
-
-
-	.trip-tag {
+	/* board-control-btn inherited from global — small variant */
+	.board-control-btn {
 		display: inline-flex;
-		border: 1.5px solid #95bee1;
-		border-radius: 0.2rem;
-		background: #e8f5ff;
-		padding: 0.22rem 0.48rem;
-		font-size: 0.76rem;
-		font-weight: 700;
-		color: #275982;
-	}
-
-	/* Desktop table */
-	.daytrip-table-wrap {
-		display: none;
-		overflow-x: auto;
-	}
-
-	.daytrip-table {
-		min-width: 100%;
-		border-collapse: collapse;
-		text-align: left;
-	}
-
-	.daytrip-table th {
+		align-items: center;
+		justify-content: center;
+		min-height: 1.96rem;
+		border: 1px solid #cad7e8;
+		border-radius: 0.58rem;
+		padding: 0.28rem 0.66rem;
+		font-family: var(--font-ui);
 		font-size: 0.66rem;
 		font-weight: 700;
-		letter-spacing: 0.14em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
-		color: var(--ink-soft);
-		padding: 0.5rem 0.44rem;
+		color: #2f435c;
+		background: #f4f8fd;
+		cursor: pointer;
+		align-self: flex-start;
 	}
 
-	.daytrip-table td {
-		padding: 0.58rem 0.44rem;
-		vertical-align: top;
-		border-top: 1px dashed #c7d0dc;
+	.board-control-btn:hover {
+		background: #eaf2fb;
 	}
 
-	.section-header-row td {
-		border-top: 1px solid #d5e0ea;
+	.board-control-btn-sm {
+		min-height: 1.72rem;
+		font-size: 0.62rem;
+		padding: 0.22rem 0.56rem;
 	}
 
-	.section-header-cell {
-		padding: 0.48rem 0.72rem !important;
-		font-family: var(--font-ui);
-		font-size: clamp(1.1rem, 4.5vw, 1.5rem);
-		font-weight: 400;
+	/* ── Panel (Log / Dogs / Stats) ── */
+	.dt-panel {
+		border: 1px solid #d3dbe6;
+		border-radius: 0.92rem;
+		background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
+		box-shadow: 0 8px 18px rgba(28, 50, 71, 0.06);
+		padding: 0.78rem;
+		display: grid;
+		gap: 0.72rem;
+	}
+
+	.dt-panel-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.dt-panel-title {
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: clamp(1.1rem, 2vw, 1.5rem);
+		font-weight: 500;
+		color: #303948;
+		line-height: 1;
+		margin-bottom: 0.18rem;
+	}
+
+	.dt-panel-sub {
+		font-size: 0.66rem;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: var(--marker-black);
-		background: transparent;
+		color: var(--ink-soft);
 	}
 
-	.section-empty-cell {
-		font-family: var(--font-typewriter);
-		font-size: 0.7rem;
+	.dt-panel-empty {
+		font-size: 0.78rem;
+		color: var(--ink-soft);
+		letter-spacing: 0.04em;
+	}
+
+	/* ── Table ── */
+	.dt-table-wrap {
+		overflow-x: auto;
+		border-radius: 0.52rem;
+		border: 1px solid #dde4ee;
+	}
+
+	.dt-table {
+		width: 100%;
+		border-collapse: collapse;
+		text-align: left;
+		min-width: 400px;
+	}
+
+	.dt-table th {
+		font-family: var(--font-ui);
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--ink-soft);
+		padding: 0.42rem 0.64rem;
+		border-bottom: 1px solid #dde4ee;
+		background: #f5f8fc;
+		white-space: nowrap;
+	}
+
+	.dt-table td {
+		padding: 0.5rem 0.64rem;
+		border-top: 1px solid #edf1f7;
+		vertical-align: middle;
+	}
+
+	.dt-table tbody tr:first-child td {
+		border-top: none;
+	}
+
+	.dt-table tbody tr:hover td {
+		background: #f8fbff;
+	}
+
+	.td-name {
+		font-family: var(--font-ui);
+		font-size: 0.88rem;
+		font-weight: 700;
+		color: var(--marker-black);
+	}
+
+	.td-muted {
+		font-size: 0.78rem;
+		color: #4a5e72;
+	}
+
+	.td-strong {
+		font-size: 0.82rem;
+		font-weight: 700;
+		color: var(--marker-black);
+	}
+
+	.td-center {
+		text-align: center;
+	}
+
+	.th-center {
+		text-align: center;
+	}
+
+	.td-month-name {
+		font-family: var(--font-ui);
+		font-size: 0.86rem;
+		font-weight: 600;
+		color: #303948;
+	}
+
+	.dt-name-link {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.dt-name-link:hover {
+		text-decoration: underline;
+		color: #1e5a8a;
+	}
+
+	.dt-table-foot td {
+		border-top: 2px solid #dde4ee;
+		background: #f5f8fc;
+	}
+
+	.td-foot-label {
+		font-size: 0.66rem;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: var(--ink-soft);
-	}
-
-	.row-ineligible td {
-		opacity: 0.62;
-	}
-
-	.trip-table-name {
-		font-size: 0.94rem;
 		font-weight: 700;
-		color: var(--marker-black);
 	}
 
-	.trip-table-meta {
-		font-size: 0.7rem;
-		color: var(--ink-soft);
+	.tr-overdue td {
+		background: #fffdf5;
 	}
 
-	.trip-table-count {
-		font-size: 1.15rem;
+	.tr-empty td {
+		color: #aab4c0;
+	}
+
+	/* ── Badges / Tags ── */
+	.dt-out-badge,
+	.dt-overdue-flag {
+		display: inline-block;
+		margin-left: 0.28rem;
+		padding: 0.06rem 0.3rem;
+		border-radius: 999px;
+		font-family: var(--font-typewriter);
+		font-size: 0.58rem;
 		font-weight: 700;
-		color: var(--marker-red);
-		line-height: 1;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		vertical-align: middle;
 	}
 
-	.trip-table-hours {
-		font-size: 0.66rem;
+	.dt-out-badge {
+		background: #d6eeff;
+		color: #1e5a8a;
+	}
+
+	.dt-overdue-flag {
+		background: #fde8c8;
+		color: #8a5010;
+	}
+
+	.dt-on-trip-tag {
+		display: inline-flex;
+		border: 1px solid #95bee1;
+		border-radius: 0.28rem;
+		background: #e8f5ff;
+		padding: 0.16rem 0.4rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.62rem;
+		font-weight: 700;
+		color: #275982;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.pill-sm {
+		font-size: 0.62rem;
+		padding: 0.1rem 0.34rem;
+	}
+
+	/* ── Import Tab ── */
+	.dt-tab-import {
+		border-color: #d2c8e8;
+		color: #5a3e7a;
+	}
+
+	.dt-tab-import.dt-tab-active {
+		border-color: #8b5fa8;
+		background: #f2eafa;
+		color: #5a2e7c;
+	}
+
+	.dt-import-panel {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.dt-import-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.dt-import-btn {
+		display: inline-flex;
+		align-items: center;
+		min-height: 2.1rem;
+		border: 1px solid #c8d4e4;
+		border-radius: 0.65rem;
+		padding: 0.3rem 0.9rem;
+		background: #f6f9fd;
+		font-family: var(--font-typewriter);
+		font-size: 0.74rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		color: #2a3f55;
+		cursor: pointer;
+	}
+
+	.dt-import-btn:hover:not(:disabled) {
+		background: #eaf2fb;
+	}
+
+	.dt-import-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.dt-import-btn-go {
+		border-color: #7b4eab;
+		background: #f3ebfa;
+		color: #5c2d8a;
+	}
+
+	.dt-import-btn-go:hover:not(:disabled) {
+		background: #ead9f7;
+	}
+
+	.dt-import-done {
+		font-size: 0.74rem;
+		font-weight: 700;
+		color: #2f8d24;
+		letter-spacing: 0.04em;
+	}
+
+	.dt-import-preview,
+	.dt-import-log {
+		display: grid;
+		gap: 0.38rem;
+	}
+
+	.dt-import-section-label {
+		font-size: 0.64rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
 		color: var(--ink-soft);
+		margin: 0;
 	}
 
+	.dt-import-table td,
+	.dt-import-table th {
+		white-space: nowrap;
+	}
+
+	.dt-import-row-miss td {
+		opacity: 0.55;
+	}
+
+	.dt-import-match {
+		color: #2a6e3a;
+		font-weight: 600;
+		font-size: 0.82rem;
+	}
+
+	.dt-import-miss {
+		color: #b84a4a;
+		font-size: 0.74rem;
+	}
+
+	.dt-import-dates {
+		font-size: 0.72rem;
+		color: #56698a;
+	}
+
+	.dt-import-log-pre {
+		margin: 0;
+		padding: 0.62rem 0.74rem;
+		background: #f4f8fd;
+		border: 1px solid #d0dcea;
+		border-radius: 0.6rem;
+		font-size: 0.75rem;
+		line-height: 1.7;
+		color: #253545;
+		white-space: pre-wrap;
+	}
+
+	.dt-import-note {
+		padding: 0.52rem 0.68rem;
+		background: #fefaf2;
+		border: 1px solid #edd9a0;
+		border-radius: 0.6rem;
+	}
+
+	.dt-import-note p {
+		margin: 0;
+		font-size: 0.74rem;
+		color: #6b5530;
+		line-height: 1.5;
+	}
+
+	/* ── Desktop ── */
 	@media (min-width: 900px) {
-		.daytrip-hero {
-			grid-template-columns: minmax(0, 1fr) auto;
-			align-items: end;
+		.dt-board {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+
+		.dt-panel {
 			padding: 0.95rem;
-		}
-
-		.daytrip-title {
-			font-size: 1.56rem;
-		}
-
-		.daytrip-sub {
-			font-size: 0.92rem;
-		}
-
-		.daytrip-controls {
-			grid-template-columns: auto auto;
-			align-items: end;
-		}
-
-		.month-input,
-		.refresh-trip-btn {
-			min-height: 2.15rem;
-		}
-
-		.daytrip-sheet {
-			padding: 0.84rem;
-		}
-
-		.daytrip-mobile-list {
-			display: none;
-		}
-
-		.daytrip-table-wrap {
-			display: block;
-		}
-
-		.btn {
-			margin-top: 0;
 		}
 	}
 </style>

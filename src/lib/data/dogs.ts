@@ -984,6 +984,33 @@ export async function startDayTrip(dogId: string, profile?: UserProfile | null, 
 	});
 }
 
+/** Creates a historical day trip log entry with a specific date and zero duration.
+ *  Does NOT update the dog's lastDayTripDate — callers should do that separately. */
+export async function importHistoricalDayTrip(
+	dogId: string,
+	tripDate: Date,
+	profile?: UserProfile | null
+): Promise<void> {
+	const identity = getUserIdentity(profile);
+	const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
+	if (!ref) return; // Firebase not available — skip silently for imports
+	const entry: DayTripLog = {
+		id: createId('trip'),
+		dogId,
+		startedAt: tripDate,
+		endedAt: tripDate,
+		startedBy: identity.uid,
+		startedByName: identity.name,
+		endedBy: identity.uid,
+		endedByName: identity.name,
+		startNotes: 'Imported from March 2026 spreadsheet',
+		endNotes: null,
+		createdAt: new Date(),
+		updatedAt: new Date()
+	};
+	await setDoc(doc(ref, entry.id), serializeDayTripLog(entry));
+}
+
 export async function endDayTrip(dogId: string, profile?: UserProfile | null, notes?: string | null) {
 	const identity = getUserIdentity(profile);
 	const now = new Date();
