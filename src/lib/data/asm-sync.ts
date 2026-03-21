@@ -236,6 +236,8 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	// 1. Fetch from ASM via server-side proxy (avoids CORS)
 	const res = await fetch('/api/asm');
 	if (!res.ok) {
+		// 503 = credentials not configured (local dev), 502 = ASM unreachable — skip silently
+		if (res.status === 502 || res.status === 503) return { changes: [] };
 		let detail = '';
 		try { detail = (await res.json()).message ?? ''; } catch { /* ignore */ }
 		throw new Error(`ASM proxy error ${res.status}${detail ? `: ${detail}` : ''}`);

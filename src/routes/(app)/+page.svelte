@@ -1043,6 +1043,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.4rem;
+		flex: 1 1 0;
 		min-width: 0;
 	}
 
@@ -1058,9 +1059,6 @@
 		font-weight: 600;
 		line-height: 1.24;
 		color: #374150;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
 
 	.planner-checkbox {
