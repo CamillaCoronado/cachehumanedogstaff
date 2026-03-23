@@ -135,6 +135,7 @@
 		.slice(0, 4);
 	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster && !dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
 	$: incomingDogs = activeDogs.filter((dog) => dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
+	$: shelterOnlyCount = activeDogs.filter((dog) => !dog.inFoster && !dog.isIncoming).length;
 
 	$: surgeryAlerts = activeDogs
 		.filter((dog) => isSameCalendarDay(dog.surgeryDate, today))
@@ -492,6 +493,15 @@
 				</span>
 			{/if}
 		</p>
+		{#if !loading}
+			<div class="planner-count-chips typewriter">
+				<span class="planner-count-chip chip-shelter">In shelter: {shelterOnlyCount}</span>
+				<span class="planner-count-chip chip-foster">In foster: {fosterDogs.length}</span>
+				{#if incomingDogs.length > 0}
+					<span class="planner-count-chip chip-incoming">Incoming: {incomingDogs.length}</span>
+				{/if}
+			</div>
+		{/if}
 	</header>
 
 	{#if errorMessage}
@@ -773,6 +783,43 @@
 	.planner-weather-icon {
 		font-style: normal;
 		color: initial;
+	}
+
+	.planner-count-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin-top: 0.4rem;
+	}
+
+	.planner-count-chip {
+		display: inline-flex;
+		align-items: center;
+		border-radius: 999px;
+		padding: 0.18rem 0.6rem;
+		font-size: 0.58rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		font-weight: 700;
+		border: 1.5px solid;
+	}
+
+	.chip-shelter {
+		background: #e8f4fc;
+		color: #016aa5;
+		border-color: #7ec2e8;
+	}
+
+	.chip-foster {
+		background: #f0ebf7;
+		color: #6b2e80;
+		border-color: #c4a3d8;
+	}
+
+	.chip-incoming {
+		background: #fff8e5;
+		color: #7a6200;
+		border-color: #e3cf80;
 	}
 
 	.planner-controls {

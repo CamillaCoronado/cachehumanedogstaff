@@ -23,7 +23,6 @@
 		action?: 'log_bath';
 	};
 
-	const capacity = 30;
 	const BATH_DUE_DAYS = 7;
 	const ACTIVITY_WARNING_DAYS = 2;
 	const ACTIVITY_DUE_DAYS = 3;
@@ -61,10 +60,9 @@
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
-	$: activeCount = dogs.filter((dog) => dog.status === 'active' && !dog.isIncoming).length;
+	$: shelterCount = dogs.filter((dog) => dog.status === 'active' && !dog.inFoster && !dog.isIncoming).length;
+	$: fosterCount = dogs.filter((dog) => dog.status === 'active' && dog.inFoster && !dog.isIncoming).length;
 	$: incomingCount = dogs.filter((dog) => dog.status === 'active' && dog.isIncoming).length;
-	$: capacityReached = activeCount >= capacity;
-	$: availableSpots = Math.max(0, capacity - activeCount);
 	$: filteredDogs = dogs
 		.filter((dog) =>
 			viewMode === 'all' ? true :
@@ -635,14 +633,13 @@
 		<section class="dogs-control-strip" aria-label="Roster controls">
 			<div class="dogs-summary-row">
 				<div class="dogs-title-wrap">
-					<p class="dogs-board-sub marker-line marker-blue-line">{activeCount}/{capacity} current{#if incomingCount > 0}<span class="incoming-count-badge">{incomingCount} incoming</span>{/if}</p>
-					<p class="dogs-capacity-note marker-line marker-muted">
-						{#if capacityReached}
-							capacity full
-						{:else}
-							{availableSpots} open spot{availableSpots === 1 ? '' : 's'}
+					<div class="dogs-count-chips typewriter">
+						<span class="dogs-count-chip chip-shelter">In shelter: {shelterCount}</span>
+						<span class="dogs-count-chip chip-foster">In foster: {fosterCount}</span>
+						{#if incomingCount > 0}
+							<span class="dogs-count-chip chip-incoming">Incoming: {incomingCount}</span>
 						{/if}
-					</p>
+					</div>
 				</div>
 				<div class="dogs-header-actions">
 					{#if !$authProfile}
@@ -1042,11 +1039,41 @@
 		vertical-align: middle;
 	}
 
-	.dogs-capacity-note {
-		margin: 0;
-		font-size: 0.84rem;
-		font-weight: 600;
-		color: #6b7480;
+	.dogs-count-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		align-items: center;
+	}
+
+	.dogs-count-chip {
+		display: inline-flex;
+		align-items: center;
+		border-radius: 999px;
+		padding: 0.18rem 0.6rem;
+		font-size: 0.6rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-weight: 700;
+		border: 1.5px solid;
+	}
+
+	.chip-shelter {
+		background: #e8f4fc;
+		color: #016aa5;
+		border-color: #7ec2e8;
+	}
+
+	.chip-foster {
+		background: #f0ebf7;
+		color: #6b2e80;
+		border-color: #c4a3d8;
+	}
+
+	.chip-incoming {
+		background: #fff8e5;
+		color: #7a6200;
+		border-color: #e3cf80;
 	}
 
 	.dogs-header-actions {

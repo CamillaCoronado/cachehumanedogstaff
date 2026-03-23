@@ -4,7 +4,15 @@
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { listDogs } from '$lib/data/dogs';
-	import { addPlaygroupSession, listPlaygroupSessions } from '$lib/data/playgroups';
+	import {
+		addPlaygroupSession,
+		listPlaygroupSessions,
+		listPendingPlaygroups,
+		markPendingProcessed
+	} from '$lib/data/playgroups';
+	import type { PendingPlaygroup } from '$lib/data/playgroups';
+	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
+	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import { formatDateTime, toDate } from '$lib/utils/dates';
 	import { canAccessPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
@@ -37,6 +45,21 @@
 	let manualNotes = '';
 	let manualDogIds: string[] = [];
 	let playgroupsLoaded = false;
+
+	// Slack import — paste
+	let showSlackImport = false;
+	let importText = '';
+	let importParsed: ParsedPlaygroupMessage | null = null;
+	let importDate = format(new Date(), 'yyyy-MM-dd');
+	let importOutcome: PlaygroupOutcome = 'successful';
+	let importGroupName = '';
+	let importNotes = '';
+	let savingImport = false;
+
+	// Slack import — pending from webhook
+	let pendingPlaygroups: PendingPlaygroup[] = [];
+	let activePending: PendingPlaygroup | null = null;
+	let savingPending = false;
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canViewPlaygroups = canAccessPlaygroups(role);
@@ -168,8 +191,132 @@
 
 	async function refreshData() {
 		loading = true;
-		[dogs, sessions] = await Promise.all([listDogs(), listPlaygroupSessions()]);
+		[dogs, sessions, pendingPlaygroups] = await Promise.all([
+			listDogs(),
+			listPlaygroupSessions(),
+			listPendingPlaygroups()
+		]);
 		loading = false;
+	}
+
+	function matchImportDogs(names: string[]) {
+		return names.map((name) => ({
+			name,
+			dog: activeDogs.find((d) => d.name.toLowerCase() === name.toLowerCase()) ?? null
+		}));
+	}
+
+	function parseImport() {
+		if (!importText.trim()) return;
+		importParsed = parsePlaygroupMessage(importText);
+		importOutcome = importParsed.outcome;
+		importNotes = importParsed.notes ?? '';
+		importGroupName = '';
+	}
+
+	function clearImport() {
+		importText = '';
+		importParsed = null;
+		importGroupName = '';
+		importNotes = '';
+		importOutcome = 'successful';
+		activePending = null;
+	}
+
+	function openPending(p: PendingPlaygroup) {
+		activePending = p;
+		importDate = format(new Date(), 'yyyy-MM-dd');
+		importOutcome = p.suggestedOutcome;
+		importNotes = p.suggestedNotes ?? '';
+		importGroupName = '';
+		showSlackImport = false;
+	}
+
+	async function saveImportSession() {
+		if (!importParsed) return;
+		if (!importGroupName.trim()) {
+			toast.error('Group name is required.');
+			return;
+		}
+		const matches = matchImportDogs(importParsed.dogNames).filter((m) => m.dog !== null);
+		if (matches.length < 2) {
+			toast.error('At least 2 matched dogs required.');
+			return;
+		}
+		savingImport = true;
+		try {
+			await addPlaygroupSession(
+				{
+					date: parseInputDate(importDate),
+					groupName: importGroupName.trim(),
+					dogIds: matches.map((m) => m.dog!.id),
+					dogNames: matches.map((m) => m.dog!.name),
+					recommendationType: 'manual',
+					outcome: importOutcome,
+					notes: importNotes.trim() || null,
+					durationMinutes: null
+				},
+				$authProfile
+			);
+			sessions = await listPlaygroupSessions();
+			clearImport();
+			showSlackImport = false;
+			toast.success('Playgroup session saved.');
+		} catch (e) {
+			console.error(e);
+			toast.error('Unable to save session.');
+		} finally {
+			savingImport = false;
+		}
+	}
+
+	async function savePendingSession() {
+		if (!activePending) return;
+		if (!importGroupName.trim()) {
+			toast.error('Group name is required.');
+			return;
+		}
+		const matches = matchImportDogs(activePending.dogNames).filter((m) => m.dog !== null);
+		if (matches.length < 2) {
+			toast.error('At least 2 matched dogs required.');
+			return;
+		}
+		savingPending = true;
+		try {
+			await addPlaygroupSession(
+				{
+					date: parseInputDate(importDate),
+					groupName: importGroupName.trim(),
+					dogIds: matches.map((m) => m.dog!.id),
+					dogNames: matches.map((m) => m.dog!.name),
+					recommendationType: 'manual',
+					outcome: importOutcome,
+					notes: importNotes.trim() || null,
+					durationMinutes: null
+				},
+				$authProfile
+			);
+			await markPendingProcessed(activePending.id);
+			pendingPlaygroups = pendingPlaygroups.filter((p) => p.id !== activePending!.id);
+			sessions = await listPlaygroupSessions();
+			clearImport();
+			toast.success('Playgroup session saved.');
+		} catch (e) {
+			console.error(e);
+			toast.error('Unable to save session.');
+		} finally {
+			savingPending = false;
+		}
+	}
+
+	async function dismissPending(id: string) {
+		try {
+			await markPendingProcessed(id);
+		} catch {
+			// best-effort
+		}
+		pendingPlaygroups = pendingPlaygroups.filter((p) => p.id !== id);
+		if (activePending?.id === id) clearImport();
 	}
 
 	async function logRecommendation(recommendation: PlaygroupRecommendation) {
@@ -269,11 +416,20 @@
 	<section class="playgroups-board" aria-label="Playgroups board">
 		<header class="playgroups-header">
 			<div class="playgroups-controls">
-				<input
-					class="playgroups-search typewriter"
-					placeholder="search dog name"
-					bind:value={search}
-				/>
+				<div class="controls-top-row">
+					<input
+						class="playgroups-search typewriter"
+						placeholder="search dog name"
+						bind:value={search}
+					/>
+					<button
+						class="slack-toggle-btn typewriter"
+						type="button"
+						on:click={() => { showSlackImport = !showSlackImport; if (!showSlackImport) clearImport(); }}
+					>
+						{showSlackImport ? 'Cancel' : 'Log from Slack'}
+					</button>
+				</div>
 				<div class="stats-row typewriter">
 					<span class="stat-chip stat-ready">Ready: {readyDogs.length}</span>
 					<span class="stat-chip stat-caution">Caution: {cautionDogs.length}</span>
@@ -286,6 +442,155 @@
 		{#if loading}
 			<p class="playgroups-state marker-line marker-muted">Loading playgroups...</p>
 		{:else}
+
+			<!-- Pending Slack messages -->
+			{#if pendingPlaygroups.length > 0 && !activePending}
+				<div class="slack-pending-bar">
+					<span class="slack-pending-label typewriter">
+						{pendingPlaygroups.length} playgroup {pendingPlaygroups.length === 1 ? 'message' : 'messages'} from Slack
+					</span>
+					<div class="slack-pending-list">
+						{#each pendingPlaygroups as p}
+							<div class="slack-pending-item">
+								<span class="slack-pending-dogs">{p.dogNames.join(', ') || 'No dogs parsed'}</span>
+								<div class="slack-pending-actions">
+									<button class="slack-pending-btn typewriter" type="button" on:click={() => openPending(p)}>Review</button>
+									<button class="slack-pending-dismiss typewriter" type="button" on:click={() => dismissPending(p.id)}>Dismiss</button>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
+			<!-- Confirmation form — active pending item -->
+			{#if activePending}
+				{@const pendingMatches = matchImportDogs(activePending.dogNames)}
+				<div class="slack-confirm-panel">
+					<div class="slack-confirm-head">
+						<p class="slack-confirm-title typewriter">Review Slack playgroup</p>
+						<button class="slack-back-btn typewriter" type="button" on:click={clearImport}>Back</button>
+					</div>
+					<div class="slack-dog-pills">
+						{#each pendingMatches as m}
+							<span class={`slack-dog-pill ${m.dog ? 'pill-matched' : 'pill-unmatched'}`}>{m.name}</span>
+						{/each}
+					</div>
+					{#if pendingMatches.some((m) => !m.dog)}
+						<p class="slack-unmatched-note typewriter">Gray names not found in active dogs — they won't be included.</p>
+					{/if}
+					<div class="slack-confirm-fields">
+						<label class="form-field">
+							<span class="typewriter">Group name</span>
+							<input bind:value={importGroupName} placeholder="e.g. Morning Yard Group A" />
+						</label>
+						<label class="form-field">
+							<span class="typewriter">Date</span>
+							<input type="date" bind:value={importDate} />
+						</label>
+						<label class="form-field">
+							<span class="typewriter">Outcome</span>
+							<select bind:value={importOutcome}>
+								<option value="successful">Successful</option>
+								<option value="mixed">Mixed</option>
+								<option value="incident">Incident</option>
+								<option value="cancelled">Cancelled</option>
+							</select>
+						</label>
+						<label class="form-field form-field-wide">
+							<span class="typewriter">Notes</span>
+							<textarea rows="3" bind:value={importNotes}></textarea>
+						</label>
+					</div>
+					<div class="slack-confirm-raw">
+						<p class="typewriter">Raw Slack message</p>
+						<pre class="slack-raw-text">{activePending.rawText}</pre>
+					</div>
+					<button
+						class="slack-save-btn typewriter"
+						type="button"
+						on:click={savePendingSession}
+						disabled={savingPending}
+					>
+						{savingPending ? 'Saving...' : 'Save session'}
+					</button>
+				</div>
+			{/if}
+
+			<!-- Paste import panel -->
+			{#if showSlackImport && !activePending}
+				<div class="slack-import-panel">
+					{#if !importParsed}
+						<label class="form-field" for="slack-paste">
+							<span class="typewriter">Paste Slack message</span>
+							<textarea
+								id="slack-paste"
+								class="slack-paste-area"
+								rows="8"
+								bind:value={importText}
+								placeholder={'Archer in\nBirdie in\nArcher out\nBirdie out: rude body language at first, settled after 2 min'}
+							></textarea>
+						</label>
+						<button
+							class="slack-parse-btn typewriter"
+							type="button"
+							on:click={parseImport}
+							disabled={!importText.trim()}
+						>
+							Parse
+						</button>
+					{:else}
+						{@const pasteMatches = matchImportDogs(importParsed.dogNames)}
+						<div class="slack-confirm-head">
+							<p class="slack-confirm-title typewriter">Preview</p>
+							<button class="slack-back-btn typewriter" type="button" on:click={clearImport}>Edit message</button>
+						</div>
+						<div class="slack-dog-pills">
+							{#each pasteMatches as m}
+								<span class={`slack-dog-pill ${m.dog ? 'pill-matched' : 'pill-unmatched'}`}>{m.name}</span>
+							{/each}
+							{#if pasteMatches.length === 0}
+								<span class="typewriter" style="font-size:0.72rem;color:#7a3e3e">No dog names parsed. Check format.</span>
+							{/if}
+						</div>
+						{#if pasteMatches.some((m) => !m.dog)}
+							<p class="slack-unmatched-note typewriter">Gray names not found in active dogs — they won't be included.</p>
+						{/if}
+						<div class="slack-confirm-fields">
+							<label class="form-field">
+								<span class="typewriter">Group name</span>
+								<input bind:value={importGroupName} placeholder="e.g. Morning Yard Group A" />
+							</label>
+							<label class="form-field">
+								<span class="typewriter">Date</span>
+								<input type="date" bind:value={importDate} />
+							</label>
+							<label class="form-field">
+								<span class="typewriter">Outcome</span>
+								<select bind:value={importOutcome}>
+									<option value="successful">Successful</option>
+									<option value="mixed">Mixed</option>
+									<option value="incident">Incident</option>
+									<option value="cancelled">Cancelled</option>
+								</select>
+							</label>
+							<label class="form-field form-field-wide">
+								<span class="typewriter">Notes</span>
+								<textarea rows="3" bind:value={importNotes}></textarea>
+							</label>
+						</div>
+						<button
+							class="slack-save-btn typewriter"
+							type="button"
+							on:click={saveImportSession}
+							disabled={savingImport}
+						>
+							{savingImport ? 'Saving...' : 'Save session'}
+						</button>
+					{/if}
+				</div>
+			{/if}
+
 			<div class="playgroups-grid">
 			<section class="panel">
 				<div class="panel-head">
@@ -979,5 +1284,260 @@
 		.manual-dog-list {
 			grid-template-columns: 1fr;
 		}
+	}
+
+	/* Slack import header button */
+	.controls-top-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.slack-toggle-btn {
+		border: 1.5px solid #016aa5;
+		border-radius: 0.2rem;
+		padding: 0.3rem 0.7rem;
+		font-size: 0.58rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		font-weight: 700;
+		background: #e8f4fc;
+		color: #016aa5;
+		cursor: pointer;
+	}
+
+	.slack-toggle-btn:hover {
+		background: #d0eaf8;
+	}
+
+	/* Pending banner */
+	.slack-pending-bar {
+		border-top: 1px solid #d5e0ea;
+		background: #fffbea;
+		border-left: 4px solid #e6a800;
+		padding: 0.6rem 0.82rem;
+	}
+
+	.slack-pending-label {
+		display: block;
+		font-size: 0.58rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		color: #6b4f00;
+		margin-bottom: 0.4rem;
+	}
+
+	.slack-pending-list {
+		display: grid;
+		gap: 0.32rem;
+	}
+
+	.slack-pending-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		background: #fff8d6;
+		border: 1px solid #e6cc7a;
+		border-radius: 0.2rem;
+		padding: 0.38rem 0.52rem;
+	}
+
+	.slack-pending-dogs {
+		font-size: 0.76rem;
+		color: #3a2e00;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.slack-pending-actions {
+		display: flex;
+		gap: 0.3rem;
+		flex-shrink: 0;
+	}
+
+	.slack-pending-btn {
+		border: 1.5px solid #016aa5;
+		border-radius: 0.2rem;
+		padding: 0.22rem 0.52rem;
+		font-size: 0.56rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		font-weight: 700;
+		background: #e8f4fc;
+		color: #016aa5;
+		cursor: pointer;
+	}
+
+	.slack-pending-dismiss {
+		border: 1.5px solid #c8d0db;
+		border-radius: 0.2rem;
+		padding: 0.22rem 0.52rem;
+		font-size: 0.56rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		font-weight: 700;
+		background: #f4f6f9;
+		color: #4f6681;
+		cursor: pointer;
+	}
+
+	/* Paste import panel */
+	.slack-import-panel,
+	.slack-confirm-panel {
+		border-top: 1px solid #d5e0ea;
+		background: #f8fbff;
+		padding: 0.7rem 0.82rem;
+	}
+
+	.slack-paste-area {
+		width: 100%;
+		border: 1.5px solid #becbdd;
+		border-radius: 0.2rem;
+		padding: 0.44rem 0.52rem;
+		font-size: 0.76rem;
+		font-family: var(--font-mono, monospace);
+		color: #22384f;
+		resize: vertical;
+		background: #fff;
+	}
+
+	.slack-parse-btn {
+		margin-top: 0.4rem;
+		border: 1.5px solid #016aa5;
+		border-radius: 0.2rem;
+		padding: 0.3rem 0.9rem;
+		font-size: 0.58rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		font-weight: 700;
+		background: #016aa5;
+		color: #fff;
+		cursor: pointer;
+	}
+
+	.slack-parse-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+
+	.slack-confirm-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-bottom: 0.5rem;
+	}
+
+	.slack-confirm-title {
+		margin: 0;
+		font-size: 0.62rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #4a607a;
+	}
+
+	.slack-back-btn {
+		border: 1px solid #c8d3e0;
+		border-radius: 0.2rem;
+		padding: 0.18rem 0.46rem;
+		font-size: 0.54rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		background: #f0f5fb;
+		color: #4a607a;
+		cursor: pointer;
+	}
+
+	.slack-dog-pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin-bottom: 0.4rem;
+	}
+
+	.slack-dog-pill {
+		border-radius: 999px;
+		padding: 0.14rem 0.5rem;
+		font-size: 0.66rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+	}
+
+	.pill-matched {
+		background: #e9f6ec;
+		color: #256640;
+		border: 1px solid #abd5b4;
+	}
+
+	.pill-unmatched {
+		background: #f0f2f5;
+		color: #7a8fa6;
+		border: 1px solid #c8d3df;
+	}
+
+	.slack-unmatched-note {
+		margin: 0 0 0.4rem;
+		font-size: 0.56rem;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		color: #7a6530;
+	}
+
+	.slack-confirm-fields {
+		display: grid;
+		gap: 0.36rem;
+		margin-bottom: 0.5rem;
+	}
+
+	@media (min-width: 620px) {
+		.slack-confirm-fields {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+
+	.slack-confirm-raw {
+		margin-bottom: 0.5rem;
+	}
+
+	.slack-confirm-raw p {
+		margin: 0 0 0.2rem;
+		font-size: 0.54rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #617990;
+	}
+
+	.slack-raw-text {
+		margin: 0;
+		padding: 0.44rem 0.52rem;
+		background: #f2f5f9;
+		border: 1px solid #cdd8e6;
+		border-radius: 0.2rem;
+		font-size: 0.72rem;
+		color: #2b3f57;
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 10rem;
+		overflow-y: auto;
+	}
+
+	.slack-save-btn {
+		border: 1.5px solid #3aaf2a;
+		border-radius: 0.2rem;
+		padding: 0.3rem 0.9rem;
+		font-size: 0.58rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		font-weight: 700;
+		background: #3aaf2a;
+		color: #fff;
+		cursor: pointer;
+	}
+
+	.slack-save-btn:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 </style>

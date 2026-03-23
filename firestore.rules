@@ -94,6 +94,13 @@ service cloud.firestore {
       allow update, delete: if canEditDogs();
     }
 
+    match /pendingPlaygroups/{docId} {
+      // Read and mark-processed by managers/admins only
+      allow read, update: if canEditDogs();
+      // Create and delete are server-only (firebase-admin SDK bypasses rules)
+      allow create, delete: if false;
+    }
+
     // Supports collectionGroup('dayTripLogs') queries used by dashboard/day trips pages.
     match /{path=**}/dayTripLogs/{logId} {
       allow read: if isAuthenticated();

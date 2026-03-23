@@ -1,10 +1,20 @@
-import type { PlaygroupSession, UserProfile } from '$lib/types';
+import type { PlaygroupOutcome, PlaygroupSession, UserProfile } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { toDate, toDateString } from '$lib/utils/dates';
 import { db } from '$lib/firebase/config';
-import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore';
 
 const PLAYGROUP_SESSIONS_KEY = 'shelter.playgroupSessions';
+
+export interface PendingPlaygroup {
+	id: string;
+	rawText: string;
+	dogNames: string[];
+	suggestedNotes: string | null;
+	suggestedOutcome: PlaygroupOutcome;
+	receivedAt: string; // ISO string
+	processed: boolean;
+}
 
 interface StoredPlaygroupSession {
 	id: string;
@@ -76,6 +86,22 @@ export async function listPlaygroupSessions() {
 	return stored
 		.map(deserializeSession)
 		.sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
+}
+
+export async function listPendingPlaygroups(): Promise<PendingPlaygroup[]> {
+	if (!db) return [];
+	const q = query(
+		collection(db, 'pendingPlaygroups'),
+		where('processed', '==', false),
+		orderBy('receivedAt', 'desc')
+	);
+	const snapshot = await getDocs(q);
+	return snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingPlaygroup, 'id'>) }));
+}
+
+export async function markPendingProcessed(id: string): Promise<void> {
+	if (!db) return;
+	await setDoc(doc(db, 'pendingPlaygroups', id), { processed: true }, { merge: true });
 }
 
 export async function addPlaygroupSession(
