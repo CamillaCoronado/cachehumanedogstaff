@@ -67,6 +67,7 @@ interface StoredDog {
 	isFixed: boolean;
 	fixedDate: string | null;
 	isVaccinated: boolean;
+	vaccineCount?: number;
 	vaccinatedDate: string | null;
 	dayTripStatus: 'ineligible' | 'difficult' | 'eligible';
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
@@ -75,6 +76,7 @@ interface StoredDog {
 	dayTripNotes: string | null;
 	handlingLevel?: DogHandlingLevel;
 	inFoster: boolean;
+	shelterSince?: string | null;
 	isIncoming?: boolean;
 	isolationStatus: 'none' | 'sick' | 'bite_quarantine';
 	isolationStartDate: string | null;
@@ -241,6 +243,7 @@ function serializeDog(dog: Dog): StoredDog {
 		isFixed: dog.isFixed,
 		fixedDate: toDateString(dog.fixedDate),
 		isVaccinated: dog.isVaccinated,
+		vaccineCount: dog.vaccineCount,
 		vaccinatedDate: toDateString(dog.vaccinatedDate),
 		dayTripStatus: dog.dayTripStatus,
 		dayTripIneligibleReason: dog.dayTripIneligibleReason ?? null,
@@ -249,6 +252,7 @@ function serializeDog(dog: Dog): StoredDog {
 		dayTripNotes: dog.dayTripNotes,
 		handlingLevel: dog.handlingLevel ?? 'volunteer',
 		inFoster: dog.inFoster ?? false,
+		shelterSince: toDateString(dog.shelterSince) ?? null,
 		isolationStatus: dog.isolationStatus,
 		isolationStartDate: toDateString(dog.isolationStartDate),
 		status: dog.status,
@@ -329,6 +333,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		isFixed: stored.isFixed ?? false,
 		fixedDate: stored.fixedDate ? toDate(stored.fixedDate) : null,
 		isVaccinated: stored.isVaccinated ?? false,
+		vaccineCount: stored.vaccineCount ?? (stored.isVaccinated ? 1 : 0),
 		vaccinatedDate: stored.vaccinatedDate ? toDate(stored.vaccinatedDate) : null,
 		dayTripStatus: normalizedDayTripStatus,
 		dayTripIneligibleReason,
@@ -337,6 +342,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
 		handlingLevel: normalizedHandlingLevel,
 		inFoster: stored.inFoster ?? false,
+		shelterSince: stored.shelterSince ? toDate(stored.shelterSince) : null,
 		isIncoming: stored.isIncoming ?? false,
 		isolationStatus: stored.isolationStatus ?? 'none',
 		isolationStartDate: stored.isolationStartDate ? toDate(stored.isolationStartDate) : null,

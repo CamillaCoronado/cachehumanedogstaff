@@ -308,7 +308,7 @@
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
-	$: activeDogs = dogs.filter((dog) => dog.status === 'active');
+	$: activeDogs = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster);
 	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster);
 	$: kennelEligibleDogs = activeDogs.filter((dog) => !dog.inFoster);
 	$: assignments = getAssignments(kennelEligibleDogs);

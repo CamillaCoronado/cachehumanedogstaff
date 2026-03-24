@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { browser } from '$app/environment';
 	import { format, startOfDay } from 'date-fns';
-	import { readJson, writeJson } from '$lib/utils/storage';
+	import { loadCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
+	import type { CleaningShift } from '$lib/data/cleaning';
 
-	type Shift = 'morning' | 'evening';
+	type Shift = CleaningShift;
 
 	interface Task {
 		id: string;
@@ -16,16 +16,6 @@
 		tasks: Task[];
 		note?: string;
 	}
-
-	interface CompletionRecord {
-		id: string;
-		date: string;
-		shift: Shift;
-		completedTaskIds: string[];
-		lastUpdated: string;
-	}
-
-	const COMPLETIONS_KEY = 'shelter.cleaningCompletions.v1';
 
 	const sundayMorningShared: Section = {
 		title: 'Sunday AM — Shared',
@@ -252,15 +242,17 @@
 	const dateKey = format(today, 'yyyy-MM-dd');
 	const dayName = format(today, 'EEEE');
 	const isSunday = dayName.toLowerCase() === 'sunday';
-	const defaultShift: Shift = new Date().getHours() < 12 ? 'morning' : 'evening';
+	const _n = new Date();
+	const defaultShift: Shift =
+		_n.getHours() > 13 || (_n.getHours() === 13 && _n.getMinutes() >= 30) ? 'evening' : 'morning';
 
 	let shift: Shift = defaultShift;
 	let showSundayOverride = false;
 	let completed = new Set<string>();
 	let lastUpdated = '';
 
-	onMount(() => {
-		loadCompletion();
+	onMount(async () => {
+		completed = await loadCompletedTasks(dateKey, shift);
 	});
 
 	$: showSunday = isSunday || showSundayOverride;
@@ -270,51 +262,20 @@
 	$: allTaskIds = sections.flatMap((section) => section.tasks.map((task) => task.id));
 	$: completedCount = allTaskIds.filter((id) => completed.has(id)).length;
 
-	function completionId(activeShift: Shift) {
-		return `${dateKey}-${activeShift}`;
-	}
-
-	function loadCompletion() {
-		if (!browser) return;
-		const stored = readJson<Record<string, CompletionRecord>>(COMPLETIONS_KEY, {});
-		const record = stored[completionId(shift)];
-		if (record) {
-			completed = new Set(record.completedTaskIds);
-			lastUpdated = record.lastUpdated;
-		} else {
-			completed = new Set();
-			lastUpdated = '';
-		}
-	}
-
-	function saveCompletion() {
-		if (!browser) return;
-		const stored = readJson<Record<string, CompletionRecord>>(COMPLETIONS_KEY, {});
-		const record: CompletionRecord = {
-			id: completionId(shift),
-			date: dateKey,
-			shift,
-			completedTaskIds: Array.from(completed),
-			lastUpdated: new Date().toISOString()
-		};
-		stored[record.id] = record;
-		writeJson(COMPLETIONS_KEY, stored);
-		lastUpdated = record.lastUpdated;
-	}
-
 	function toggleTask(taskId: string) {
-		if (completed.has(taskId)) {
-			completed.delete(taskId);
-		} else {
-			completed.add(taskId);
-		}
-		completed = new Set(completed);
-		saveCompletion();
+		const checked = !completed.has(taskId);
+		const next = new Set(completed);
+		if (checked) next.add(taskId);
+		else next.delete(taskId);
+		completed = next;
+		lastUpdated = new Date().toISOString();
+		void toggleCleaningTask(dateKey, shift, taskId, checked);
 	}
 
-	function setShift(value: Shift) {
+	async function setShift(value: Shift) {
 		shift = value;
-		loadCompletion();
+		completed = await loadCompletedTasks(dateKey, shift);
+		lastUpdated = '';
 	}
 </script>
 

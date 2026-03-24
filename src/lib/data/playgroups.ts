@@ -2,7 +2,7 @@ import type { PlaygroupOutcome, PlaygroupSession, UserProfile } from '$lib/types
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { toDate, toDateString } from '$lib/utils/dates';
 import { db } from '$lib/firebase/config';
-import { collection, doc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 
 const PLAYGROUP_SESSIONS_KEY = 'shelter.playgroupSessions';
 
@@ -90,13 +90,17 @@ export async function listPlaygroupSessions() {
 
 export async function listPendingPlaygroups(): Promise<PendingPlaygroup[]> {
 	if (!db) return [];
-	const q = query(
-		collection(db, 'pendingPlaygroups'),
-		where('processed', '==', false),
-		orderBy('receivedAt', 'desc')
-	);
-	const snapshot = await getDocs(q);
-	return snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingPlaygroup, 'id'>) }));
+	try {
+		const q = query(
+			collection(db, 'pendingPlaygroups'),
+			where('processed', '==', false),
+			orderBy('receivedAt', 'desc')
+		);
+		const snapshot = await getDocs(q);
+		return snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingPlaygroup, 'id'>) }));
+	} catch {
+		return [];
+	}
 }
 
 export async function markPendingProcessed(id: string): Promise<void> {
@@ -126,4 +130,38 @@ export async function addPlaygroupSession(
 	stored.unshift(serializeSession(next));
 	writeJson(PLAYGROUP_SESSIONS_KEY, stored);
 	return next;
+}
+
+export async function deletePlaygroupSession(id: string): Promise<void> {
+	if (db) {
+		await deleteDoc(doc(db, 'playgroupSessions', id));
+		return;
+	}
+
+	const stored = readJson<StoredPlaygroupSession[]>(PLAYGROUP_SESSIONS_KEY, []);
+	writeJson(PLAYGROUP_SESSIONS_KEY, stored.filter((s) => s.id !== id));
+}
+
+export async function updatePlaygroupSession(
+	id: string,
+	updates: Partial<Pick<PlaygroupSession, 'date' | 'groupName' | 'outcome' | 'notes' | 'durationMinutes'>>
+) {
+	const serialized: Partial<StoredPlaygroupSession> = {};
+	if (updates.date !== undefined) serialized.date = toDateString(updates.date) ?? new Date().toISOString();
+	if (updates.groupName !== undefined) serialized.groupName = updates.groupName;
+	if (updates.outcome !== undefined) serialized.outcome = updates.outcome;
+	if (updates.notes !== undefined) serialized.notes = updates.notes;
+	if (updates.durationMinutes !== undefined) serialized.durationMinutes = updates.durationMinutes;
+
+	if (db) {
+		await updateDoc(doc(db, 'playgroupSessions', id), serialized);
+		return;
+	}
+
+	const stored = readJson<StoredPlaygroupSession[]>(PLAYGROUP_SESSIONS_KEY, []);
+	const idx = stored.findIndex((s) => s.id === id);
+	if (idx !== -1) {
+		stored[idx] = { ...stored[idx], ...serialized };
+		writeJson(PLAYGROUP_SESSIONS_KEY, stored);
+	}
 }

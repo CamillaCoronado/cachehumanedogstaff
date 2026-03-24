@@ -5,22 +5,14 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
-	import { readJson, writeJson } from '$lib/utils/storage';
+	import { loadCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
+	import type { CleaningShift } from '$lib/data/cleaning';
 	import { onMount } from 'svelte';
 	import { writable } from 'svelte/store';
 	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
 
-	type CleaningShift = 'morning' | 'evening';
 	type TodayActionId = 'feeding' | 'cleaning' | 'movement' | 'slack';
 	type ActionBusyMap = Record<TodayActionId, boolean>;
-
-	interface CompletionRecord {
-		id: string;
-		date: string;
-		shift: CleaningShift;
-		completedTaskIds: string[];
-		lastUpdated: string;
-	}
 
 	interface TodayAction {
 		id: TodayActionId;
@@ -36,22 +28,25 @@
 		days: number;
 	}
 
-	const CLEANING_COMPLETIONS_KEY = 'shelter.cleaningCompletions.v1';
 	const today = startOfDay(new Date());
 	let weatherIcon = '';
 	let weatherTemp = '';
 
 	let loading = true;
 	let errorMessage = '';
-	const shift = writable<MealTime>(new Date().getHours() < 12 ? 'am' : 'pm');
-	let cleaningShift: CleaningShift = 'morning';
+	// PM shift starts at 1:30pm
+	const _now = new Date();
+	const _isAfternoon = _now.getHours() > 13 || (_now.getHours() === 13 && _now.getMinutes() >= 30);
+	const shift = writable<MealTime>(_isAfternoon ? 'pm' : 'am');
+	let cleaningShift: CleaningShift = _isAfternoon ? 'evening' : 'morning';
 
 	let activeDogs: Dog[] = [];
+	let allActiveDogs: Dog[] = [];
 	let recentlyAdopted: Dog[] = [];
 	let playgroupSessions: PlaygroupSession[] = [];
 	let dayTripLogs: DayTripLog[] = [];
 	let feedingLogsByDog: Record<string, FeedingLog[]> = {};
-	let cleaningCompletions: Record<string, CompletionRecord> = {};
+	let completedTaskIds = new Set<string>();
 	let todayItems: TodayAction[] = [];
 	let returningDogIds = new Set<string>();
 	let fosterUpdatingDogIds = new Set<string>();
@@ -107,9 +102,7 @@
 		hour: 'numeric',
 		minute: '2-digit'
 	}).format(new Date());
-	$: cleaningShift = $shift === 'am' ? 'morning' : 'evening';
-	$: completion = cleaningCompletions[`${todayKey}-${cleaningShift}`];
-	$: completedTaskIds = new Set(completion?.completedTaskIds ?? []);
+	$: cleaningShift = ($shift === 'am' ? 'morning' : 'evening') as CleaningShift;
 	$: openTripByDog = buildOpenTripMap(dayTripLogs);
 
 	$: dogsOut = activeDogs
@@ -133,9 +126,9 @@
 		.filter((dog) => dog.isolationStatus !== 'none')
 		.sort((a, b) => a.name.localeCompare(b.name))
 		.slice(0, 4);
-	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster && !dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
-	$: incomingDogs = activeDogs.filter((dog) => dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
-	$: shelterOnlyCount = activeDogs.filter((dog) => !dog.inFoster && !dog.isIncoming).length;
+	$: fosterDogs = allActiveDogs.filter((dog) => dog.inFoster && !dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
+	$: incomingDogs = allActiveDogs.filter((dog) => dog.isIncoming).sort((a, b) => a.name.localeCompare(b.name));
+	$: shelterOnlyCount = activeDogs.filter((dog) => !dog.isIncoming).length;
 
 	$: surgeryAlerts = activeDogs
 		.filter((dog) => isSameCalendarDay(dog.surgeryDate, today))
@@ -143,17 +136,24 @@
 
 	$: feedingTargets = activeDogs.filter((dog) => !isSameCalendarDay(dog.surgeryDate, today));
 	$: feedingDone =
-		feedingTargets.length > 0 && feedingTargets.every((dog) => hasFeedingLogForShift(dog.id, $shift));
-	$: cleaningDone = hasAnyTask(
+		feedingTargets.length > 0 &&
+		feedingTargets.every((dog) =>
+			(feedingLogsByDog[dog.id] ?? []).some(
+				(log) => log.mealTime === $shift && isSameCalendarDay(log.date, today)
+			)
+		);
+	$: cleaningDone = (
 		$shift === 'am'
 			? ['am-cleaner-clean-kennels', 'am-shared-scrub-kennels']
 			: ['pm-cleaner-hose-sanitize', 'pm-shared-scrub-kennels']
-	);
+	).some((id) => completedTaskIds.has(id));
 	$: movementDone =
 		$shift === 'am'
-			? hasAnyTask(['am-shared-take-dogs-out'])
-			: dogsOut.length === 0 || hasAnyTask(['pm-cleaner-bring-dogs-in', 'pm-shared-bring-dogs-in']);
-	$: slackDone = Array.from(completedTaskIds).some((taskId) => taskId.includes('slack'));
+			? ['am-shared-take-dogs-out'].some((id) => completedTaskIds.has(id))
+			: ['pm-cleaner-bring-dogs-in', 'pm-shared-bring-dogs-in'].some((id) => completedTaskIds.has(id));
+	$: slackDone = ['am-cleaner-slack', 'am-feeder-slack', 'pm-cleaner-slack', 'pm-feeder-slack'].some(
+		(id) => completedTaskIds.has(id)
+	);
 	$: todayItems =
 		$shift === 'am'
 			? [
@@ -255,34 +255,45 @@
 
 		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none');
 
-		// Bath overdue: >= 7 days since last bath (or intake if never bathed)
+		// Bath overdue: >= 7 days since last bath (or since available if never bathed)
 		for (const dog of shelterDogs) {
-			const intakeDays = daysSince(dog.intakeDate, today) ?? 0;
-			const bathDays = daysSince(dog.lastBathDate, today);
-			const days = bathDays ?? (intakeDays >= 7 ? intakeDays : null);
+			const availableSince = dog.shelterSince ?? dog.intakeDate;
+			const availableDays = daysSince(availableSince, today) ?? 0;
+			const availableMs = toDate(availableSince)?.getTime() ?? 0;
+			const lastBathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
+			const effectiveBathDate = dog.lastBathDate && lastBathMs >= availableMs ? dog.lastBathDate : null;
+			const bathDays = daysSince(effectiveBathDate, today);
+			const days = bathDays ?? (availableDays >= 7 ? availableDays : null);
 			if (days !== null && days >= 7) {
 				items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days });
 			}
 		}
 
-		// Day trip overdue: eligible, not out, >= 14 days since last trip (or intake if never)
+		// Day trip overdue: eligible, not out, >= 14 days since last trip (or since available if never)
 		for (const dog of activeDogs) {
 			if (dog.isOutOnDayTrip || dog.dayTripStatus === 'ineligible' || dog.isolationStatus !== 'none') continue;
-			const intakeDays = daysSince(dog.intakeDate, today) ?? 0;
-			const tripDays = daysSince(dog.lastDayTripDate, today);
-			const days = tripDays ?? (intakeDays >= 14 ? intakeDays : null);
+			const availableSince = dog.shelterSince ?? dog.intakeDate;
+			const availableDays = daysSince(availableSince, today) ?? 0;
+			const availableMs = toDate(availableSince)?.getTime() ?? 0;
+			const lastTripMs = toDate(dog.lastDayTripDate)?.getTime() ?? 0;
+			const effectiveTripDate = dog.lastDayTripDate && lastTripMs >= availableMs ? dog.lastDayTripDate : null;
+			const tripDays = daysSince(effectiveTripDate, today);
+			const days = tripDays ?? (availableDays >= 14 ? availableDays : null);
 			if (days !== null && days >= 14) {
 				items.push({ dogId: dog.id, dogName: dog.name, type: 'daytrip', days });
 			}
 		}
 
-		// Playgroup overdue: dog-friendly, not fostered/isolated, >= 10 days since last (or intake)
+		// Playgroup overdue: dog-friendly, not isolated, >= 10 days since last (or since available if never)
 		for (const dog of shelterDogs) {
-			if (dog.inFoster || dog.goodWithDogs === 'no') continue;
-			const intakeDays = daysSince(dog.intakeDate, today) ?? 0;
+			if (dog.goodWithDogs === 'no') continue;
+			const availableSince = dog.shelterSince ?? dog.intakeDate;
+			const availableDays = daysSince(availableSince, today) ?? 0;
+			const availableMs = toDate(availableSince)?.getTime() ?? 0;
 			const lastMs = lastPgMs[dog.id] ?? null;
-			const pgDays = lastMs !== null ? (daysSince(new Date(lastMs), today) ?? null) : null;
-			const days = pgDays ?? (intakeDays >= 10 ? intakeDays : null);
+			const effectiveLastMs = lastMs !== null && lastMs >= availableMs ? lastMs : null;
+			const pgDays = effectiveLastMs !== null ? (daysSince(new Date(effectiveLastMs), today) ?? null) : null;
+			const days = pgDays ?? (availableDays >= 10 ? availableDays : null);
 			if (days !== null && days >= 10) {
 				items.push({ dogId: dog.id, dogName: dog.name, type: 'playgroup', days });
 			}
@@ -313,30 +324,14 @@
 		fosterUpdatingDogIds = next;
 	}
 
-	function completionRecordId() {
-		return `${todayKey}-${cleaningShift}`;
-	}
-
 	function toggleCompletionTask(taskId: string, shouldComplete: boolean) {
-		const key = completionRecordId();
-		const current = cleaningCompletions[key] ?? {
-			id: key,
-			date: todayKey,
-			shift: cleaningShift,
-			completedTaskIds: [],
-			lastUpdated: new Date().toISOString()
-		};
-		const set = new Set(current.completedTaskIds);
-		if (shouldComplete) set.add(taskId);
-		else set.delete(taskId);
-		const nextRecord: CompletionRecord = {
-			...current,
-			completedTaskIds: Array.from(set),
-			lastUpdated: new Date().toISOString()
-		};
-		const nextMap = { ...cleaningCompletions, [key]: nextRecord };
-		cleaningCompletions = nextMap;
-		writeJson(CLEANING_COMPLETIONS_KEY, nextMap);
+		// Optimistic local update for instant UI response
+		const next = new Set(completedTaskIds);
+		if (shouldComplete) next.add(taskId);
+		else next.delete(taskId);
+		completedTaskIds = next;
+		// Persist to Firestore in background
+		void toggleCleaningTask(todayKey, cleaningShift, taskId, shouldComplete);
 	}
 
 	function primaryCleaningTaskId() {
@@ -394,7 +389,7 @@
 		setFosterUpdating(dog.id, true);
 		errorMessage = '';
 		try {
-			await updateDog(dog.id, { inFoster: false });
+			await updateDog(dog.id, { inFoster: false, shelterSince: new Date() });
 			await loadBoard();
 		} catch (error) {
 			console.error(error);
@@ -448,9 +443,10 @@
 		errorMessage = '';
 		try {
 			const dogs = await listDogs();
-			const active = dogs
-				.filter((dog) => dog.status === 'active')
+			const allActive = dogs
+				.filter((dog) => dog.status === 'active' && !dog.permanentFoster)
 				.sort((a, b) => a.name.localeCompare(b.name));
+			const active = allActive.filter((dog) => !dog.inFoster);
 			recentlyAdopted = dogs
 				.filter((dog) => dog.status === 'adopted' && !dog.permanentFoster && !dog.inFoster)
 				.sort((a, b) => {
@@ -466,11 +462,12 @@
 				listPlaygroupSessions()
 			]);
 
+			allActiveDogs = allActive;
 			activeDogs = active;
 			dayTripLogs = tripLogs;
 			feedingLogsByDog = feedingByDog;
 			playgroupSessions = pgSessions;
-			cleaningCompletions = readJson<Record<string, CompletionRecord>>(CLEANING_COMPLETIONS_KEY, {});
+			completedTaskIds = await loadCompletedTasks(todayKey, cleaningShift);
 		} catch (error) {
 			console.error(error);
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';

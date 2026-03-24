@@ -24,6 +24,7 @@
 		formatAge,
 		bathEligible,
 		daysSince,
+		dogStripeColor,
 		formatDate,
 		formatDateTime,
 		isSurgeryToday,
@@ -197,17 +198,7 @@
 		: adoptionReasonBadge
 			? `Adoption: Unavailable (${adoptionReasonBadge})`
 			: 'Adoption: Unavailable';
-	$: whiteboardStatusTagClass = dog
-		? dog.isolationStatus !== 'none' ||
-		  isManagerOnly ||
-		  isManagerHandlingOnly ||
-		  isStaffHandlingOnly ||
-		  stripHasCarefulWarning
-			? 'whiteboard-tag-red'
-			: dayTripEligibility.status === 'difficult'
-				? 'whiteboard-tag-yellow'
-				: 'whiteboard-tag-green'
-		: 'whiteboard-tag-green';
+	$: whiteboardStatusTagClass = dog ? `whiteboard-tag-${dogStripeColor(dog)}` : 'whiteboard-tag-green';
 	$: stripHasCarefulWarning =
 		Boolean(dog) &&
 		!dog.isOutOnDayTrip &&

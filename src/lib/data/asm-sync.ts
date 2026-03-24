@@ -156,6 +156,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		isFixed: animal.NEUTERED === 1,
 		fixedDate: animal.NEUTEREDDATE || null,
 		isVaccinated: (animal.VACCGIVENCOUNT ?? 0) > 0,
+		vaccineCount: animal.VACCGIVENCOUNT ?? 0,
 		vaccinatedDate: animal.VACCRABIESDATE || null,
 		weightLbs: typeof animal.WEIGHT === 'number' && animal.WEIGHT > 0 ? animal.WEIGHT : null,
 		dateOfBirth: animal.DATEOFBIRTH || now,

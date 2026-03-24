@@ -55,6 +55,7 @@ export function handlingRequirementLabel(level: DogHandlingLevel | null | undefi
 	return 'volunteer';
 }
 
+
 export function handlingRestrictionReason(
 	level: DogHandlingLevel | null | undefined,
 	role: UserRole | null | undefined,

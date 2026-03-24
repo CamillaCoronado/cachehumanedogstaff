@@ -192,7 +192,7 @@
 		await refreshDogs();
 	});
 
-	$: activeDogs = dogs.filter((dog) => dog.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
+	$: activeDogs = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster).sort((a, b) => a.name.localeCompare(b.name));
 	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster);
 	$: shelterDogs = activeDogs.filter((dog) => !dog.inFoster);
 	$: kennelAssignments = getAssignments(shelterDogs);

@@ -71,6 +71,7 @@ export interface Dog {
 	isFixed: boolean;
 	fixedDate: DateValue | null;
 	isVaccinated: boolean;
+	vaccineCount: number;
 	vaccinatedDate: DateValue | null;
 	dayTripStatus: DayTripStatus;
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
@@ -79,6 +80,7 @@ export interface Dog {
 	dayTripNotes: string | null;
 	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;
+	shelterSince?: DateValue | null;
 	permanentFoster?: boolean;
 	isIncoming?: boolean;
 	isolationStatus: IsolationStatus;

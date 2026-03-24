@@ -8,7 +8,7 @@
 	import { listDogs, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
-	import { bathEligible, daysSince, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { bathEligible, daysSince, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -26,8 +26,7 @@
 	const BATH_DUE_DAYS = 7;
 	const ACTIVITY_WARNING_DAYS = 2;
 	const ACTIVITY_DUE_DAYS = 3;
-	const NEW_INTAKE_RED_MS = 24 * 60 * 60 * 1000;
-	const today = new Date();
+const today = new Date();
 
 	let dogs: Dog[] = [];
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
@@ -60,9 +59,9 @@
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
-	$: shelterCount = dogs.filter((dog) => dog.status === 'active' && !dog.inFoster && !dog.isIncoming).length;
-	$: fosterCount = dogs.filter((dog) => dog.status === 'active' && dog.inFoster && !dog.isIncoming).length;
-	$: incomingCount = dogs.filter((dog) => dog.status === 'active' && dog.isIncoming).length;
+	$: shelterCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster && !dog.isIncoming).length;
+	$: fosterCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && dog.inFoster && !dog.isIncoming).length;
+	$: incomingCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && dog.isIncoming).length;
 	$: filteredDogs = dogs
 		.filter((dog) =>
 			viewMode === 'all' ? true :
@@ -152,6 +151,7 @@
 			isFixed: false,
 			fixedDate: null,
 			isVaccinated: false,
+			vaccineCount: 0,
 			vaccinatedDate: null,
 			dayTripStatus: 'eligible',
 			dayTripIneligibleReason: null,
@@ -524,28 +524,6 @@
 	function sortArrow(key: typeof sortKey) {
 		if (sortKey !== key) return '';
 		return sortDir === 'asc' ? ' ↑' : ' ↓';
-	}
-
-	function isWithinNewIntakeWindow(dog: Dog) {
-		const intakeAt = toDate(dog.intakeDate)?.getTime() ?? 0;
-		const createdAt = toDate(dog.createdAt)?.getTime() ?? 0;
-		const baseline = Math.max(intakeAt, createdAt);
-		if (!baseline) return false;
-		return Date.now() - baseline < NEW_INTAKE_RED_MS;
-	}
-
-	function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
-		const level = dogHandlingLevel(dog);
-		// Stripes are based on handling/day-trip risk rules, plus intake red flags.
-		// Intake dates from ASM are sometimes date-only, so createdAt keeps brand-new
-		// arrivals red for at least the first 24 hours in-app.
-		if (!dog.isVaccinated) return 'red';
-		if (isWithinNewIntakeWindow(dog)) return 'red';
-		if (level === 'manager_only') return 'red';
-		if (level === 'staff_only') return 'yellow';
-		if (dog.dayTripStatus === 'ineligible' && dog.isolationStatus === 'none') return 'red';
-		if (dog.dayTripStatus === 'difficult' && dog.isolationStatus === 'none') return 'yellow';
-		return 'green';
 	}
 
 	function photoStripeClass(dog: Dog): string {

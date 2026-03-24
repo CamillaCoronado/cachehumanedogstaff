@@ -6,9 +6,11 @@
 	import { listDogs } from '$lib/data/dogs';
 	import {
 		addPlaygroupSession,
+		deletePlaygroupSession,
 		listPlaygroupSessions,
 		listPendingPlaygroups,
-		markPendingProcessed
+		markPendingProcessed,
+		updatePlaygroupSession
 	} from '$lib/data/playgroups';
 	import type { PendingPlaygroup } from '$lib/data/playgroups';
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
@@ -44,6 +46,8 @@
 	let manualDuration = '';
 	let manualNotes = '';
 	let manualDogIds: string[] = [];
+	let manualExtraNames = '';
+	let showManualModal = false;
 	let playgroupsLoaded = false;
 
 	// Slack import — paste
@@ -55,11 +59,23 @@
 	let importGroupName = '';
 	let importNotes = '';
 	let savingImport = false;
+	let importExcludedNames: string[] = [];
 
 	// Slack import — pending from webhook
 	let pendingPlaygroups: PendingPlaygroup[] = [];
 	let activePending: PendingPlaygroup | null = null;
 	let savingPending = false;
+
+	// Tabs
+	let activeTab: 'dogs' | 'recommendations' | 'history' = 'dogs';
+
+	// History editing
+	let editingSessionId: string | null = null;
+	let editDate = '';
+	let editGroupName = '';
+	let editOutcome: PlaygroupOutcome = 'successful';
+	let editNotes = '';
+	let savingEdit = false;
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canViewPlaygroups = canAccessPlaygroups(role);
@@ -72,7 +88,7 @@
 	}
 
 	$: activeDogs = dogs
-		.filter((dog) => dog.status === 'active')
+		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
 		.sort((a, b) => a.name.localeCompare(b.name));
 	$: filteredDogs = activeDogs.filter((dog) => dog.name.toLowerCase().includes(search.toLowerCase()));
 	$: readyDogs = activeDogs.filter((dog) => getReadiness(dog) === 'ready');
@@ -82,8 +98,26 @@
 	$: history = [...sessions].sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
 
 
+	function ageWeeks(dog: Dog): number | null {
+		const dob = toDate(dog.dateOfBirth);
+		if (!dob) return null;
+		return Math.floor((Date.now() - dob.getTime()) / (7 * 86_400_000));
+	}
+
+	function isPuppy(dog: Dog): boolean {
+		const weeks = ageWeeks(dog);
+		return weeks !== null && weeks < 26; // under 6 months
+	}
+
 	function getReadiness(dog: Dog): DogReadiness {
 		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no') return 'hold';
+		const weeks = ageWeeks(dog);
+		if (weeks !== null && weeks < 26) {
+			// Under 12 weeks or not yet vaccinated → hold
+			if (weeks < 12 || !dog.isVaccinated) return 'hold';
+			// 12+ weeks with vaccines → caution only, never ready
+			return 'caution';
+		}
 		if (dog.goodWithDogs === 'yes') return 'ready';
 		return 'caution';
 	}
@@ -98,9 +132,15 @@
 		const readiness = getReadiness(dog);
 		if (readiness === 'hold') {
 			if (dog.isolationStatus !== 'none') return 'In isolation: do not schedule.';
-			return 'Marked not dog-social: behavior team only.';
+			if (dog.goodWithDogs === 'no') return 'Marked not dog-social: behavior team only.';
+			const weeks = ageWeeks(dog);
+			if (weeks !== null && weeks < 12) return `Too young for playgroup (${weeks} wks — minimum 12 weeks).`;
+			if (isPuppy(dog) && !dog.isVaccinated) return 'Needs 2 sets of vaccines before playgroup.';
 		}
-		if (readiness === 'caution') return 'Unknown dog compatibility: do controlled intro with a stable dog.';
+		if (readiness === 'caution') {
+			if (isPuppy(dog)) return 'Puppy (12+ wks, vaccinated): cleared for playgroup with specific calm dogs only.';
+			return 'Unknown dog compatibility: do controlled intro with a stable dog.';
+		}
 		return 'Eligible for standard playgroup rotation.';
 	}
 
@@ -200,18 +240,32 @@
 	}
 
 	function matchImportDogs(names: string[]) {
-		return names.map((name) => ({
-			name,
-			dog: activeDogs.find((d) => d.name.toLowerCase() === name.toLowerCase()) ?? null
-		}));
+		const searchable = dogs.filter((d) => !d.permanentFoster);
+		return names.map((name) => {
+			const lower = name.toLowerCase();
+			// Exact match first
+			let dog = searchable.find((d) => d.name.toLowerCase() === lower) ?? null;
+			// Partial: "Rosie" matches "Rosie Mae", "Mac" matches "Big Mac", etc.
+			if (!dog) {
+				dog = searchable.find((d) => {
+					const dogLower = d.name.toLowerCase();
+					return dogLower.includes(lower) || lower.includes(dogLower);
+				}) ?? null;
+			}
+			return { name, dog, isActive: dog ? dog.status === 'active' : false };
+		});
 	}
 
 	function parseImport() {
 		if (!importText.trim()) return;
-		importParsed = parsePlaygroupMessage(importText);
+		const allDogNames = dogs
+			.filter((d) => !d.permanentFoster)
+			.map((d) => d.name);
+		importParsed = parsePlaygroupMessage(importText, allDogNames);
 		importOutcome = importParsed.outcome;
 		importNotes = importParsed.notes ?? '';
 		importGroupName = '';
+		importExcludedNames = [];
 	}
 
 	function clearImport() {
@@ -221,6 +275,7 @@
 		importNotes = '';
 		importOutcome = 'successful';
 		activePending = null;
+		importExcludedNames = [];
 	}
 
 	function openPending(p: PendingPlaygroup) {
@@ -229,18 +284,24 @@
 		importOutcome = p.suggestedOutcome;
 		importNotes = p.suggestedNotes ?? '';
 		importGroupName = '';
+		importExcludedNames = [];
 		showSlackImport = false;
+	}
+
+	function toggleExclude(name: string) {
+		if (importExcludedNames.includes(name)) {
+			importExcludedNames = importExcludedNames.filter((n) => n !== name);
+		} else {
+			importExcludedNames = [...importExcludedNames, name];
+		}
 	}
 
 	async function saveImportSession() {
 		if (!importParsed) return;
-		if (!importGroupName.trim()) {
-			toast.error('Group name is required.');
-			return;
-		}
-		const matches = matchImportDogs(importParsed.dogNames).filter((m) => m.dog !== null);
+		const allMatches = matchImportDogs(importParsed.dogNames);
+		const matches = allMatches.filter((m) => !importExcludedNames.includes(m.name));
 		if (matches.length < 2) {
-			toast.error('At least 2 matched dogs required.');
+			toast.error('At least 2 dogs required.');
 			return;
 		}
 		savingImport = true;
@@ -249,8 +310,8 @@
 				{
 					date: parseInputDate(importDate),
 					groupName: importGroupName.trim(),
-					dogIds: matches.map((m) => m.dog!.id),
-					dogNames: matches.map((m) => m.dog!.name),
+					dogIds: matches.filter((m) => m.dog !== null).map((m) => m.dog!.id),
+					dogNames: matches.map((m) => m.name),
 					recommendationType: 'manual',
 					outcome: importOutcome,
 					notes: importNotes.trim() || null,
@@ -272,13 +333,10 @@
 
 	async function savePendingSession() {
 		if (!activePending) return;
-		if (!importGroupName.trim()) {
-			toast.error('Group name is required.');
-			return;
-		}
-		const matches = matchImportDogs(activePending.dogNames).filter((m) => m.dog !== null);
+		const allMatches = matchImportDogs(activePending.dogNames);
+		const matches = allMatches.filter((m) => !importExcludedNames.includes(m.name));
 		if (matches.length < 2) {
-			toast.error('At least 2 matched dogs required.');
+			toast.error('At least 2 dogs required.');
 			return;
 		}
 		savingPending = true;
@@ -287,8 +345,8 @@
 				{
 					date: parseInputDate(importDate),
 					groupName: importGroupName.trim(),
-					dogIds: matches.map((m) => m.dog!.id),
-					dogNames: matches.map((m) => m.dog!.name),
+					dogIds: matches.filter((m) => m.dog !== null).map((m) => m.dog!.id),
+					dogNames: matches.map((m) => m.name),
 					recommendationType: 'manual',
 					outcome: importOutcome,
 					notes: importNotes.trim() || null,
@@ -352,7 +410,8 @@
 			return;
 		}
 		const selectedDogs = activeDogs.filter((dog) => manualDogIds.includes(dog.id));
-		if (selectedDogs.length < 2) {
+		const extraNames = manualExtraNames.split(',').map((n) => n.trim()).filter(Boolean);
+		if (selectedDogs.length + extraNames.length < 2) {
 			toast.error('Select at least 2 dogs.');
 			return;
 		}
@@ -373,7 +432,7 @@
 					date: parseInputDate(manualDate),
 					groupName: manualGroupName.trim(),
 					dogIds: selectedDogs.map((dog) => dog.id),
-					dogNames: selectedDogs.map((dog) => dog.name),
+					dogNames: [...selectedDogs.map((dog) => dog.name), ...extraNames],
 					recommendationType: 'manual',
 					outcome: manualOutcome,
 					notes: manualNotes.trim() || null,
@@ -387,13 +446,59 @@
 			manualDuration = '';
 			manualNotes = '';
 			manualDogIds = [];
+			manualExtraNames = '';
 			manualDate = format(new Date(), 'yyyy-MM-dd');
+			showManualModal = false;
 			toast.success('Playgroup session saved.');
 		} catch (error) {
 			console.error(error);
 			toast.error('Unable to save playgroup session.');
 		} finally {
 			savingManual = false;
+		}
+	}
+
+	function startEdit(session: PlaygroupSession) {
+		editingSessionId = session.id;
+		editDate = format(toDate(session.date) ?? new Date(), 'yyyy-MM-dd');
+		editGroupName = session.groupName;
+		editOutcome = session.outcome;
+		editNotes = session.notes ?? '';
+	}
+
+	function cancelEdit() {
+		editingSessionId = null;
+	}
+
+	async function saveEdit() {
+		if (!editingSessionId) return;
+		savingEdit = true;
+		try {
+			await updatePlaygroupSession(editingSessionId, {
+				date: parseInputDate(editDate),
+				groupName: editGroupName.trim(),
+				outcome: editOutcome,
+				notes: editNotes.trim() || null
+			});
+			sessions = await listPlaygroupSessions();
+			editingSessionId = null;
+			toast.success('Session updated.');
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to update session.');
+		} finally {
+			savingEdit = false;
+		}
+	}
+
+	async function deleteSession(id: string) {
+		if (!confirm('Delete this playgroup session? This cannot be undone.')) return;
+		try {
+			await deletePlaygroupSession(id);
+			sessions = sessions.filter((s) => s.id !== id);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to delete session.');
 		}
 	}
 
@@ -409,7 +514,7 @@
 	<section class="playgroups-board" aria-label="Playgroups board">
 		<div class="playgroups-restricted panel panel-wide">
 			<h3>Manager only</h3>
-			<p class="panel-note typewriter">Playgroups are temporarily available only to manager and admin accounts.</p>
+			<p class="panel-note">Playgroups are temporarily available only to manager and admin accounts.</p>
 		</div>
 	</section>
 {:else}
@@ -418,7 +523,7 @@
 			<div class="playgroups-controls">
 				<div class="controls-top-row">
 					<input
-						class="playgroups-search typewriter"
+						class="playgroups-search"
 						placeholder="search dog name"
 						bind:value={search}
 					/>
@@ -427,7 +532,7 @@
 						type="button"
 						on:click={() => { showSlackImport = !showSlackImport; if (!showSlackImport) clearImport(); }}
 					>
-						{showSlackImport ? 'Cancel' : 'Log from Slack'}
+						{showSlackImport ? 'Cancel' : 'Paste log'}
 					</button>
 				</div>
 				<div class="stats-row typewriter">
@@ -473,11 +578,19 @@
 					</div>
 					<div class="slack-dog-pills">
 						{#each pendingMatches as m}
-							<span class={`slack-dog-pill ${m.dog ? 'pill-matched' : 'pill-unmatched'}`}>{m.name}</span>
+							<button
+								type="button"
+								class={`slack-dog-pill ${importExcludedNames.includes(m.name) ? 'pill-excluded' : m.dog ? (m.isActive ? 'pill-matched' : 'pill-archived') : 'pill-unmatched'}`}
+								on:click={() => toggleExclude(m.name)}
+								title={importExcludedNames.includes(m.name) ? 'Click to include' : 'Click to remove'}
+							>{m.name}</button>
 						{/each}
 					</div>
 					{#if pendingMatches.some((m) => !m.dog)}
-						<p class="slack-unmatched-note typewriter">Gray names not found in active dogs — they won't be included.</p>
+						<p class="slack-unmatched-note">Gray: not in app — will still be saved by name. Click to remove.</p>
+					{/if}
+					{#if pendingMatches.some((m) => m.dog && !m.isActive)}
+						<p class="slack-unmatched-note" style="color:#7a6000">Amber: no longer at shelter — will still be included. Click to remove.</p>
 					{/if}
 					<div class="slack-confirm-fields">
 						<label class="form-field">
@@ -522,7 +635,7 @@
 				<div class="slack-import-panel">
 					{#if !importParsed}
 						<label class="form-field" for="slack-paste">
-							<span class="typewriter">Paste Slack message</span>
+							<span class="typewriter">Paste playgroup log</span>
 							<textarea
 								id="slack-paste"
 								class="slack-paste-area"
@@ -547,14 +660,22 @@
 						</div>
 						<div class="slack-dog-pills">
 							{#each pasteMatches as m}
-								<span class={`slack-dog-pill ${m.dog ? 'pill-matched' : 'pill-unmatched'}`}>{m.name}</span>
+								<button
+									type="button"
+									class={`slack-dog-pill ${importExcludedNames.includes(m.name) ? 'pill-excluded' : m.dog ? (m.isActive ? 'pill-matched' : 'pill-archived') : 'pill-unmatched'}`}
+									on:click={() => toggleExclude(m.name)}
+									title={importExcludedNames.includes(m.name) ? 'Click to include' : 'Click to remove'}
+								>{m.name}</button>
 							{/each}
 							{#if pasteMatches.length === 0}
 								<span class="typewriter" style="font-size:0.72rem;color:#7a3e3e">No dog names parsed. Check format.</span>
 							{/if}
 						</div>
 						{#if pasteMatches.some((m) => !m.dog)}
-							<p class="slack-unmatched-note typewriter">Gray names not found in active dogs — they won't be included.</p>
+							<p class="slack-unmatched-note">Gray: not in app — will still be saved by name. Click to remove.</p>
+						{/if}
+						{#if pasteMatches.some((m) => m.dog && !m.isActive)}
+							<p class="slack-unmatched-note" style="color:#7a6000">Amber: no longer at shelter — will still be included.</p>
 						{/if}
 						<div class="slack-confirm-fields">
 							<label class="form-field">
@@ -591,14 +712,20 @@
 				</div>
 			{/if}
 
-			<div class="playgroups-grid">
+			<div class="pg-tab-bar">
+				<button class={`pg-tab ${activeTab === 'dogs' ? 'pg-tab-active' : ''}`} type="button" on:click={() => activeTab = 'dogs'}>Dogs</button>
+				<button class={`pg-tab ${activeTab === 'recommendations' ? 'pg-tab-active' : ''}`} type="button" on:click={() => activeTab = 'recommendations'}>Recommendations</button>
+				<button class={`pg-tab ${activeTab === 'history' ? 'pg-tab-active' : ''}`} type="button" on:click={() => activeTab = 'history'}>History</button>
+			</div>
+
+			{#if activeTab === 'dogs'}
 			<section class="panel">
 				<div class="panel-head">
 					<h3>Dog List</h3>
-					<p class="panel-note typewriter">Use this as the source roster for group planning.</p>
+					<p class="panel-note">Use this as the source roster for group planning.</p>
 				</div>
 				{#if filteredDogs.length === 0}
-					<p class="empty-line typewriter">No active dogs match search.</p>
+					<p class="empty-line">No active dogs match search.</p>
 				{:else}
 					<!-- Mobile cards -->
 					<div class="dog-card-list">
@@ -615,7 +742,7 @@
 									<span>{dateDayCount(dog.intakeDate) ?? '—'} days in</span>
 								</div>
 								{#if guidanceForDog(dog)}
-									<p class="dog-card-guidance typewriter">{guidanceForDog(dog)}</p>
+									<p class="dog-card-guidance">{guidanceForDog(dog)}</p>
 								{/if}
 							</div>
 						{/each}
@@ -653,14 +780,14 @@
 					</div>
 				{/if}
 			</section>
-
+			{:else if activeTab === 'recommendations'}
 			<section class="panel">
 				<div class="panel-head">
 					<h3>Recommended Playgroups</h3>
-					<p class="panel-note typewriter">Auto-suggested from readiness + energy compatibility.</p>
+					<p class="panel-note">Auto-suggested from readiness + energy compatibility.</p>
 				</div>
 				{#if recommendations.length === 0}
-					<p class="empty-line typewriter">No recommendations yet. Add more ready dogs for pairing.</p>
+					<p class="empty-line">No recommendations yet. Add more ready dogs for pairing.</p>
 				{:else}
 					<div class="recommendation-grid">
 						{#each recommendations as recommendation}
@@ -688,90 +815,138 @@
 					</div>
 				{/if}
 			</section>
-
+			{:else}
 			<section class="panel panel-history">
 				<div class="panel-head">
 					<h3>Playgroup History</h3>
-					<p class="panel-note typewriter">All previously logged playgroups.</p>
+					<div class="panel-head-right">
+						<p class="panel-note">All previously logged playgroups.</p>
+						<button class="log-manual-btn typewriter" type="button" on:click={() => showManualModal = true}>Log playgroup</button>
+					</div>
 				</div>
 
-				<form class="manual-form" on:submit|preventDefault={saveManualSession}>
-					<div class="manual-grid">
-						<label class="form-field" for="manual-group-name">
-							<span class="typewriter">Group name</span>
-							<input id="manual-group-name" bind:value={manualGroupName} placeholder="Morning Yard Group A" />
-						</label>
-						<label class="form-field" for="manual-date">
-							<span class="typewriter">Date</span>
-							<input id="manual-date" type="date" bind:value={manualDate} />
-						</label>
-						<label class="form-field" for="manual-duration">
-							<span class="typewriter">Duration (minutes)</span>
-							<input id="manual-duration" type="number" min="1" bind:value={manualDuration} placeholder="30" />
-						</label>
-						<label class="form-field" for="manual-outcome">
-							<span class="typewriter">Outcome</span>
-							<select id="manual-outcome" bind:value={manualOutcome}>
-								<option value="successful">Successful</option>
-								<option value="mixed">Mixed</option>
-								<option value="incident">Incident</option>
-								<option value="cancelled">Cancelled</option>
-							</select>
-						</label>
-						<label class="form-field form-field-wide" for="manual-notes">
-							<span class="typewriter">Notes</span>
-							<textarea id="manual-notes" rows="2" bind:value={manualNotes} placeholder="Behavior notes, handling notes, staff observations"></textarea>
-						</label>
-					</div>
+				{#if showManualModal}
+					<div class="manual-modal-overlay" role="presentation" on:click|self={() => showManualModal = false}>
+						<div class="manual-modal" role="dialog" aria-modal="true" aria-label="Log playgroup">
+							<div class="manual-modal-head">
+								<p class="manual-modal-title typewriter">Log playgroup</p>
+								<button class="manual-modal-close" type="button" aria-label="Close" on:click={() => showManualModal = false}>×</button>
+							</div>
+							<form class="manual-form" on:submit|preventDefault={saveManualSession}>
+								<div class="manual-grid">
+									<label class="form-field" for="manual-group-name">
+										<span class="typewriter">Group name</span>
+										<input id="manual-group-name" bind:value={manualGroupName} placeholder="Morning Yard Group A" />
+									</label>
+									<label class="form-field" for="manual-date">
+										<span class="typewriter">Date</span>
+										<input id="manual-date" type="date" bind:value={manualDate} />
+									</label>
+									<label class="form-field" for="manual-duration">
+										<span class="typewriter">Duration (minutes)</span>
+										<input id="manual-duration" type="number" min="1" bind:value={manualDuration} placeholder="30" />
+									</label>
+									<label class="form-field" for="manual-outcome">
+										<span class="typewriter">Outcome</span>
+										<select id="manual-outcome" bind:value={manualOutcome}>
+											<option value="successful">Successful</option>
+											<option value="mixed">Mixed</option>
+											<option value="incident">Incident</option>
+											<option value="cancelled">Cancelled</option>
+										</select>
+									</label>
+									<label class="form-field form-field-wide" for="manual-notes">
+										<span class="typewriter">Notes</span>
+										<textarea id="manual-notes" rows="2" bind:value={manualNotes} placeholder="Behavior notes, handling notes, staff observations"></textarea>
+									</label>
+								</div>
 
-					<div class="manual-dogs">
-						<p class="typewriter">Select dogs for this session</p>
-						<div class="manual-dog-list">
-							{#each activeDogs as dog}
-								<label class="manual-dog-option">
+								<div class="manual-dogs">
+									<p class="manual-dogs-label">Select dogs for this session</p>
+									<div class="manual-dog-list">
+										{#each activeDogs as dog}
+											<label class="manual-dog-option">
+												<input
+													type="checkbox"
+													checked={manualDogIds.includes(dog.id)}
+													on:change={(event) => toggleManualDog(dog.id, event.currentTarget.checked)}
+												/>
+												<span>{dog.name}</span>
+											</label>
+										{/each}
+									</div>
+								</div>
+
+								<label class="form-field">
+									<span>Add dogs not at shelter</span>
 									<input
-										type="checkbox"
-										checked={manualDogIds.includes(dog.id)}
-										on:change={(event) => toggleManualDog(dog.id, event.currentTarget.checked)}
+										type="text"
+										bind:value={manualExtraNames}
+										placeholder="e.g. Buddy, Rosie (comma-separated)"
 									/>
-									<span>{dog.name}</span>
 								</label>
-							{/each}
+
+								<button class="manual-save-btn typewriter" type="submit" disabled={savingManual}>
+									{savingManual ? 'Saving...' : 'Add to history'}
+								</button>
+							</form>
 						</div>
 					</div>
-
-					<button class="manual-save-btn typewriter" type="submit" disabled={savingManual}>
-						{savingManual ? 'Saving...' : 'Add to history'}
-					</button>
-				</form>
+				{/if}
 
 				{#if history.length === 0}
-					<p class="empty-line typewriter">No previous playgroups logged yet.</p>
+					<p class="empty-line">No previous playgroups logged yet.</p>
 				{:else}
 					<div class="history-list">
 						{#each history as session}
 							<article class="history-card">
-								<div class="history-head">
-									<p class="history-name">{session.groupName}</p>
-									<span class={`outcome-pill ${outcomeClass(session.outcome)}`}>{session.outcome}</span>
-								</div>
-								<p class="history-meta typewriter">
-									{formatDateTime(session.date)} • {session.dogNames.length} dog(s)
-									{#if session.durationMinutes}
-										• {session.durationMinutes} min
+								{#if editingSessionId === session.id}
+									<div class="history-edit-form">
+										<div class="history-edit-row">
+											<input type="date" bind:value={editDate} />
+											<select bind:value={editOutcome}>
+												<option value="successful">Successful</option>
+												<option value="mixed">Mixed</option>
+												<option value="incident">Incident</option>
+												<option value="cancelled">Cancelled</option>
+											</select>
+										</div>
+										<input type="text" bind:value={editGroupName} placeholder="Group name (optional)" />
+										<textarea bind:value={editNotes} placeholder="Notes" rows={3}></textarea>
+										<div class="history-edit-actions">
+											<button class="btn-save-edit" on:click={saveEdit} disabled={savingEdit}>
+												{savingEdit ? 'Saving…' : 'Save'}
+											</button>
+											<button class="btn-cancel-edit" on:click={cancelEdit}>Cancel</button>
+										</div>
+									</div>
+								{:else}
+									<div class="history-head">
+										<p class="history-name">{session.groupName || '—'}</p>
+										<div class="history-head-right">
+											<span class={`outcome-pill ${outcomeClass(session.outcome)}`}>{session.outcome}</span>
+											<button class="btn-edit-session" on:click={() => startEdit(session)}>Edit</button>
+											<button class="btn-delete-session" on:click={() => deleteSession(session.id)}>Delete</button>
+										</div>
+									</div>
+									<p class="history-meta typewriter">
+										{formatDateTime(session.date)} • {session.dogNames.length} dog(s)
+										{#if session.durationMinutes}
+											• {session.durationMinutes} min
+										{/if}
+									</p>
+									<p class="history-dogs">{session.dogNames.join(', ')}</p>
+									{#if session.notes}
+										<p class="history-notes">{session.notes}</p>
 									{/if}
-								</p>
-								<p class="history-dogs">{session.dogNames.join(', ')}</p>
-								{#if session.notes}
-									<p class="history-notes">{session.notes}</p>
+									<p class="history-logger typewriter">Logged by {session.loggedByName}</p>
 								{/if}
-								<p class="history-logger typewriter">Logged by {session.loggedByName}</p>
 							</article>
 						{/each}
 					</div>
 				{/if}
 			</section>
-			</div>
+			{/if}
 		{/if}
 	</section>
 {/if}
@@ -813,8 +988,6 @@
 		border-radius: 0.24rem;
 		padding: 0.46rem 0.58rem;
 		font-size: 1rem;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
 	}
 
 	.stats-row {
@@ -826,7 +999,7 @@
 	.stat-chip {
 		display: inline-flex;
 		align-items: center;
-		border: 1.5px solid #b8c7d9;
+		border: 1px solid #b8c7d9;
 		border-radius: 999px;
 		padding: 0.16rem 0.54rem;
 		font-size: 0.58rem;
@@ -864,6 +1037,37 @@
 		align-content: center;
 	}
 
+	.pg-tab-bar {
+		display: flex;
+		border-top: 1px solid #d5e0ea;
+		background: #f4f7fa;
+	}
+
+	.pg-tab {
+		flex: 1;
+		padding: 0.5rem 0.4rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #4f6580;
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		cursor: pointer;
+	}
+
+	.pg-tab:hover {
+		background: #eaf0f7;
+	}
+
+	.pg-tab-active {
+		color: #016aa5;
+		border-bottom-color: #016aa5;
+		background: #fff;
+	}
+
 	.playgroups-grid {
 		display: grid;
 		gap: 0;
@@ -887,9 +1091,7 @@
 
 	.panel-note {
 		margin: 0.2rem 0 0;
-		font-size: 0.58rem;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
+		font-size: 0.68rem;
 		color: #4f6681;
 	}
 
@@ -907,7 +1109,7 @@
 	}
 
 	.dog-card {
-		border: 1.5px solid #c9d5e3;
+		border: 1px solid #c9d5e3;
 		border-radius: 0.3rem;
 		padding: 0.6rem 0.7rem;
 	}
@@ -981,7 +1183,6 @@
 		margin: 0.15rem 0 0;
 		font-size: 0.54rem;
 		color: #5f748d;
-		text-transform: uppercase;
 	}
 
 	.readiness-pill {
@@ -1020,7 +1221,7 @@
 	}
 
 	.recommendation-card {
-		border: 1.5px solid #c6d4e4;
+		border: 1px solid #c6d4e4;
 		background: #fbfdff;
 		padding: 0.52rem;
 	}
@@ -1078,7 +1279,7 @@
 		margin-top: 0.46rem;
 		min-height: 1.95rem;
 		border: 1px solid #d5e0ea;
-		border-radius: 0.2rem;
+		border-radius: 0.42rem;
 		padding: 0.18rem 0.52rem;
 		font-size: 0.58rem;
 		letter-spacing: 0.09em;
@@ -1098,9 +1299,8 @@
 	}
 
 	.manual-form {
-		border: 1.5px solid #cedae8;
 		background: #fbfdff;
-		padding: 0.56rem;
+		padding: 0.56rem 0 0;
 	}
 
 	.manual-grid {
@@ -1124,8 +1324,8 @@
 	.form-field select,
 	.form-field textarea {
 		width: 100%;
-		border: 1.5px solid #becbdd;
-		border-radius: 0.2rem;
+		border: 1px solid #becbdd;
+		border-radius: 0.42rem;
 		padding: 0.34rem 0.44rem;
 		font-size: 0.74rem;
 		color: #24384f;
@@ -1140,11 +1340,10 @@
 		margin-top: 0.45rem;
 	}
 
-	.manual-dogs p {
+	.manual-dogs p,
+	.manual-dogs-label {
 		margin: 0;
-		font-size: 0.55rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
+		font-size: 0.68rem;
 		color: #4d637d;
 	}
 
@@ -1167,7 +1366,7 @@
 		margin-top: 0.5rem;
 		min-height: 1.95rem;
 		border: 1px solid #d5e0ea;
-		border-radius: 0.2rem;
+		border-radius: 0.42rem;
 		padding: 0.2rem 0.52rem;
 		font-size: 0.6rem;
 		letter-spacing: 0.1em;
@@ -1181,13 +1380,91 @@
 		opacity: 0.6;
 	}
 
+	.panel-head-right {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.log-manual-btn {
+		flex-shrink: 0;
+		border: 1px solid #a9d4b3;
+		border-radius: 0.42rem;
+		padding: 0.22rem 0.6rem;
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		background: #e9f6ec;
+		color: #21563a;
+		cursor: pointer;
+	}
+
+	.log-manual-btn:hover {
+		background: #d5eedb;
+	}
+
+	.manual-modal-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.38);
+		z-index: 200;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+	}
+
+	.manual-modal {
+		background: #fff;
+		border: 1px solid #c8d5e4;
+		border-radius: 0.42rem;
+		width: 100%;
+		max-width: 30rem;
+		max-height: 90vh;
+		overflow-y: auto;
+		padding: 0.82rem;
+	}
+
+	.manual-modal-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.6rem;
+	}
+
+	.manual-modal-title {
+		margin: 0;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #2e4a66;
+	}
+
+	.manual-modal-close {
+		background: none;
+		border: none;
+		font-size: 1.1rem;
+		line-height: 1;
+		color: #7a8fa6;
+		cursor: pointer;
+		padding: 0 0.2rem;
+	}
+
+	.manual-modal-close:hover {
+		color: #2e4a66;
+	}
+
 	.history-list {
 		display: grid;
 		gap: 0.42rem;
 	}
 
 	.history-card {
-		border: 1.5px solid #c8d5e4;
+		border: 1px solid #c8d5e4;
 		background: #ffffff;
 		padding: 0.48rem;
 	}
@@ -1225,6 +1502,85 @@
 		margin: 0.22rem 0 0;
 		font-size: 0.76rem;
 		color: #3b4f68;
+	}
+
+	.history-head-right {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.btn-edit-session {
+		background: none;
+		border: 1px solid #b0c4d8;
+		border-radius: 3px;
+		padding: 0.1rem 0.36rem;
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: #4f6580;
+		cursor: pointer;
+	}
+	.btn-edit-session:hover {
+		background: #eaf0f7;
+	}
+
+	.btn-delete-session {
+		background: none;
+		border: 1px solid #e2b6b6;
+		border-radius: 3px;
+		padding: 0.1rem 0.36rem;
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: #8a3e3c;
+		cursor: pointer;
+	}
+	.btn-delete-session:hover {
+		background: #fff0f0;
+	}
+
+	.history-edit-form {
+		display: grid;
+		gap: 0.4rem;
+	}
+
+	.history-edit-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.4rem;
+	}
+
+	.history-edit-actions {
+		display: flex;
+		gap: 0.4rem;
+	}
+
+	.btn-save-edit {
+		background: #016aa5;
+		color: #fff;
+		border: none;
+		border-radius: 3px;
+		padding: 0.28rem 0.7rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.btn-save-edit:disabled {
+		opacity: 0.6;
+	}
+
+	.btn-cancel-edit {
+		background: none;
+		border: 1px solid #b0c4d8;
+		border-radius: 3px;
+		padding: 0.28rem 0.7rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: #4f6580;
+		cursor: pointer;
 	}
 
 	.outcome-pill {
@@ -1295,8 +1651,8 @@
 	}
 
 	.slack-toggle-btn {
-		border: 1.5px solid #016aa5;
-		border-radius: 0.2rem;
+		border: 1px solid #016aa5;
+		border-radius: 0.42rem;
 		padding: 0.3rem 0.7rem;
 		font-size: 0.58rem;
 		letter-spacing: 0.09em;
@@ -1340,7 +1696,7 @@
 		gap: 0.5rem;
 		background: #fff8d6;
 		border: 1px solid #e6cc7a;
-		border-radius: 0.2rem;
+		border-radius: 0.42rem;
 		padding: 0.38rem 0.52rem;
 	}
 
@@ -1358,8 +1714,8 @@
 	}
 
 	.slack-pending-btn {
-		border: 1.5px solid #016aa5;
-		border-radius: 0.2rem;
+		border: 1px solid #016aa5;
+		border-radius: 0.42rem;
 		padding: 0.22rem 0.52rem;
 		font-size: 0.56rem;
 		letter-spacing: 0.09em;
@@ -1371,8 +1727,8 @@
 	}
 
 	.slack-pending-dismiss {
-		border: 1.5px solid #c8d0db;
-		border-radius: 0.2rem;
+		border: 1px solid #c8d0db;
+		border-radius: 0.42rem;
 		padding: 0.22rem 0.52rem;
 		font-size: 0.56rem;
 		letter-spacing: 0.09em;
@@ -1393,11 +1749,11 @@
 
 	.slack-paste-area {
 		width: 100%;
-		border: 1.5px solid #becbdd;
-		border-radius: 0.2rem;
+		border: 1px solid #becbdd;
+		border-radius: 0.42rem;
 		padding: 0.44rem 0.52rem;
 		font-size: 0.76rem;
-		font-family: var(--font-mono, monospace);
+		font-family: var(--font-typewriter);
 		color: #22384f;
 		resize: vertical;
 		background: #fff;
@@ -1405,8 +1761,8 @@
 
 	.slack-parse-btn {
 		margin-top: 0.4rem;
-		border: 1.5px solid #016aa5;
-		border-radius: 0.2rem;
+		border: 1px solid #016aa5;
+		border-radius: 0.42rem;
 		padding: 0.3rem 0.9rem;
 		font-size: 0.58rem;
 		letter-spacing: 0.1em;
@@ -1440,7 +1796,7 @@
 
 	.slack-back-btn {
 		border: 1px solid #c8d3e0;
-		border-radius: 0.2rem;
+		border-radius: 0.42rem;
 		padding: 0.18rem 0.46rem;
 		font-size: 0.54rem;
 		letter-spacing: 0.08em;
@@ -1463,6 +1819,8 @@
 		font-size: 0.66rem;
 		font-weight: 700;
 		letter-spacing: 0.04em;
+		cursor: pointer;
+		font-family: inherit;
 	}
 
 	.pill-matched {
@@ -1471,17 +1829,29 @@
 		border: 1px solid #abd5b4;
 	}
 
+	.pill-archived {
+		background: #fef3e2;
+		color: #7a4f10;
+		border: 1px solid #f0c87a;
+	}
+
 	.pill-unmatched {
 		background: #f0f2f5;
 		color: #7a8fa6;
 		border: 1px solid #c8d3df;
 	}
 
+	.pill-excluded {
+		background: #f5f5f5;
+		color: #b0b0b0;
+		border: 1px solid #d4d4d4;
+		text-decoration: line-through;
+		opacity: 0.6;
+	}
+
 	.slack-unmatched-note {
 		margin: 0 0 0.4rem;
-		font-size: 0.56rem;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
+		font-size: 0.68rem;
 		color: #7a6530;
 	}
 
@@ -1514,7 +1884,7 @@
 		padding: 0.44rem 0.52rem;
 		background: #f2f5f9;
 		border: 1px solid #cdd8e6;
-		border-radius: 0.2rem;
+		border-radius: 0.42rem;
 		font-size: 0.72rem;
 		color: #2b3f57;
 		white-space: pre-wrap;
@@ -1524,8 +1894,8 @@
 	}
 
 	.slack-save-btn {
-		border: 1.5px solid #3aaf2a;
-		border-radius: 0.2rem;
+		border: 1px solid #3aaf2a;
+		border-radius: 0.42rem;
 		padding: 0.3rem 0.9rem;
 		font-size: 0.58rem;
 		letter-spacing: 0.1em;

@@ -138,7 +138,7 @@
 	}
 
 	$: activeDogs = dogs
-		.filter((dog) => dog.status === 'active')
+		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
 		.sort((a, b) => a.name.localeCompare(b.name));
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 
