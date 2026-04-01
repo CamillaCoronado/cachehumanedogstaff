@@ -73,6 +73,7 @@ export interface Dog {
 	isVaccinated: boolean;
 	vaccineCount: number;
 	vaccinatedDate: DateValue | null;
+	allergyTypes?: string[];
 	dayTripStatus: DayTripStatus;
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
 	dayTripManagerOnly: boolean;

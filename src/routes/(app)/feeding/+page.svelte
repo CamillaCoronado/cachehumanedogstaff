@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
-	import { listDogs, addFeedingLog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
+	import { listDogs, addFeedingLog, updateFeedingLog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
 	import { formatDate, isSameCalendarDay, isSurgeryToday } from '$lib/utils/dates';
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -10,7 +10,7 @@
 
 	type RunId = number | 'puppy' | 'rock';
 	const MAX_DOGS_PER_RUN = 2;
-	type WalkPathId = 'back_to_front' | 'front_to_back' | 'snake_route';
+	type WalkPathId = 'back_to_front' | 'front_to_back' | 'snake_route' | 'snake_route_reverse';
 
 	type KennelCell = {
 		id: string;
@@ -32,7 +32,8 @@
 	const routeOptions: Array<{ id: WalkPathId; label: string }> = [
 		{ id: 'back_to_front', label: 'Back to Front' },
 		{ id: 'front_to_back', label: 'Front to Back' },
-		{ id: 'snake_route', label: 'Snake Route' }
+		{ id: 'snake_route', label: 'Snake Route' },
+		{ id: 'snake_route_reverse', label: 'Snake Route (Reversed)' }
 	];
 
 	function makeRunCells(start: number, count: number, row: number, colStart: number) {
@@ -186,15 +187,23 @@
 	let stoolNotes = '';
 	let savingStool = false;
 	let showHistory = false;
-	let walkPath: WalkPathId = 'back_to_front';
+	let walkPath: WalkPathId = 'snake_route';
+	let editLog: { dogId: string; logId: string; amountEaten: AmountEaten; notes: string } | null = null;
+	let savingEdit = false;
 
 	onMount(async () => {
 		await refreshDogs();
 	});
 
-	$: activeDogs = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster).sort((a, b) => a.name.localeCompare(b.name));
-	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster);
-	$: shelterDogs = activeDogs.filter((dog) => !dog.inFoster);
+	// Exclude foster, permanent foster, and incoming dogs not expected today
+	$: activeDogs = dogs.filter((dog) => {
+		if (dog.status !== 'active') return false;
+		if (dog.permanentFoster || dog.inFoster) return false;
+		if (dog.isIncoming) return isSameCalendarDay(dog.intakeDate, selectedDay);
+		return true;
+	}).sort((a, b) => a.name.localeCompare(b.name));
+	$: fosterDogs = dogs.filter((dog) => dog.status === 'active' && dog.inFoster && !dog.permanentFoster);
+	$: shelterDogs = activeDogs;
 	$: kennelAssignments = getAssignments(shelterDogs);
 	$: unassignedDogs = shelterDogs.filter((dog) => !getDogRun(dog));
 	$: assignedCount = shelterDogs.length - unassignedDogs.length;
@@ -257,7 +266,12 @@
 		}
 
 		const rowIndex = allRows.indexOf(position.row);
-		const colRank = rowIndex % 2 === 0 ? position.col : maxCol - position.col;
+		if (path === 'snake_route') {
+			const colRank = rowIndex % 2 === 0 ? position.col : maxCol - position.col;
+			return rowIndex * 100 + colRank;
+		}
+		// snake_route_reverse: starts right-to-left on first row
+		const colRank = rowIndex % 2 === 0 ? maxCol - position.col : position.col;
 		return rowIndex * 100 + colRank;
 	}
 
@@ -301,6 +315,7 @@
 
 	function feedingFlags(dog: Dog) {
 		const flags: string[] = [];
+		if ((dog.allergyTypes ?? []).length > 0) flags.push('Allergy');
 		if (hasSupplements(dog)) flags.push('Supplements');
 		if (hasSpecialDiet(dog)) flags.push('Special Diet');
 		return flags;
@@ -308,6 +323,8 @@
 
 	function specialFeedingReasons(dog: Dog) {
 		const reasons: string[] = [];
+		const allergies = dog.allergyTypes ?? [];
+		if (allergies.length > 0) reasons.push(`Allergy: ${allergies.join(', ')}`);
 		if (isOwnFood(dog)) reasons.push('Own Food');
 		if (dog.hasOwnFood && dog.transitionToHills === true) reasons.push('Transition to Hills');
 		if (dog.hasOwnFood && dog.transitionToHills === false) reasons.push('No Hills Transition');
@@ -331,10 +348,10 @@
 	}
 
 	function getFedMap(list: Dog[], logs: Record<string, FeedingLog[]>, day: Date, meal: MealTime) {
-		const map: Record<string, boolean> = {};
+		const map: Record<string, FeedingLog | null> = {};
 		for (const dog of list) {
 			const entries = logs[dog.id] ?? [];
-			map[dog.id] = entries.some((log) => log.mealTime === meal && isSameCalendarDay(log.date, day));
+			map[dog.id] = entries.find((log) => log.mealTime === meal && isSameCalendarDay(log.date, day)) ?? null;
 		}
 		return map;
 	}
@@ -450,6 +467,29 @@
 		const value = (event.currentTarget as HTMLSelectElement).value as AmountEaten;
 		if (!value) return;
 		logFeeding(dog, value);
+	}
+
+	function openEdit(dog: Dog, log: FeedingLog) {
+		editLog = { dogId: dog.id, logId: log.id, amountEaten: log.amountEaten, notes: log.notes ?? '' };
+	}
+
+	async function saveEdit() {
+		if (!editLog) return;
+		savingEdit = true;
+		try {
+			await updateFeedingLog(editLog.dogId, editLog.logId, {
+				amountEaten: editLog.amountEaten,
+				notes: editLog.notes.trim() || null
+			});
+			await refreshLogs();
+			toast.success('Updated.');
+			editLog = null;
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to update feeding log.');
+		} finally {
+			savingEdit = false;
+		}
 	}
 
 	async function markAllFed() {
@@ -593,8 +633,9 @@
 							{@const flags = feedingFlags(dog)}
 							{@const notes = dog.dietaryNotes?.trim() ?? ''}
 							{@const specialReasons = specialFeedingReasons(dog)}
+							{@const fedLog = fedMap[dog.id]}
 							<article
-								class={`feeding-feed-row ${fedMap[dog.id] ? 'feeding-feed-row-fed' : ''} ${
+								class={`feeding-feed-row ${fedLog ? 'feeding-feed-row-fed' : ''} ${
 									isSurgeryBlocked(dog) ? 'feeding-feed-row-alert' : ''
 								}`}
 							>
@@ -617,7 +658,7 @@
 									{#if flags.length > 0}
 										<div class="feeding-feed-tags">
 											{#each flags as flag}
-												<span class="feeding-feed-tag">{flag}</span>
+												<span class={`feeding-feed-tag ${flag === 'Allergy' ? 'feeding-feed-tag-allergy' : ''}`}>{flag}</span>
 											{/each}
 										</div>
 									{/if}
@@ -627,28 +668,54 @@
 								</div>
 								<div class="feeding-feed-actions">
 									<div class="feeding-feed-badges">
-										{#if fedMap[dog.id]}
+										{#if fedLog}
 											<span class="fed-badge">Logged</span>
 										{/if}
 										{#if isSurgeryBlocked(dog)}
 											<span class="surgery-pill">Do not feed</span>
 										{/if}
 									</div>
-									<select
-										class="feeding-field"
-										disabled={fedMap[dog.id] || isSurgeryBlocked(dog)}
-										on:change={(event) => handleAmountChange(dog, event)}
-									>
-										<option value="">{fedMap[dog.id] ? 'Already logged' : 'Amount eaten'}</option>
-										{#each amounts as amount}
-											<option value={amount}>{amount}</option>
-										{/each}
-									</select>
-									<input
-										class="feeding-field"
-										placeholder="Feeding notes"
-										bind:value={notesByDog[dog.id]}
-									/>
+									{#if fedLog}
+										{#if editLog?.dogId === dog.id}
+											<select class="feeding-field" bind:value={editLog.amountEaten}>
+												{#each amounts as amount}
+													<option value={amount}>{amount}</option>
+												{/each}
+											</select>
+											<input class="feeding-field" placeholder="Notes" bind:value={editLog.notes} />
+											<div class="feeding-inline-edit-actions">
+												<button class="feeding-edit-save-btn" on:click={saveEdit} disabled={savingEdit}>
+													{savingEdit ? '…' : 'Save'}
+												</button>
+												<button class="feeding-edit-cancel-btn" on:click={() => (editLog = null)}>Cancel</button>
+											</div>
+										{:else}
+											<div class="feeding-fed-summary">
+												<span class="feeding-fed-amount">{fedLog.amountEaten}</span>
+												{#if fedLog.notes}
+													<span class="feeding-fed-notes">{fedLog.notes}</span>
+												{/if}
+												<span class="feeding-fed-by">by {fedLog.loggedByName}</span>
+											</div>
+											<button class="feeding-edit-btn" on:click={() => openEdit(dog, fedLog)}>Edit</button>
+										{/if}
+									{:else}
+										<select
+											class="feeding-field"
+											disabled={isSurgeryBlocked(dog)}
+											on:change={(event) => handleAmountChange(dog, event)}
+										>
+											<option value="">Amount eaten</option>
+											{#each amounts as amount}
+												<option value={amount}>{amount}</option>
+											{/each}
+										</select>
+										<input
+											class="feeding-field"
+											placeholder="Feeding notes"
+											bind:value={notesByDog[dog.id]}
+										/>
+									{/if}
 									<button class="feeding-action" on:click={() => openStoolModal(dog)}>
 										Log Stool
 									</button>
@@ -814,6 +881,7 @@
 		</button>
 	</div>
 </Modal>
+
 
 <style>
 	.feeding-board {
@@ -1442,6 +1510,97 @@
 		text-transform: uppercase;
 		font-weight: 700;
 		color: var(--marker-black);
+	}
+
+	.feeding-feed-tag-allergy {
+		border-color: #e8a8a8;
+		background: #fff0f0;
+		color: #8b2020;
+	}
+
+	.feeding-fed-summary {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.3rem;
+		padding: 0.26rem 0.42rem;
+		border: 1px solid #b6d9c2;
+		border-radius: 0.22rem;
+		background: #f0fbf4;
+	}
+
+	.feeding-fed-amount {
+		font-family: var(--font-ui);
+		font-weight: 700;
+		font-size: 0.88rem;
+		color: #1d5a3b;
+		text-transform: capitalize;
+	}
+
+	.feeding-fed-notes {
+		font-size: 0.78rem;
+		color: #3a5a45;
+		font-style: italic;
+	}
+
+	.feeding-fed-by {
+		font-size: 0.66rem;
+		font-family: var(--font-typewriter);
+		letter-spacing: 0.06em;
+		color: #4d7a5e;
+	}
+
+	.feeding-edit-btn {
+		min-height: 2rem;
+		border: 1px solid #b6d9c2;
+		border-radius: 0.22rem;
+		background: #ffffff;
+		padding: 0.18rem 0.62rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.66rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #266741;
+	}
+
+	.feeding-inline-edit-actions {
+		display: flex;
+		gap: 0.4rem;
+	}
+
+	.feeding-edit-save-btn {
+		flex: 1;
+		min-height: 2rem;
+		border: 1px solid #7abf98;
+		border-radius: 0.22rem;
+		background: #edf7f1;
+		padding: 0.28rem 0.6rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.65rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: #266741;
+	}
+
+	.feeding-edit-save-btn:disabled {
+		opacity: 0.6;
+	}
+
+	.feeding-edit-cancel-btn {
+		flex: 1;
+		min-height: 2rem;
+		border: 1px solid #c8d6e0;
+		border-radius: 0.22rem;
+		background: #f4f7fa;
+		padding: 0.28rem 0.6rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.65rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--ink-soft);
 	}
 
 	.feeding-reference summary {

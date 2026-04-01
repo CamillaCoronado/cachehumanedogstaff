@@ -147,6 +147,15 @@
 		dispatch('change', { value, valid: true });
 	}
 
+	const allergyOptions = ['Chicken', 'Fish', 'Grains', 'Beef', 'Dairy', 'Soy', 'Other'];
+
+	function handleAllergyToggle(type: string, checked: boolean) {
+		const current = value.allergyTypes ?? [];
+		const next = checked ? [...current, type] : current.filter((t) => t !== type);
+		value = { ...value, allergyTypes: next };
+		dispatch('change', { value, valid: true });
+	}
+
 	function handleOwnFoodChange(checked: boolean) {
 		value = {
 			...value,
@@ -631,6 +640,23 @@
 			/>
 			<span class="text-sm" style="color: var(--marker-black);">Dog came with personal food</span>
 		</label>
+	</div>
+	<div class="form-field">
+		<label class="form-label typewriter">Food Allergies</label>
+		<div class="allergy-checkboxes">
+			{#each allergyOptions as allergyType}
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={(value.allergyTypes ?? []).includes(allergyType)}
+						on:change={(event) => handleAllergyToggle(allergyType, event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">{allergyType}</span>
+				</label>
+			{/each}
+		</div>
 	</div>
 	<div class="form-field">
 		<label class="form-label typewriter">Transition to Hills</label>
@@ -1237,6 +1263,12 @@
 		height: 1.15rem;
 		border: 1.5px solid #c0c8d2;
 		border-radius: 0.18rem;
+	}
+
+	.allergy-checkboxes {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1.2rem;
 	}
 
 	.form-hint {

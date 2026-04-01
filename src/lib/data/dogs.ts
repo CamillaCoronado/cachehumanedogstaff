@@ -69,6 +69,7 @@ interface StoredDog {
 	isVaccinated: boolean;
 	vaccineCount?: number;
 	vaccinatedDate: string | null;
+	allergyTypes?: string[];
 	dayTripStatus: 'ineligible' | 'difficult' | 'eligible';
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
 	dayTripManagerOnly?: boolean;
@@ -245,6 +246,7 @@ function serializeDog(dog: Dog): StoredDog {
 		isVaccinated: dog.isVaccinated,
 		vaccineCount: dog.vaccineCount,
 		vaccinatedDate: toDateString(dog.vaccinatedDate),
+		allergyTypes: dog.allergyTypes ?? [],
 		dayTripStatus: dog.dayTripStatus,
 		dayTripIneligibleReason: dog.dayTripIneligibleReason ?? null,
 		dayTripManagerOnly: dog.dayTripManagerOnly ?? false,
@@ -335,6 +337,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		isVaccinated: stored.isVaccinated ?? false,
 		vaccineCount: stored.vaccineCount ?? (stored.isVaccinated ? 1 : 0),
 		vaccinatedDate: stored.vaccinatedDate ? toDate(stored.vaccinatedDate) : null,
+		allergyTypes: stored.allergyTypes ?? [],
 		dayTripStatus: normalizedDayTripStatus,
 		dayTripIneligibleReason,
 		dayTripManagerOnly,
@@ -608,6 +611,8 @@ export async function archiveDog(id: string) {
 		status: 'adopted',
 		outdoorKennelAssignment: '',
 		inFoster: false,
+		permanentFoster: false,
+		shelterSince: null,
 		isOutOnDayTrip: false,
 		currentDayTripStartedAt: null
 	});
@@ -823,6 +828,26 @@ export async function addFeedingLog(
 	stored[dogId] = list;
 	writeJson(FEEDING_KEY, stored);
 	return entry;
+}
+
+export async function updateFeedingLog(
+	dogId: string,
+	logId: string,
+	updates: Pick<FeedingLog, 'amountEaten' | 'notes'>
+) {
+	const ref = dogSubcollectionRef(dogId, 'feedingLogs');
+	if (ref) {
+		await setDoc(doc(ref, logId), updates, { merge: true });
+		return;
+	}
+
+	const stored = readJson<LogMap<StoredFeedingLog>>(FEEDING_KEY, {});
+	const list = stored[dogId] ?? [];
+	const idx = list.findIndex((e) => e.id === logId);
+	if (idx < 0) return;
+	list[idx] = { ...list[idx], ...updates };
+	stored[dogId] = list;
+	writeJson(FEEDING_KEY, stored);
 }
 
 export async function addStoolLog(dogId: string, log: Omit<StoolLog, 'id' | 'loggedBy' | 'loggedByName'>, profile?: UserProfile | null) {

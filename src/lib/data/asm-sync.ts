@@ -26,6 +26,7 @@ const FIELD_LABELS: Record<string, string> = {
 	isFixed: 'Fixed',
 	fixedDate: 'Fixed date',
 	isVaccinated: 'Vaccinated',
+	vaccineCount: 'Vaccine count',
 	vaccinatedDate: 'Vaccine date',
 	weightLbs: 'Weight',
 	dateOfBirth: 'DOB',
@@ -46,6 +47,25 @@ const FIELD_LABELS: Record<string, string> = {
 	asmShelterCode: 'Shelter code',
 	origin: 'Origin'
 };
+
+// Long-form or opaque fields where showing the value isn't useful
+const TEXT_ONLY_FIELDS = new Set([
+	'description', 'markings', 'healthProblems', 'origin',
+	'microchipDate', 'fixedDate', 'vaccinatedDate', 'dateOfBirth',
+	'intakeDate', 'originalIntakeDate', 'photoUrl', 'asmShelterCode'
+]);
+
+function formatSyncValue(key: string, value: unknown): string | null {
+	if (TEXT_ONLY_FIELDS.has(key)) return null;
+	if (value === null || value === undefined) return null;
+	if (typeof value === 'boolean') return value ? 'yes' : 'no';
+	if (key === 'energyLevel') return String(value).replace('_', ' ');
+	if (key === 'weightLbs') return `${value} lbs`;
+	if (key === 'vaccineCount') return String(value);
+	if (typeof value === 'string' && value.length <= 20) return value;
+	if (typeof value === 'number') return String(value);
+	return null;
+}
 
 // Raw shape returned by ASM API (ALL_CAPS field names)
 interface AsmAnimal {
@@ -275,7 +295,11 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			const { _lastSyncedAt: _ignored, ...comparable } = asmToStoredFields(animal, now);
 			const changedFields = (Object.entries(comparable) as [string, unknown][])
 				.filter(([k, v]) => existing[k] !== v)
-				.map(([k]) => FIELD_LABELS[k] ?? k);
+				.map(([k, v]) => {
+					const label = FIELD_LABELS[k] ?? k;
+					const formatted = formatSyncValue(k, v);
+					return formatted !== null ? `${label} (${formatted})` : label;
+				});
 			if (changedFields.length > 0) pending.push({ animal, isNew: false, changedFields });
 		}
 	}
@@ -364,14 +388,18 @@ export async function markStaleAsmDogsArchived(
 	const BATCH_SIZE = 499;
 	for (let i = 0; i < staleDocs.length; i += BATCH_SIZE) {
 		const batch = writeBatch(db);
+		const now = new Date().toISOString();
 		for (const staleDoc of staleDocs.slice(i, i + BATCH_SIZE)) {
 			batch.set(staleDoc.ref, {
 				status: 'adopted',
 				outdoorKennelAssignment: '',
 				inFoster: false,
+				permanentFoster: false,
+				shelterSince: null,
 				isOutOnDayTrip: false,
 				currentDayTripStartedAt: null,
-				_lastSyncedAt: new Date().toISOString()
+				updatedAt: now,
+				_lastSyncedAt: now
 			}, { merge: true });
 		}
 		await batch.commit();

@@ -60,7 +60,7 @@
 
 	function runDryRun() {
 		const activeLookup: Record<string, Dog> = {};
-		for (const dog of activeDogs) {
+		for (const dog of dogs.filter(d => d.status === 'active')) {
 			activeLookup[dog.name.toLowerCase().trim()] = dog;
 		}
 
@@ -87,7 +87,7 @@
 		importLog = [];
 
 		const activeLookup: Record<string, Dog> = {};
-		for (const dog of activeDogs) {
+		for (const dog of dogs.filter(d => d.status === 'active')) {
 			activeLookup[dog.name.toLowerCase().trim()] = dog;
 		}
 
@@ -936,6 +936,19 @@
 
 	.dt-row-ineligible {
 		opacity: 0.72;
+		padding: 0.28rem 0.56rem;
+		gap: 0.18rem;
+	}
+
+	.dt-row-ineligible .dt-row-info {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.dt-row-ineligible .dt-row-meta {
+		font-size: 0.62rem;
 	}
 
 	.dt-row-main {
@@ -953,6 +966,7 @@
 	}
 
 	.dt-row-name {
+		margin: 0;
 		font-family: var(--font-ui);
 		font-size: 0.92rem;
 		font-weight: 700;
@@ -961,6 +975,7 @@
 	}
 
 	.dt-row-meta {
+		margin: 0;
 		font-size: 0.66rem;
 		letter-spacing: 0.04em;
 		color: var(--ink-soft);
@@ -996,6 +1011,7 @@
 	}
 
 	.dt-row-warning {
+		margin: 0;
 		font-size: 0.74rem;
 		color: var(--marker-red);
 		line-height: 1.2;

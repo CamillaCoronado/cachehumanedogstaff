@@ -24,7 +24,7 @@
 	interface AttentionItem {
 		dogId: string;
 		dogName: string;
-		type: 'bath' | 'daytrip' | 'playgroup';
+		type: 'bath' | 'playgroup';
 		days: number;
 	}
 
@@ -255,7 +255,7 @@
 
 		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none');
 
-		// Bath overdue: >= 7 days since last bath (or since available if never bathed)
+		// Bath overdue: >= 28 days since last bath (or since available if never bathed)
 		for (const dog of shelterDogs) {
 			const availableSince = dog.shelterSince ?? dog.intakeDate;
 			const availableDays = daysSince(availableSince, today) ?? 0;
@@ -263,28 +263,13 @@
 			const lastBathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
 			const effectiveBathDate = dog.lastBathDate && lastBathMs >= availableMs ? dog.lastBathDate : null;
 			const bathDays = daysSince(effectiveBathDate, today);
-			const days = bathDays ?? (availableDays >= 7 ? availableDays : null);
-			if (days !== null && days >= 7) {
+			const days = bathDays ?? (availableDays >= 28 ? availableDays : null);
+			if (days !== null && days >= 28) {
 				items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days });
 			}
 		}
 
-		// Day trip overdue: eligible, not out, >= 14 days since last trip (or since available if never)
-		for (const dog of activeDogs) {
-			if (dog.isOutOnDayTrip || dog.dayTripStatus === 'ineligible' || dog.isolationStatus !== 'none') continue;
-			const availableSince = dog.shelterSince ?? dog.intakeDate;
-			const availableDays = daysSince(availableSince, today) ?? 0;
-			const availableMs = toDate(availableSince)?.getTime() ?? 0;
-			const lastTripMs = toDate(dog.lastDayTripDate)?.getTime() ?? 0;
-			const effectiveTripDate = dog.lastDayTripDate && lastTripMs >= availableMs ? dog.lastDayTripDate : null;
-			const tripDays = daysSince(effectiveTripDate, today);
-			const days = tripDays ?? (availableDays >= 14 ? availableDays : null);
-			if (days !== null && days >= 14) {
-				items.push({ dogId: dog.id, dogName: dog.name, type: 'daytrip', days });
-			}
-		}
-
-		// Playgroup overdue: dog-friendly, not isolated, >= 10 days since last (or since available if never)
+		// Playgroup overdue: dog-friendly, not isolated, >= 3 days since last playgroup
 		for (const dog of shelterDogs) {
 			if (dog.goodWithDogs === 'no') continue;
 			const availableSince = dog.shelterSince ?? dog.intakeDate;
@@ -293,8 +278,8 @@
 			const lastMs = lastPgMs[dog.id] ?? null;
 			const effectiveLastMs = lastMs !== null && lastMs >= availableMs ? lastMs : null;
 			const pgDays = effectiveLastMs !== null ? (daysSince(new Date(effectiveLastMs), today) ?? null) : null;
-			const days = pgDays ?? (availableDays >= 10 ? availableDays : null);
-			if (days !== null && days >= 10) {
+			const days = pgDays ?? (availableDays >= 3 ? availableDays : null);
+			if (days !== null && days >= 3) {
 				items.push({ dogId: dog.id, dogName: dog.name, type: 'playgroup', days });
 			}
 		}
@@ -447,8 +432,13 @@
 				.filter((dog) => dog.status === 'active' && !dog.permanentFoster)
 				.sort((a, b) => a.name.localeCompare(b.name));
 			const active = allActive.filter((dog) => !dog.inFoster);
+			const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 			recentlyAdopted = dogs
-				.filter((dog) => dog.status === 'adopted' && !dog.permanentFoster && !dog.inFoster)
+				.filter((dog) => {
+					if (dog.status !== 'adopted') return false;
+					const updatedMs = toDate(dog.updatedAt)?.getTime() ?? 0;
+					return updatedMs >= thirtyDaysAgo;
+				})
 				.sort((a, b) => {
 					const aTime = toDate(a.updatedAt)?.getTime() ?? 0;
 					const bTime = toDate(b.updatedAt)?.getTime() ?? 0;
@@ -689,12 +679,12 @@
 						<a class="planner-row planner-row-link" href="/dogs/{item.dogId}">
 							<span class="planner-row-main">
 								<span class="planner-bullet">
-									{#if item.type === 'bath'}🛁{:else if item.type === 'daytrip'}🚗{:else}🐶{/if}
+									{#if item.type === 'bath'}🛁{:else}🐶{/if}
 								</span>
 								<span class="planner-row-text">{item.dogName}</span>
 							</span>
 							<span class="attention-tag attention-tag-{item.type}">
-								{item.type === 'bath' ? 'bath' : item.type === 'daytrip' ? 'trip' : 'playgroup'} · {dayGapLabel(item.days)}
+								{item.type === 'bath' ? 'bath' : 'last group'} · {dayGapLabel(item.days)}
 							</span>
 						</a>
 					{/each}
@@ -1174,11 +1164,6 @@
 	.attention-tag-bath {
 		background: rgba(80, 120, 180, 0.14);
 		color: #3a6090;
-	}
-
-	.attention-tag-daytrip {
-		background: rgba(180, 100, 60, 0.14);
-		color: #8a4820;
 	}
 
 	.attention-tag-playgroup {

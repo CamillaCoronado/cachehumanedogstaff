@@ -121,6 +121,7 @@ const today = new Date();
 			dietaryNotes: '',
 			photoUrl: null,
 			hasOwnFood: false,
+			allergyTypes: [],
 			transitionToHills: null,
 			origin: '',
 			markings: '',
