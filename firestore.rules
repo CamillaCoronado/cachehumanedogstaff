@@ -69,6 +69,11 @@ service cloud.firestore {
         allow update, delete: if canEditDogs();
       }
 
+      match /bathLogs/{logId} {
+        allow read, create: if isAuthenticated();
+        allow update, delete: if canEditDogs();
+      }
+
       match /stoolLogs/{logId} {
         allow read, create: if isAuthenticated();
         allow update, delete: if canEditDogs();
@@ -108,6 +113,11 @@ service cloud.firestore {
 
     // Supports collectionGroup('feedingLogs') query used by dashboard to check today's feedings.
     match /{path=**}/feedingLogs/{logId} {
+      allow read: if isAuthenticated();
+    }
+
+    // Supports collectionGroup('bathLogs') query used by bath history backfill.
+    match /{path=**}/bathLogs/{logId} {
       allow read: if isAuthenticated();
     }
   }

@@ -148,6 +148,8 @@ const today = new Date();
 			isOutOnDayTrip: false,
 			currentDayTripStartedAt: null,
 			surgeryDate: null,
+			surgeryRestDays: null,
+			lastSurgeryDate: null,
 			isMicrochipped: false,
 			isFixed: false,
 			fixedDate: null,
@@ -233,6 +235,8 @@ const today = new Date();
 			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
 			dog.handlingLevel,
+			dog.surgeryDate,
+			dog.surgeryRestDays,
 			role,
 			today
 		);

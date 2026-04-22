@@ -4,7 +4,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, updateDog } from '$lib/data/dogs';
+	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog } from '$lib/data/dogs';
 	import type { DayTripLog, Dog, UserRole } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, formatDateTime, toDate } from '$lib/utils/dates';
 
@@ -19,29 +19,27 @@
 	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'import' = 'board';
 
 	// ── Import state ──
-	const MARCH_2026_DATA: { name: string; dates: string[] }[] = [
-		{ name: 'Archer',  dates: ['2026-03-05'] },
-		{ name: 'Birdie',  dates: ['2026-03-05', '2026-03-07'] },
-		{ name: 'Bubbles', dates: ['2026-03-12'] },
-		{ name: 'Chewy',   dates: ['2026-03-04'] },
-		{ name: 'Clover',  dates: ['2026-03-07'] },
-		{ name: 'Dougie',  dates: ['2026-03-12'] },
-		{ name: 'Drake',   dates: ['2026-03-12'] },
-		{ name: 'Finn',    dates: ['2026-03-04', '2026-03-05', '2026-03-07', '2026-03-10', '2026-03-12'] },
-		{ name: 'Fred',    dates: ['2026-03-07'] },
-		{ name: 'Giza',    dates: ['2026-03-07', '2026-03-12'] },
-		{ name: 'Kallion', dates: ['2026-03-05', '2026-03-06', '2026-03-11'] },
-		{ name: 'Lola',    dates: ['2026-03-07'] },
-		{ name: 'Newsie',  dates: ['2026-03-03'] },
-		{ name: 'Oreo',    dates: ['2026-03-11'] },
-		{ name: 'Piper',   dates: ['2026-03-07', '2026-03-12'] },
-		{ name: 'Remy',    dates: ['2026-03-07'] },
-		{ name: 'Summer',  dates: ['2026-03-03', '2026-03-06'] },
-		{ name: 'Thor',    dates: ['2026-03-07', '2026-03-09', '2026-03-10', '2026-03-11'] },
-		{ name: 'Uno',     dates: ['2026-03-11'] },
-		{ name: 'Walker',  dates: ['2026-03-03', '2026-03-04'] },
-		{ name: 'Willow',  dates: ['2026-03-04', '2026-03-06', '2026-03-07', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12'] },
-	];
+	let sheetData: { name: string; dates: string[] }[] = [];
+	let sheetLoading = false;
+	let sheetError = '';
+
+	async function loadFromSheet() {
+		sheetLoading = true;
+		sheetError = '';
+		importDryRunDone = false;
+		importDone = false;
+		importPreview = [];
+		importLog = [];
+		try {
+			const res = await fetch('/api/sheets/daytrips');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			sheetData = await res.json();
+		} catch (e) {
+			sheetError = e instanceof Error ? e.message : String(e);
+		} finally {
+			sheetLoading = false;
+		}
+	}
 
 	interface ImportPreviewRow {
 		sheetName: string;
@@ -50,6 +48,9 @@
 		dates: string[];
 		tripCount: number;
 		matched: boolean;
+		willCreate: boolean;
+		asmStatus?: string;  // status found in ASM for unmatched dogs
+		overrideId?: string;
 	}
 
 	let importPreview: ImportPreviewRow[] = [];
@@ -58,27 +59,74 @@
 	let importDone = false;
 	let importLog: string[] = [];
 
-	function runDryRun() {
-		const activeLookup: Record<string, Dog> = {};
-		for (const dog of dogs.filter(d => d.status === 'active')) {
-			activeLookup[dog.name.toLowerCase().trim()] = dog;
-		}
+	function normalizeName(n: string): string {
+		return n.toLowerCase().replace(/[^a-z]/g, '');
+	}
 
-		importPreview = MARCH_2026_DATA.map((row) => {
-			const key = row.name.toLowerCase().trim();
-			const matched = activeLookup[key];
+	function buildLookup(): { exact: Record<string, Dog>; fuzzy: Record<string, Dog> } {
+		const exact: Record<string, Dog> = {};
+		const fuzzy: Record<string, Dog> = {};
+		for (const dog of dogs) {
+			exact[dog.name.toLowerCase().trim()] = dog;
+			fuzzy[normalizeName(dog.name)] = dog;
+		}
+		return { exact, fuzzy };
+	}
+
+	function lookupDog(name: string, lookup: { exact: Record<string, Dog>; fuzzy: Record<string, Dog> }): Dog | undefined {
+		const exact = lookup.exact[name.toLowerCase().trim()];
+		if (exact) return exact;
+		const fuzzyKey = normalizeName(name);
+		const fuzzy = lookup.fuzzy[fuzzyKey];
+		if (fuzzy) return fuzzy;
+		// Partial: sheet name contained in dog name or vice versa (e.g. "Arcanine" matches "Arcanine (Jerry)")
+		return dogs.find((d) => {
+			const dn = normalizeName(d.name);
+			return dn.includes(fuzzyKey) || fuzzyKey.includes(dn);
+		});
+	}
+
+	async function runDryRun() {
+		const lookup = buildLookup();
+
+		importPreview = sheetData.map((row) => {
+			const matched = lookupDog(row.name, lookup);
 			return {
 				sheetName: row.name,
 				dogId: matched?.id ?? null,
 				dogName: matched?.name ?? null,
 				dates: row.dates,
 				tripCount: row.dates.length,
-				matched: Boolean(matched)
+				matched: Boolean(matched),
+				willCreate: !matched
 			};
 		});
 		importDryRunDone = true;
 		importDone = false;
 		importLog = [];
+
+		// Look up unmatched dogs in ASM to show their status
+		const unmatched = importPreview.filter((r) => r.willCreate);
+		await Promise.all(
+			unmatched.map(async (row) => {
+				try {
+					const res = await fetch(`/api/asm/search?q=${encodeURIComponent(row.sheetName)}`);
+					if (!res.ok) return;
+					const results: { name: string; status: string }[] = await res.json();
+					const hit = results.find((a) =>
+						normalizeName(a.name).includes(normalizeName(row.sheetName)) ||
+						normalizeName(row.sheetName).includes(normalizeName(a.name))
+					);
+					if (hit) {
+						importPreview = importPreview.map((r) =>
+							r.sheetName === row.sheetName ? { ...r, asmStatus: hit.status } : r
+						);
+					}
+				} catch {
+					// silently ignore ASM lookup failures
+				}
+			})
+		);
 	}
 
 	async function runImport() {
@@ -86,26 +134,88 @@
 		importing = true;
 		importLog = [];
 
-		const activeLookup: Record<string, Dog> = {};
-		for (const dog of dogs.filter(d => d.status === 'active')) {
-			activeLookup[dog.name.toLowerCase().trim()] = dog;
-		}
+		const lookup = buildLookup();
 
 		let totalCreated = 0;
 		let totalSkipped = 0;
 
-		for (const row of MARCH_2026_DATA) {
-			const dog = activeLookup[row.name.toLowerCase().trim()];
+		const previewMap = Object.fromEntries(importPreview.map((r) => [r.sheetName, r]));
+		let totalNewDogs = 0;
+
+		for (const row of sheetData) {
+			const preview = previewMap[row.name];
+			const overrideDog = preview?.overrideId ? dogs.find((d) => d.id === preview.overrideId) : undefined;
+			let dog = overrideDog ?? lookupDog(row.name, lookup);
+
 			if (!dog) {
-				importLog = [...importLog, `⚠ Skipped "${row.name}" — no matching active dog`];
+				// Create a minimal record flagged as adopted (not in system)
+				const newDog = await createDog({
+					name: row.name,
+					breed: '',
+					sex: 'unknown',
+					intakeDate: null,
+					originalIntakeDate: null,
+					reentryDates: [],
+					dateOfBirth: null,
+					weightLbs: null,
+					foodType: '',
+					foodAmount: '',
+					dietaryNotes: '',
+					origin: '',
+					pottyTrained: 'unknown',
+					goodWithDogs: 'unknown',
+					goodWithCats: 'unknown',
+					goodWithKids: 'unknown',
+					idealHome: '',
+					energyLevel: 'unknown',
+					outdoorKennelAssignment: '',
+					lastBathDate: null,
+					lastBathBy: null,
+					lastDayTripDate: null,
+					isOutOnDayTrip: false,
+					currentDayTripStartedAt: null,
+					surgeryDate: null,
+					surgeryRestDays: null,
+					lastSurgeryDate: null,
+					isMicrochipped: false,
+					isFixed: false,
+					fixedDate: null,
+					isVaccinated: false,
+					vaccineCount: 0,
+					vaccinatedDate: null,
+					dayTripStatus: 'eligible',
+					dayTripManagerOnly: false,
+					dayTripNotes: null,
+					handlingLevel: 'volunteer',
+					inFoster: false,
+					isolationStatus: 'none',
+					isolationStartDate: null,
+					status: 'adopted',
+					hiddenComments: 'Auto-created during day trip import — not found in system'
+				});
+				if (!newDog) {
+					importLog = [...importLog, `⚠ Skipped "${row.name}" — could not create dog record`];
+					totalSkipped++;
+					continue;
+				}
+				dog = newDog;
+				totalNewDogs++;
+				importLog = [...importLog, `+ Created "${row.name}" as adopted (not in system)`];
+			}
+
+			const sortedDates = [...row.dates].sort();
+			if (sortedDates.length === 0) {
+				importLog = [...importLog, `⚠ Skipped "${row.name}" — no valid dates`];
 				totalSkipped++;
 				continue;
 			}
 
-			const sortedDates = [...row.dates].sort();
+			// Wipe existing logs — spreadsheet is source of truth
+			await clearDayTripLogs(dog.id);
+
 			for (const dateStr of sortedDates) {
 				const parts = dateStr.split('-').map(Number);
-				const tripDate = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0); // noon local time
+				const tripDate = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0);
 				await importHistoricalDayTrip(dog.id, tripDate, $authProfile);
 				totalCreated++;
 			}
@@ -113,7 +223,7 @@
 			// Update lastDayTripDate to the most recent imported date
 			const lastDateStr = sortedDates[sortedDates.length - 1];
 			const lp = lastDateStr.split('-').map(Number);
-			const lastDate = new Date(lp[0], lp[1] - 1, lp[2], 12, 0, 0);
+			const lastDate = new Date(lp[0], lp[1] - 1, lp[2], 0, 0, 0);
 			await updateDog(dog.id, {
 				lastDayTripDate: lastDate,
 				isOutOnDayTrip: false,
@@ -123,7 +233,7 @@
 			importLog = [...importLog, `✓ ${dog.name} — ${row.dates.length} trip${row.dates.length === 1 ? '' : 's'} imported (${sortedDates.join(', ')})`];
 		}
 
-		importLog = [...importLog, ``, `Done: ${totalCreated} trips created, ${totalSkipped} dogs skipped.`];
+		importLog = [...importLog, ``, `Done: ${totalCreated} trips created, ${totalNewDogs} new dogs added, ${totalSkipped} skipped.`];
 		importing = false;
 		importDone = true;
 		await refresh();
@@ -261,6 +371,7 @@
 
 	function formatTime(d: Date | null): string {
 		if (!d) return '—';
+		if (d.getHours() === 0 && d.getMinutes() === 0) return '—';
 		return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 	}
 
@@ -281,6 +392,8 @@
 			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
 			dog.handlingLevel,
+			dog.surgeryDate,
+			dog.surgeryRestDays,
 			role,
 			new Date()
 		);
@@ -617,15 +730,24 @@
 			<div class="dt-panel dt-import-panel">
 				<div class="dt-panel-head">
 					<div>
-						<p class="dt-panel-title">Import March 2026 Data</p>
-						<p class="dt-panel-sub typewriter">One-time import from spreadsheet — 21 dogs, 44 trips</p>
+						<p class="dt-panel-title">Import Day Trip Data</p>
+						<p class="dt-panel-sub typewriter">Load from the DT Numbers spreadsheet, then preview and import.</p>
 					</div>
 				</div>
 
 				<div class="dt-import-actions">
-					<button class="dt-import-btn" on:click={runDryRun} disabled={importing}>
-						Dry Run
+					<button class="dt-import-btn" on:click={loadFromSheet} disabled={sheetLoading || importing}>
+						{sheetLoading ? 'Loading…' : 'Load from Sheet'}
 					</button>
+					{#if sheetError}
+						<span class="dt-import-error typewriter">{sheetError}</span>
+					{/if}
+					{#if sheetData.length > 0 && !sheetLoading}
+						<span class="dt-import-loaded typewriter">{sheetData.length} dogs loaded</span>
+						<button class="dt-import-btn" on:click={runDryRun} disabled={importing}>
+							Dry Run
+						</button>
+					{/if}
 					{#if importDryRunDone && !importDone}
 						<button class="dt-import-btn dt-import-btn-go" on:click={runImport} disabled={importing}>
 							{importing ? 'Importing…' : 'Import Now'}
@@ -650,20 +772,32 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each importPreview as row}
-										<tr class:dt-import-row-miss={!row.matched}>
+									{#each importPreview as row, i}
+										{@const resolved = row.overrideId ? dogs.find(d => d.id === row.overrideId) : null}
+										{@const isResolved = row.matched || Boolean(resolved) || row.willCreate}
+										<tr class:dt-import-row-miss={!row.matched && !resolved && !row.willCreate} class:dt-import-row-new={row.willCreate && !resolved}>
 											<td class="typewriter">{row.sheetName}</td>
 											<td>
 												{#if row.matched}
 													<span class="dt-import-match">{row.dogName}</span>
-												{:else}
-													<span class="dt-import-miss typewriter">no match</span>
+												{:else if row.willCreate && !row.overrideId}
+													<span class="dt-import-create typewriter">will create{row.asmStatus ? ` · ASM: ${row.asmStatus}` : ''}</span>
+													<select class="dt-import-override"
+														bind:value={importPreview[i].overrideId}
+														on:change={() => importPreview = [...importPreview]}>
+														<option value="">— create new —</option>
+														{#each dogs.slice().sort((a,b) => a.name.localeCompare(b.name)) as dog}
+															<option value={dog.id}>{dog.name}{dog.status !== 'active' ? ` (${dog.status})` : ''}</option>
+														{/each}
+													</select>
+												{:else if resolved}
+													<span class="dt-import-match">{resolved.name}</span>
 												{/if}
 											</td>
-											<td class="td-center typewriter">{row.matched ? row.tripCount : '—'}</td>
+											<td class="td-center typewriter">{isResolved ? row.tripCount : '—'}</td>
 											<td class="dt-import-dates typewriter">
-												{#if row.matched}
-													{row.dates.map(d => d.replace('2026-0', '').replace('2026-', '')).join(', ')}
+												{#if isResolved}
+													{row.dates.map(d => d.replace(/^\d{4}-0?/, '')).join(', ')}
 												{:else}
 													—
 												{/if}
@@ -1302,6 +1436,20 @@
 		letter-spacing: 0.04em;
 	}
 
+	.dt-import-loaded {
+		font-size: 0.74rem;
+		font-weight: 600;
+		color: #016aa5;
+		letter-spacing: 0.03em;
+	}
+
+	.dt-import-error {
+		font-size: 0.74rem;
+		font-weight: 600;
+		color: #cf4b4b;
+		letter-spacing: 0.03em;
+	}
+
 	.dt-import-preview,
 	.dt-import-log {
 		display: grid;
@@ -1326,6 +1474,18 @@
 		opacity: 0.55;
 	}
 
+	.dt-import-row-new td {
+		background: #fdf8f0;
+	}
+
+	.dt-import-create {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: #a06c10;
+		display: block;
+		margin-bottom: 0.25rem;
+	}
+
 	.dt-import-match {
 		color: #2a6e3a;
 		font-weight: 600;
@@ -1335,6 +1495,17 @@
 	.dt-import-miss {
 		color: #b84a4a;
 		font-size: 0.74rem;
+	}
+
+	.dt-import-override {
+		font-size: 0.76rem;
+		font-family: var(--font-typewriter);
+		border: 1px solid #c8d4e4;
+		border-radius: 0.4rem;
+		padding: 0.2rem 0.4rem;
+		background: #f6f9fd;
+		color: #2a3f55;
+		max-width: 14rem;
 	}
 
 	.dt-import-dates {

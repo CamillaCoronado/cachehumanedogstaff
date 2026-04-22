@@ -127,6 +127,8 @@ export function checkDayTripEligibility(
 	dayTripManagerOnlyReason: DayTripIneligibleReason | null | undefined,
 	dayTripNotes: string | null,
 	handlingLevel: DogHandlingLevel | null | undefined,
+	surgeryDate: DateValue | string | null | undefined,
+	surgeryRestDays: number | null | undefined,
 	actorRole: UserRole | null | undefined = null,
 	today = new Date()
 ): DayTripEligibility {
@@ -144,6 +146,22 @@ export function checkDayTripEligibility(
 	);
 	const roleRestrictionReason = handlingRestrictionReason(effectiveHandlingLevel, actorRole);
 	const blockedByHandlingRole = Boolean(roleRestrictionReason);
+
+	const surgeryDateObj = toDate(surgeryDate);
+	const surgeryDaysAgo = surgeryDateObj
+		? differenceInDays(startOfDay(today), startOfDay(surgeryDateObj))
+		: null;
+	const restDays = surgeryRestDays ?? 0;
+	const blockedBySurgery =
+		surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < restDays;
+	const isSurgeryDay = surgeryDaysAgo === 0 && restDays === 0;
+
+	if (isSurgeryDay) {
+		reasons.push('Surgery today — no day trips');
+	} else if (blockedBySurgery) {
+		const daysLeft = restDays - surgeryDaysAgo!;
+		reasons.push(`Post-surgery rest — ${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining`);
+	}
 
 	if (isolationStatus === 'sick') {
 		reasons.push('In isolation: Sick');
@@ -198,7 +216,7 @@ export function checkDayTripEligibility(
 	void intakeDate;
 	const blockedByRequirements = !isVaccinated || !isFixed;
 	const blockedByStatus =
-		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole;
+		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay;
 	const eligible = !(blockedByRequirements || blockedByStatus);
 
 	let status: DayTripStatus = 'ineligible';

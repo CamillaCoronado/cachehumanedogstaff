@@ -11,6 +11,9 @@
 		archiveDog,
 		deleteDog,
 		addBehavioralNote,
+		addFeedingLog,
+		addStoolLog,
+		listBathLogs,
 		listBehavioralNotes,
 		listFeedingLogs,
 		listStoolLogs,
@@ -19,7 +22,7 @@
 		startDayTrip,
 		endDayTrip
 	} from '$lib/data/dogs';
-	import type { BehavioralNote, DayTripLog, Dog, FeedingLog, StoolLog, UserRole } from '$lib/types';
+	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, FeedingLog, MealTime, StoolLog, UserRole } from '$lib/types';
 	import {
 		formatAge,
 		bathEligible,
@@ -42,14 +45,26 @@
 	let formValid = true;
 	let saving = false;
 	let notes: BehavioralNote[] = [];
+	let bathLogs: BathLog[] = [];
 	let feedingLogs: FeedingLog[] = [];
 	let stoolLogs: StoolLog[] = [];
 	let dayTripLogs: DayTripLog[] = [];
 	let newNote = '';
-	let fromDate = '';
-	let toDateFilter = '';
-	let stoolFromDate = '';
-	let stoolToDateFilter = '';
+
+	function todayStr() {
+		const d = new Date();
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	}
+
+	let newBathDate = todayStr();
+	let savingBath = false;
+	let newFeedingDate = todayStr();
+	let newFeedingMealTime: MealTime = 'am';
+	let newFeedingAmount: AmountEaten = 'all';
+	let savingFeeding = false;
+	let newStoolDate = todayStr();
+	let newStoolType = 4;
+	let savingStool = false;
 	let confirmAction: 'archive' | 'delete' | null = null;
 	let confirmBusy = false;
 	let activeStatusInfo: 'adoption' | 'daytrip' | 'handling' | null = null;
@@ -73,6 +88,8 @@
 				dog.dayTripManagerOnlyReason,
 				dog.dayTripNotes,
 				dog.handlingLevel,
+				dog.surgeryDate,
+				dog.surgeryRestDays,
 				role,
 				today
 			)
@@ -283,14 +300,16 @@
 		activeStatusInfo = null;
 		dog = await getDog(dogId);
 		if (dog) {
-			[notes, feedingLogs, stoolLogs, dayTripLogs] = await Promise.all([
+			[notes, bathLogs, feedingLogs, stoolLogs, dayTripLogs] = await Promise.all([
 				listBehavioralNotes(dogId),
+				listBathLogs(dogId),
 				listFeedingLogs(dogId),
 				listStoolLogs(dogId),
 				listDayTripLogs(dogId)
 			]);
 		} else {
 			notes = [];
+			bathLogs = [];
 			feedingLogs = [];
 			stoolLogs = [];
 			dayTripLogs = [];
@@ -414,15 +433,41 @@
 		return Math.max(0, (endedAt.getTime() - startedAt.getTime()) / 3_600_000);
 	}
 
-	function withinRange(value: Date, start?: string, end?: string) {
-		const startDate = start ? new Date(start) : null;
-		const endDate = end ? new Date(end) : null;
-		if (endDate) {
-			endDate.setHours(23, 59, 59, 999);
-		}
-		if (startDate && value < startDate) return false;
-		if (endDate && value > endDate) return false;
-		return true;
+	async function handleSaveBath() {
+		if (!dog || !newBathDate) return;
+		if (!bathIsEligible) { toast.error('Baths are blocked for 10 days after surgery.'); return; }
+		savingBath = true;
+		try {
+			await logBath(dog.id, $authProfile, new Date(newBathDate + 'T12:00:00'));
+			toast.success('Bath logged.');
+			newBathDate = todayStr();
+			await loadAll();
+		} catch (e) { console.error(e); toast.error('Unable to log bath.'); }
+		finally { savingBath = false; }
+	}
+
+	async function handleSaveFeeding() {
+		if (!dog || !newFeedingDate) return;
+		savingFeeding = true;
+		try {
+			await addFeedingLog(dog.id, { date: new Date(newFeedingDate + 'T12:00:00'), mealTime: newFeedingMealTime, amountEaten: newFeedingAmount, notes: null }, $authProfile);
+			toast.success('Feeding logged.');
+			newFeedingDate = todayStr();
+			await loadAll();
+		} catch (e) { console.error(e); toast.error('Unable to log feeding.'); }
+		finally { savingFeeding = false; }
+	}
+
+	async function handleSaveStool() {
+		if (!dog || !newStoolDate) return;
+		savingStool = true;
+		try {
+			await addStoolLog(dog.id, { timestamp: new Date(newStoolDate + 'T12:00:00'), stoolType: newStoolType, notes: null }, $authProfile);
+			toast.success('Stool logged.');
+			newStoolDate = todayStr();
+			await loadAll();
+		} catch (e) { console.error(e); toast.error('Unable to log stool.'); }
+		finally { savingStool = false; }
 	}
 
 	function shelterTimeLabel(entryDate: Dog['intakeDate']) {
@@ -433,15 +478,9 @@
 		return `${weeks} week${weeks === 1 ? '' : 's'} (${days} days)`;
 	}
 
-	$: filteredFeeding = feedingLogs.filter((log) => {
-		const date = toDate(log.date) ?? new Date();
-		return withinRange(date, fromDate, toDateFilter);
-	});
-
-	$: filteredStool = stoolLogs.filter((log) => {
-		const date = toDate(log.timestamp) ?? new Date();
-		return withinRange(date, stoolFromDate, stoolToDateFilter);
-	});
+	$: filteredFeeding = feedingLogs;
+	$: filteredBath = bathLogs;
+	$: filteredStool = stoolLogs;
 
 	function stoolColor(type: number) {
 		if (type >= 3 && type <= 4) return 'bg-emerald-100 text-emerald-700';
@@ -680,7 +719,7 @@
 								<details class="kennel-section">
 									<summary>Behavior & Home Fit</summary>
 									<div class="kennel-section-body kennel-facts">
-										<p><span>Description:</span> <strong class="detail-note">{dog.description || 'No additional profile notes logged yet.'}</strong></p>
+											<p><span>Description:</span> <strong class="detail-note">{dog.description || 'No additional profile notes logged yet.'}</strong></p>
 										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
 										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
 										<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
@@ -697,6 +736,12 @@
 					<aside class="kennel-whiteboard">
 					{#if whiteboardNote}
 						<p class={`whiteboard-note ${whiteboardNoteToneClass}`}>{whiteboardNote}</p>
+					{/if}
+					{#if canEdit}
+						<div class="hidden-comments-block">
+							<p class="hidden-comments-label typewriter">Staff note</p>
+							<p class="hidden-comments-text {dog.hiddenComments ? '' : 'hidden-comments-empty'}">{dog.hiddenComments || 'No staff notes — edit to add.'}</p>
+						</div>
 					{/if}
 
 				<dl class="whiteboard-facts typewriter">
@@ -728,6 +773,10 @@
 					<div>
 						<dt>Bath Hold</dt>
 						<dd>{bathIsEligible ? 'Clear' : `${daysSince(dog.surgeryDate, today) ?? 0} days post-surgery`}</dd>
+					</div>
+					<div>
+						<dt>Last Surgery</dt>
+						<dd>{dog.lastSurgeryDate ? formatDate(dog.lastSurgeryDate) : '—'}</dd>
 					</div>
 					<div>
 						<dt>Day Trips</dt>
@@ -825,18 +874,52 @@
 			<div class="space-y-4">
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
+						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Bath Logs</h3>
+						<div class="flex items-center gap-2 text-xs">
+							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newBathDate} />
+							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveBath} disabled={savingBath || !bathIsEligible}>Save</button>
+						</div>
+					</div>
+					<div class="mt-4 overflow-x-auto">
+						<table class="min-w-full text-left text-xs">
+							<thead class="text-[11px] uppercase tracking-[0.2em] text-ink-400">
+								<tr>
+									<th class="py-2">Time</th>
+									<th class="py-2">Logged By</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-ink-100">
+								{#if filteredBath.length === 0}
+									<tr><td colspan="2" class="py-3 text-xs text-ink-500">No bath logs.</td></tr>
+								{:else}
+									{#each filteredBath as log}
+										<tr>
+											<td class="py-2">{formatDateTime(log.timestamp)}</td>
+											<td class="py-2">{log.loggedByName}</td>
+										</tr>
+									{/each}
+								{/if}
+							</tbody>
+						</table>
+					</div>
+				</div>
+				<div class="rounded-3xl bg-white p-6 shadow-card">
+					<div class="flex flex-wrap items-center justify-between gap-2">
 						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Feeding History</h3>
-						<div class="flex w-full flex-wrap gap-2 text-xs sm:w-auto">
-							<input
-								type="date"
-								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
-								bind:value={fromDate}
-							/>
-							<input
-								type="date"
-								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
-								bind:value={toDateFilter}
-							/>
+						<div class="flex flex-wrap items-center gap-2 text-xs">
+							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newFeedingDate} />
+							<select class="rounded-full border border-ink-100 px-3 py-1" bind:value={newFeedingMealTime}>
+								<option value="am">AM</option>
+								<option value="pm">PM</option>
+							</select>
+							<select class="rounded-full border border-ink-100 px-3 py-1" bind:value={newFeedingAmount}>
+								<option value="all">All</option>
+								<option value="most">Most</option>
+								<option value="half">Half</option>
+								<option value="little">Little</option>
+								<option value="none">None</option>
+							</select>
+							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveFeeding} disabled={savingFeeding}>Save</button>
 						</div>
 					</div>
 					<div class="mt-4 overflow-x-auto">
@@ -871,17 +954,14 @@
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Stool Logs</h3>
-						<div class="flex w-full flex-wrap gap-2 text-xs sm:w-auto">
-							<input
-								type="date"
-								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
-								bind:value={stoolFromDate}
-							/>
-							<input
-								type="date"
-								class="w-full rounded-full border border-ink-100 px-3 py-1 sm:w-auto"
-								bind:value={stoolToDateFilter}
-							/>
+						<div class="flex flex-wrap items-center gap-2 text-xs">
+							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newStoolDate} />
+							<select class="rounded-full border border-ink-100 px-3 py-1" bind:value={newStoolType}>
+								{#each [1,2,3,4,5,6,7] as t}
+									<option value={t}>Type {t}</option>
+								{/each}
+							</select>
+							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveStool} disabled={savingStool}>Save</button>
 						</div>
 					</div>
 					<div class="mt-4 overflow-x-auto">
@@ -1469,6 +1549,38 @@
 
 	.whiteboard-note-blue {
 		color: #1f5fa8;
+	}
+
+	.hidden-comments-block {
+		margin: 0.4rem 0 0.2rem;
+		padding: 0.55rem 0.7rem;
+		background: #fdf6e3;
+		border: 1px solid #e8d49a;
+		border-radius: 0.4rem;
+	}
+
+	.hidden-comments-label {
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #9a7520;
+		margin: 0 0 0.25rem;
+	}
+
+	.hidden-comments-text {
+		font-size: 0.82rem;
+		font-weight: 600;
+		color: #5c3d00;
+		margin: 0;
+		line-height: 1.4;
+		white-space: pre-wrap;
+	}
+
+	.hidden-comments-empty {
+		font-weight: 400;
+		color: #b08a40;
+		font-style: italic;
 	}
 
 	.whiteboard-facts {

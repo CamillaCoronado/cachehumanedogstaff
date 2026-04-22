@@ -10,8 +10,9 @@
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
-	import { canAccessPlaygroups } from '$lib/utils/permissions';
+	import { canAccessPlaygroups, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
+	import { backfillBathLogsFromDogs } from '$lib/data/dogs';
 
 	type TabItem = {
 		href: string;
@@ -45,6 +46,7 @@
 	let turnDirection: 'forward' | 'backward' = 'forward';
 	let mobileNavOpen = false;
 	let asmAttempted = false;
+	let bathBackfillAttempted = false;
 	let asmSyncing = false;
 	let asmSyncedAt: string | null = null;
 	let asmError: string | null = null;
@@ -71,7 +73,7 @@
 		goto('/login');
 	}
 
-	$: if ($authReady && $authUser && !asmAttempted) {
+	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !asmAttempted) {
 		asmAttempted = true;
 		asmSyncing = true;
 		void syncAnimalsFromASM()
@@ -97,6 +99,13 @@
 			.finally(() => {
 				asmSyncing = false;
 			});
+	}
+
+	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !bathBackfillAttempted) {
+		bathBackfillAttempted = true;
+		void backfillBathLogsFromDogs().catch((err: unknown) => {
+			console.error('[Bath log backfill]', err instanceof Error ? err.message : err);
+		});
 	}
 
 	$: currentPath = $page.url.pathname;

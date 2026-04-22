@@ -91,8 +91,8 @@
 		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
 		.sort((a, b) => a.name.localeCompare(b.name));
 	$: filteredDogs = activeDogs.filter((dog) => dog.name.toLowerCase().includes(search.toLowerCase()));
-	$: readyDogs = activeDogs.filter((dog) => getReadiness(dog) === 'ready');
-	$: cautionDogs = activeDogs.filter((dog) => getReadiness(dog) === 'caution');
+	$: readyDogs = activeDogs.filter((dog) => getReadiness(dog) === 'ready' && !dog.awaitingEvaluation);
+	$: cautionDogs = activeDogs.filter((dog) => getReadiness(dog) === 'caution' && !dog.awaitingEvaluation);
 	$: holdDogs = activeDogs.filter((dog) => getReadiness(dog) === 'hold');
 	$: recommendations = buildRecommendations(readyDogs, cautionDogs);
 	$: history = [...sessions].sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
@@ -111,6 +111,7 @@
 
 	function getReadiness(dog: Dog): DogReadiness {
 		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no') return 'hold';
+		if (!dog.isFixed) return 'hold';
 		const weeks = ageWeeks(dog);
 		if (weeks !== null && weeks < 26) {
 			// Under 12 weeks or not yet vaccinated → hold
@@ -133,6 +134,7 @@
 		if (readiness === 'hold') {
 			if (dog.isolationStatus !== 'none') return 'In isolation: do not schedule.';
 			if (dog.goodWithDogs === 'no') return 'Marked not dog-social: behavior team only.';
+			if (!dog.isFixed) return 'Not fixed: cannot participate in playgroups.';
 			const weeks = ageWeeks(dog);
 			if (weeks !== null && weeks < 12) return `Too young for playgroup (${weeks} wks — minimum 12 weeks).`;
 			if (isPuppy(dog) && !dog.isVaccinated) return 'Needs 2 sets of vaccines before playgroup.';
@@ -158,8 +160,30 @@
 		return 2;
 	}
 
+	function eligiblePuppies(allDogs: Dog[]): Dog[] {
+		return allDogs.filter((dog) => {
+			if (dog.isolationStatus !== 'none') return false;
+			if (dog.goodWithDogs === 'no') return false;
+			const weeks = ageWeeks(dog);
+			return weeks !== null && weeks >= 12 && weeks < 26 && dog.isVaccinated;
+		});
+	}
+
 	function buildRecommendations(ready: Dog[], caution: Dog[]): PlaygroupRecommendation[] {
 		const list: PlaygroupRecommendation[] = [];
+
+		const puppies = eligiblePuppies(activeDogs);
+		if (puppies.length >= 2) {
+			list.push({
+				id: `puppy-${puppies.map((d) => d.id).join('-')}`,
+				title: 'Puppy Group',
+				dogs: puppies,
+				dogIds: puppies.map((d) => d.id),
+				reason: `${puppies.length} puppies (12–26 wks, vaccinated) available. Puppies should only play with other puppies, not adults.`,
+				recommendationType: 'manual',
+				priority: 'high'
+			});
+		}
 		const sortedReady = [...ready].sort((a, b) => {
 			const diff = energyRank(a.energyLevel) - energyRank(b.energyLevel);
 			if (diff !== 0) return diff;
@@ -735,6 +759,9 @@
 								<div class="dog-card-top">
 									<a href={`/dogs/${dog.id}`} class="dog-link">{dog.name}</a>
 									<span class={`readiness-pill readiness-${readiness}`}>{readinessLabel(readiness)}</span>
+									{#if dog.awaitingEvaluation}
+										<span class="readiness-pill readiness-eval">Eval pending</span>
+									{/if}
 								</div>
 								<div class="dog-card-meta typewriter">
 									<span>Energy: {energyLabel(dog.energyLevel)}</span>
@@ -768,7 +795,12 @@
 											<a href={`/dogs/${dog.id}`} class="dog-link">{dog.name}</a>
 											<p class="table-meta typewriter">Good with dogs: {compatibilityLabel(dog.goodWithDogs)}</p>
 										</td>
-										<td><span class={`readiness-pill readiness-${readiness}`}>{readinessLabel(readiness)}</span></td>
+										<td>
+											<span class={`readiness-pill readiness-${readiness}`}>{readinessLabel(readiness)}</span>
+											{#if dog.awaitingEvaluation}
+												<span class="readiness-pill readiness-eval">Eval pending</span>
+											{/if}
+										</td>
 										<td>{energyLabel(dog.energyLevel)}</td>
 										<td>{dog.outdoorKennelAssignment || 'Unassigned'}</td>
 										<td>{dateDayCount(dog.intakeDate) ?? '—'} days</td>
@@ -1212,6 +1244,12 @@
 		background: #fff0f0;
 		color: #8a3e3c;
 		border: 1px solid #e6bbbb;
+	}
+
+	.readiness-eval {
+		background: #fdf4e3;
+		color: #7a5a1e;
+		border: 1px solid #e8d49a;
 	}
 
 	.recommendation-grid {

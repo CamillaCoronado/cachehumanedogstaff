@@ -103,6 +103,9 @@
 	];
 
 	$: isInIsolation = value.isolationStatus !== 'none';
+	$: evalAvailableSince = value.shelterSince ?? value.intakeDate;
+	$: evalDaysAtShelter = Math.floor((Date.now() - (toDate(evalAvailableSince)?.getTime() ?? Date.now())) / 86_400_000);
+	$: canClearEval = evalDaysAtShelter >= 7;
 	$: isManagerOnly = value.dayTripManagerOnly === true && !isInIsolation;
 	$: isManualIneligible = value.dayTripStatus === 'ineligible' && !isInIsolation && !isManagerOnly;
 	$: selectedIneligibleReason = value.dayTripIneligibleReason ?? 'other';
@@ -887,23 +890,39 @@
 		</div>
 		<p class="form-hint mt-1">{selectedHandlingLevel.description}</p>
 	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Surgery Date</label>
-		<input
-			type="date"
-			class="form-input"
-			disabled={disabled}
-			value={toDate(value.surgeryDate)?.toISOString().slice(0, 10) ?? ''}
-			on:change={(event) => handleDateChange('surgeryDate', event.currentTarget.value)}
-		/>
-		{#if value.surgeryDate}
-			<p class="form-hint">Currently: {formatDate(value.surgeryDate)}</p>
-		{/if}
-	</div>
-
 	<div class="form-section md:col-span-2">
 		<h4 class="form-section-title permanent-marker">Medical Status</h4>
 			<div class="grid gap-4 md:grid-cols-2">
+				<div class="form-field">
+					<label class="form-label typewriter">Surgery Date</label>
+					<input
+						type="date"
+						class="form-input"
+						disabled={disabled}
+						value={toDate(value.surgeryDate)?.toISOString().slice(0, 10) ?? ''}
+						on:change={(event) => handleDateChange('surgeryDate', event.currentTarget.value)}
+					/>
+					{#if value.surgeryDate}
+						<p class="form-hint">Currently: {formatDate(value.surgeryDate)}</p>
+					{/if}
+				</div>
+				<div class="form-field">
+					<label class="form-label typewriter" for="surgery-rest-days">Post-Surgery Rest (days)</label>
+					<input
+						id="surgery-rest-days"
+						type="number"
+						class="form-input"
+						disabled={disabled}
+						min="0"
+						placeholder="e.g. 14"
+						value={value.surgeryRestDays ?? ''}
+						on:change={(event) => {
+							const n = parseInt(event.currentTarget.value, 10);
+							value = { ...value, surgeryRestDays: Number.isFinite(n) && n >= 0 ? n : null };
+						}}
+					/>
+					<p class="form-hint">Blocks day trips and playgroups until this many days after surgery.</p>
+				</div>
 				<div class="form-inline-row">
 					<label class="flex items-center gap-2 cursor-pointer min-w-0">
 						<input
@@ -1012,6 +1031,38 @@
 					on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
 			/>
 		</div>
+	</div>
+
+	<div class="form-field">
+		<label class="form-label typewriter" for="playgroupReadyDate">Playgroup Ready From</label>
+		<input
+			id="playgroupReadyDate"
+			type="date"
+			class="form-input"
+			disabled={disabled}
+			value={toDate(value.playgroupReadyDate)?.toISOString().slice(0, 10) ?? ''}
+			on:change={(event) => handleDateChange('playgroupReadyDate', event.currentTarget.value)}
+		/>
+		<p class="form-hint">Defaults to 7 days after intake. Adjust if this dog needs more or less time to decompress.</p>
+	</div>
+
+	<div class="form-field">
+		<label class="form-label typewriter">Dog Evaluation</label>
+		<label class="flex items-center gap-2 cursor-pointer">
+			<input
+				type="checkbox"
+				class="form-checkbox"
+				disabled={disabled || !canClearEval}
+				checked={value.awaitingEvaluation ?? false}
+				on:change={(event) => handleCheckbox('awaitingEvaluation', event.currentTarget.checked)}
+			/>
+			<span class="text-sm" style="color: var(--marker-black);">Awaiting evaluation</span>
+		</label>
+		{#if !canClearEval}
+			<p class="form-hint">Can be cleared after 7 days at shelter ({Math.max(0, 7 - evalDaysAtShelter)} day(s) remaining).</p>
+		{:else}
+			<p class="form-hint">Uncheck once dog compatibility has been assessed.</p>
+		{/if}
 	</div>
 
 	<div class="form-field md:col-span-2">

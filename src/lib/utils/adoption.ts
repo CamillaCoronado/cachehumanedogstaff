@@ -1,4 +1,5 @@
 import type { Dog } from '$lib/types';
+import { toDate } from '$lib/utils/dates';
 import { resolveDogHandlingLevel } from '$lib/utils/permissions';
 
 export type AdoptionAvailabilityState =
@@ -14,6 +15,23 @@ export interface AdoptionAvailability {
 	state: AdoptionAvailabilityState;
 	missingMedicalRequirements: string[];
 	holdReason: string | null;
+}
+
+export function getEffectiveAdoptionDate(
+	dog: Pick<Dog, 'status' | 'leftShelterDate' | 'updatedAt' | 'createdAt' | 'asmId' | 'asmShelterCode'>
+): Date | null {
+	const explicit = toDate(dog.leftShelterDate);
+	if (explicit) return explicit;
+	if (dog.status !== 'adopted') return null;
+	if (typeof dog.asmId === 'number' || Boolean(dog.asmShelterCode?.trim())) return null;
+
+	const updatedAt = toDate(dog.updatedAt);
+	if (!updatedAt) return null;
+
+	const createdAt = toDate(dog.createdAt);
+	if (createdAt && updatedAt.getTime() === createdAt.getTime()) return null;
+
+	return updatedAt;
 }
 
 export function missingAdoptionMedicalRequirements(

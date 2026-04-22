@@ -67,6 +67,8 @@ export interface Dog {
 	// When the current day trip started (if out)
 	currentDayTripStartedAt: DateValue | null;
 	surgeryDate: DateValue | null;
+	surgeryRestDays: number | null;
+	lastSurgeryDate: DateValue | null;
 	isMicrochipped: boolean;
 	isFixed: boolean;
 	fixedDate: DateValue | null;
@@ -82,8 +84,12 @@ export interface Dog {
 	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;
 	shelterSince?: DateValue | null;
+	playgroupReadyDate?: DateValue | null;
+	awaitingEvaluation?: boolean;
 	permanentFoster?: boolean;
 	isIncoming?: boolean;
+	asmId?: number | null;
+	asmShelterCode?: string;
 	isolationStatus: IsolationStatus;
 	isolationStartDate: DateValue | null;
 	status: DogStatus;
@@ -116,6 +122,13 @@ export interface DayTripLog {
 
 export type MealTime = 'am' | 'pm';
 export type AmountEaten = 'all' | 'most' | 'half' | 'little' | 'none';
+
+export interface BathLog {
+	id: string;
+	timestamp: DateValue;
+	loggedBy: string;
+	loggedByName: string;
+}
 
 export interface FeedingLog {
 	id: string;
