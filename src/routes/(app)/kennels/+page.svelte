@@ -671,9 +671,8 @@
 {#if touchDraggingId}
 	<div
 		use:ghostPortal
-		class="kennel-touch-ghost"
-		style={`left: ${touchDragX}px; top: ${touchDragY}px;`}
 		aria-hidden="true"
+		style={`position:fixed;z-index:9999;pointer-events:none;left:${touchDragX}px;top:${touchDragY - 48}px;transform:translateX(-50%);padding:0.24rem 0.56rem;border-radius:0.52rem;background:#e9f7ee;border:1px solid #bddcc7;color:#2a6248;font-size:0.92rem;font-weight:700;box-shadow:0 10px 18px rgba(18,36,57,.2);white-space:nowrap;`}
 	>
 		{touchDragName}
 	</div>
@@ -950,20 +949,6 @@
 		background: #eaf4ff;
 	}
 
-	.kennel-touch-ghost {
-		position: fixed;
-		z-index: 90;
-		transform: translate(-50%, -50%);
-		pointer-events: none;
-		padding: 0.24rem 0.56rem;
-		border-radius: 0.52rem;
-		background: #e9f7ee;
-		border: 1px solid #bddcc7;
-		color: #2a6248;
-		font-size: 0.92rem;
-		font-weight: 700;
-		box-shadow: 0 10px 18px rgba(18, 36, 57, 0.2);
-	}
 
 	@media (min-width: 768px) {
 		.kennels-body {
