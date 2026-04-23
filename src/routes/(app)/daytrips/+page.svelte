@@ -4,7 +4,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, mergeDayTripLogs, updateDog, createDog, deleteDog } from '$lib/data/dogs';
+	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog } from '$lib/data/dogs';
 	import type { DayTripLog, Dog, UserRole } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, formatDateTime, toDate } from '$lib/utils/dates';
 
@@ -542,131 +542,106 @@
 </script>
 
 <section class="dt-page">
-	<div class="dt-grid">
+	<div class="dt-shell">
 
-		<!-- Header -->
-		<div class="dt-header">
-			<div class="dt-header-top">
-				<div class="dt-header-info">
-					<h2 class="dt-title">Day Trips</h2>
-					<div class="dt-stats-row">
-						{#if outNowCount > 0}
-							<span class="dt-stat-chip dt-stat-chip-out typewriter">{outNowCount} out now</span>
-						{/if}
-						<span class="dt-stat-chip typewriter">{monthLabel} · {monthlyTripCount} trips · {monthlyHourTotal.toFixed(1)} hrs</span>
-					</div>
-				</div>
-				<div class="dt-header-controls">
-					<input type="month" class="dt-month-input typewriter" bind:value={monthFilter} />
-					<button class="dt-control-btn typewriter" on:click={refresh}>Refresh</button>
-				</div>
+		<!-- Top bar -->
+		<div class="dt-topbar">
+			<div class="dt-topbar-left">
+				{#if outNowCount > 0}
+					<span class="dt-chip dt-chip-blue">{outNowCount} out now</span>
+				{/if}
+				<span class="dt-chip">{monthLabel} · {monthlyTripCount} trips · {monthlyHourTotal.toFixed(1)}h</span>
 			</div>
-
-			<nav class="dt-tabs" aria-label="Day trip views">
-				<button class="dt-tab" class:dt-tab-active={activeTab === 'board'} on:click={() => activeTab = 'board'}>Board</button>
-				<button class="dt-tab" class:dt-tab-active={activeTab === 'log'} on:click={() => activeTab = 'log'}>Log</button>
-				<button class="dt-tab" class:dt-tab-active={activeTab === 'dogs'} on:click={() => activeTab = 'dogs'}>Dogs</button>
-				<button class="dt-tab" class:dt-tab-active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
-				<button class="dt-tab dt-tab-import" class:dt-tab-active={activeTab === 'import'} on:click={() => activeTab = 'import'}>Import</button>
-			</nav>
+			<div class="dt-topbar-right">
+				<input type="month" class="dt-month-input" bind:value={monthFilter} />
+				<button class="dt-btn-sm" on:click={refresh}>Refresh</button>
+			</div>
 		</div>
 
+		<!-- Tab bar -->
+		<nav class="dt-tabbar" aria-label="Day trip views">
+			<button class="dt-tab" class:dt-tab-active={activeTab === 'board'} on:click={() => activeTab = 'board'}>Board</button>
+			<button class="dt-tab" class:dt-tab-active={activeTab === 'log'} on:click={() => activeTab = 'log'}>Log</button>
+			<button class="dt-tab" class:dt-tab-active={activeTab === 'dogs'} on:click={() => activeTab = 'dogs'}>Dogs</button>
+			<button class="dt-tab" class:dt-tab-active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
+			<button class="dt-tab" class:dt-tab-active={activeTab === 'import'} on:click={() => activeTab = 'import'}>Import</button>
+		</nav>
+
 		{#if loading}
-			<p class="dt-loading typewriter">Loading trip board...</p>
+			<p class="dt-loading">Loading trip board...</p>
 
 		<!-- ───── BOARD ───── -->
 		{:else if activeTab === 'board'}
-			<div class="dt-board">
+			<div class="cal-board">
+
+				<!-- Out Now -->
+				<div class="cal-col">
+					<div class="cal-col-head cal-col-head-blue">
+						<span class="cal-col-title">Out Now</span>
+						<span class="cal-col-badge cal-badge-blue">{dogsOut.length}</span>
+					</div>
+					{#if dogsOut.length === 0}
+						<p class="cal-empty">None out right now</p>
+					{:else}
+						{#each dogsOut as dog}
+							{@const openTrip = openTripByDog[dog.id]}
+							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
+							<div class="cal-event cal-event-blue">
+								<p class="cal-event-name">{dog.name}</p>
+								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'}</p>
+								<p class="cal-event-meta">Out since {formatDateTime(openTrip?.startedAt ?? dog.currentDayTripStartedAt)}</p>
+								<p class="cal-event-count">{allTime} total trip{allTime !== 1 ? 's' : ''}</p>
+								<button class="cal-btn cal-btn-blue" on:click={() => toggleOut(dog)}>Mark Returned</button>
+							</div>
+						{/each}
+					{/if}
+				</div>
 
 				<!-- Eligible -->
-				<div class="dt-section dt-section-sage">
-					<div class="dt-section-head">
-						<h3 class="dt-section-title">Eligible</h3>
-						<span class="dt-section-count typewriter">{dogsEligible.length}</span>
+				<div class="cal-col">
+					<div class="cal-col-head cal-col-head-green">
+						<span class="cal-col-title">Eligible</span>
+						<span class="cal-col-badge cal-badge-green">{dogsEligible.length}</span>
 					</div>
 					{#if dogsEligible.length === 0}
-						<p class="dt-section-empty typewriter">none ready</p>
+						<p class="cal-empty">None ready</p>
 					{:else}
 						{#each dogsEligible as dog}
 							{@const eligibility = getEligibility(dog)}
 							{@const days = daysSince(dog.lastDayTripDate)}
 							{@const overdue = days === null || days >= 14}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
-							<div class="dt-row" class:dt-row-overdue={overdue}>
-								<div class="dt-row-main">
-									<div class="dt-row-info">
-										<p class="dt-row-name">{dog.name}</p>
-										<p class="dt-row-meta typewriter">Kennel {dog.outdoorKennelAssignment || '—'} · {days !== null ? `Last trip ${days}d ago` : 'No trips yet'}</p>
-										<div class="dt-row-pills">
-											<span class={`pill ${statusPillClass(eligibility.status)}`}>{eligibility.status === 'difficult' ? 'Difficult' : 'Eligible'}</span>
-											{#if overdue}<span class="pill pill-orange">overdue</span>{/if}
-										</div>
-									</div>
-									<div class="dt-row-aside">
-										<span class="dt-alltime-num whiteboard-hand erase-marker-red">{allTime}</span>
-										<span class="dt-alltime-label typewriter">trips</span>
-									</div>
+							<div class="cal-event" class:cal-event-orange={overdue} class:cal-event-green={!overdue}>
+								<p class="cal-event-name">{dog.name}</p>
+								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'} · {days !== null ? `${days}d ago` : 'No trips yet'}</p>
+								<div class="cal-event-tags">
+									{#if eligibility.status === 'difficult'}<span class="cal-tag cal-tag-yellow">Adults only</span>{/if}
+									{#if overdue}<span class="cal-tag cal-tag-red">Overdue</span>{/if}
 								</div>
+								<p class="cal-event-count">{allTime} trip{allTime !== 1 ? 's' : ''} total</p>
 								{#if eligibility.reasons.length > 0}
-									<p class="dt-row-warning">{eligibility.reasons[0]}</p>
+									<p class="cal-event-warning">{eligibility.reasons[0]}</p>
 								{/if}
-								<button class="board-control-btn board-control-btn-sm" on:click={() => toggleOut(dog)}>Send Out</button>
-							</div>
-						{/each}
-					{/if}
-				</div>
-
-				<!-- Out Now -->
-				<div class="dt-section dt-section-sky">
-					<div class="dt-section-head">
-						<h3 class="dt-section-title">Out Now</h3>
-						<span class="dt-section-count typewriter">{dogsOut.length}</span>
-					</div>
-					{#if dogsOut.length === 0}
-						<p class="dt-section-empty typewriter">none out right now</p>
-					{:else}
-						{#each dogsOut as dog}
-							{@const openTrip = openTripByDog[dog.id]}
-							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
-							<div class="dt-row dt-row-out">
-								<div class="dt-row-main">
-									<div class="dt-row-info">
-										<p class="dt-row-name">{dog.name}</p>
-										<p class="dt-row-meta typewriter">Kennel {dog.outdoorKennelAssignment || '—'} · Out since {formatDateTime(openTrip?.startedAt ?? dog.currentDayTripStartedAt)}</p>
-									</div>
-									<div class="dt-row-aside">
-										<span class="dt-alltime-num whiteboard-hand erase-marker-red">{allTime}</span>
-										<span class="dt-alltime-label typewriter">trips</span>
-									</div>
-								</div>
-								<button class="board-control-btn board-control-btn-sm" on:click={() => toggleOut(dog)}>Mark Returned</button>
+								<button class="cal-btn cal-btn-green" on:click={() => toggleOut(dog)}>Send Out</button>
 							</div>
 						{/each}
 					{/if}
 				</div>
 
 				<!-- Not Eligible -->
-				<div class="dt-section dt-section-sand dt-section-dim">
-					<div class="dt-section-head">
-						<h3 class="dt-section-title">Not Eligible</h3>
-						<span class="dt-section-count typewriter">{dogsIneligible.length}</span>
+				<div class="cal-col">
+					<div class="cal-col-head">
+						<span class="cal-col-title">Not Eligible</span>
+						<span class="cal-col-badge">{dogsIneligible.length}</span>
 					</div>
 					{#if dogsIneligible.length === 0}
-						<p class="dt-section-empty typewriter">none</p>
+						<p class="cal-empty">None</p>
 					{:else}
 						{#each dogsIneligible as dog}
 							{@const eligibility = getEligibility(dog)}
-							<div class="dt-row dt-row-ineligible">
-								<div class="dt-row-main">
-									<div class="dt-row-info">
-										<p class="dt-row-name">{dog.name}</p>
-										<p class="dt-row-meta typewriter">Kennel {dog.outdoorKennelAssignment || '—'}</p>
-									</div>
-									<span class="pill pill-red">Ineligible</span>
-								</div>
-								{#if eligibility.reasons.length > 0}
-									<p class="dt-row-warning">{eligibility.reasons[0]}</p>
-								{/if}
+							<div class="cal-event cal-event-gray">
+								<p class="cal-event-name">{dog.name}</p>
+								<p class="cal-event-meta">{eligibility.reasons[0] ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
 							</div>
 						{/each}
 					{/if}
@@ -680,12 +655,12 @@
 				<div class="dt-panel-head">
 					<div>
 						<p class="dt-panel-title">{monthLabel}</p>
-						<p class="dt-panel-sub typewriter">{sortedMonthlyLogs.length} completed trip{sortedMonthlyLogs.length === 1 ? '' : 's'} · {monthlyHourTotal.toFixed(1)} total hrs{outNowCount > 0 ? ` · ${outNowCount} in progress` : ''}</p>
+						<p class="dt-panel-sub">{sortedMonthlyLogs.length} completed trip{sortedMonthlyLogs.length === 1 ? '' : 's'} · {monthlyHourTotal.toFixed(1)} total hrs{outNowCount > 0 ? ` · ${outNowCount} in progress` : ''}</p>
 					</div>
 				</div>
 
 				{#if sortedMonthlyLogs.length === 0}
-					<p class="dt-panel-empty typewriter">No completed trips logged for {monthLabel}.</p>
+					<p class="dt-panel-empty">No completed trips logged for {monthLabel}.</p>
 				{:else}
 					<div class="dt-table-wrap">
 						<table class="dt-table">
@@ -704,7 +679,7 @@
 									{@const endDate = toDate(log.endedAt)}
 									{@const dog = dogs.find(d => d.id === log.dogId)}
 									<tr>
-										<td class="td-muted typewriter">{formatShortDate(startDate)}</td>
+										<td class="td-muted">{formatShortDate(startDate)}</td>
 										<td class="td-name">
 											{#if dog}
 												<a href="/dogs/{dog.id}" class="dt-name-link">{dog.name}</a>
@@ -712,16 +687,16 @@
 												<span class="td-muted">Unknown</span>
 											{/if}
 										</td>
-										<td class="td-muted typewriter">{formatTime(startDate)}</td>
-										<td class="td-muted typewriter">{formatTime(endDate)}</td>
-										<td class="td-strong typewriter">{formatDuration(durationHours(log))}</td>
+										<td class="td-muted">{formatTime(startDate)}</td>
+										<td class="td-muted">{formatTime(endDate)}</td>
+										<td class="td-strong">{formatDuration(durationHours(log))}</td>
 									</tr>
 								{/each}
 							</tbody>
 							<tfoot>
 								<tr class="dt-table-foot">
-									<td colspan="4" class="td-foot-label typewriter">Total</td>
-									<td class="td-strong typewriter">{formatDuration(monthlyHourTotal)}</td>
+									<td colspan="4" class="td-foot-label">Total</td>
+									<td class="td-strong">{formatDuration(monthlyHourTotal)}</td>
 								</tr>
 							</tfoot>
 						</table>
@@ -735,7 +710,7 @@
 				<div class="dt-panel-head">
 					<div>
 						<p class="dt-panel-title">All Dogs</p>
-						<p class="dt-panel-sub typewriter">Sorted by most overdue · {monthStart.toLocaleDateString('en-US', { month: 'short' })} stats shown for monthly columns</p>
+						<p class="dt-panel-sub">Sorted by most overdue · {monthStart.toLocaleDateString('en-US', { month: 'short' })} stats shown for monthly columns</p>
 					</div>
 				</div>
 
@@ -761,21 +736,21 @@
 									<td class="td-name">
 										<a href="/dogs/{dog.id}" class="dt-name-link">{dog.name}</a>
 										{#if dog.isOutOnDayTrip}
-											<span class="dt-out-badge typewriter">out now</span>
+											<span class="dt-out-badge">out now</span>
 										{/if}
 									</td>
 									<td class="td-center">
-										<span class="dt-alltime-num whiteboard-hand erase-marker-red">{allTime}</span>
+										<span class="dt-alltime-num">{allTime}</span>
 									</td>
-									<td class="td-muted typewriter">
+									<td class="td-muted">
 										{#if days !== null}
 											{days}d ago{#if overdue && eligibility.eligible && !dog.isOutOnDayTrip}&thinsp;<span class="dt-overdue-flag">overdue</span>{/if}
 										{:else}
 											never
 										{/if}
 									</td>
-									<td class="td-center td-muted typewriter">{tripCountByDog[dog.id] ?? 0}</td>
-									<td class="td-center td-muted typewriter">{(tripHoursByDog[dog.id] ?? 0).toFixed(1)}</td>
+									<td class="td-center td-muted">{tripCountByDog[dog.id] ?? 0}</td>
+									<td class="td-center td-muted">{(tripHoursByDog[dog.id] ?? 0).toFixed(1)}</td>
 									<td>
 										{#if dog.isOutOnDayTrip}
 											<span class="dt-on-trip-tag">on trip</span>
@@ -796,7 +771,7 @@
 				<div class="dt-panel-head">
 					<div>
 						<p class="dt-panel-title">{currentYear} Summary</p>
-						<p class="dt-panel-sub typewriter">{yearTripTotal} trips · {yearHourTotal.toFixed(1)} hrs total</p>
+						<p class="dt-panel-sub">{yearTripTotal} trips · {yearHourTotal.toFixed(1)} hrs total</p>
 					</div>
 				</div>
 
@@ -994,361 +969,274 @@
 </section>
 
 <style>
-	/* ── Page ── */
-	.dt-page {
-		width: 100%;
+	/* ── Shell ── */
+	.dt-page { width: 100%; }
+
+	.dt-shell {
+		display: grid;
+		gap: 0;
 	}
 
-	.dt-grid {
-		display: grid;
-		gap: 0.58rem;
-	}
-
-	/* ── Header ── */
-	.dt-header {
-		display: grid;
+	/* ── Top bar ── */
+	.dt-topbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 		gap: 0.5rem;
-		padding: 0.08rem;
+		flex-wrap: wrap;
+		padding: 0 0.1rem 0.6rem;
 	}
 
-	.dt-header-top {
+	.dt-topbar-left {
 		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 0.6rem;
+		align-items: center;
+		gap: 0.4rem;
 		flex-wrap: wrap;
 	}
 
-	.dt-header-info {
-		display: grid;
-		gap: 0.22rem;
-	}
-
-	.dt-title {
-		margin: 0;
-		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-		font-size: clamp(1.45rem, 2.4vw, 2.05rem);
-		font-weight: 500;
-		letter-spacing: 0.01em;
-		line-height: 1.04;
-		color: #303948;
-	}
-
-	.dt-stats-row {
+	.dt-topbar-right {
 		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		flex-wrap: wrap;
-	}
-
-	.dt-stat-chip {
-		display: inline-flex;
-		align-items: center;
-		min-height: 1.72rem;
-		padding: 0.18rem 0.52rem;
-		border: 1px solid #d8e0ea;
-		border-radius: 0.52rem;
-		background: #f7f9fc;
-		font-size: 0.66rem;
-		font-weight: 600;
-		letter-spacing: 0.04em;
-		color: #4a5a6e;
-	}
-
-	.dt-stat-chip-out {
-		border-color: #b3d4c0;
-		background: #ecf7f0;
-		color: #2a6040;
-	}
-
-	.dt-header-controls {
-		display: flex;
-		gap: 0.3rem;
-		align-items: center;
-		flex-shrink: 0;
-	}
-
-	.dt-month-input {
-		min-height: 1.96rem;
-		border: 1px solid #d8e0ea;
-		border-radius: 0.52rem;
-		padding: 0.24rem 0.52rem;
-		background: #f7f9fc;
-		color: #2d3b4f;
-		font-size: 1rem;
-	}
-
-	.dt-control-btn {
-		display: inline-flex;
-		align-items: center;
-		min-height: 1.96rem;
-		border: 1px solid #cad7e8;
-		border-radius: 0.58rem;
-		padding: 0.24rem 0.66rem;
-		font-size: 0.63rem;
-		font-weight: 700;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-		color: #2f435c;
-		background: #f4f8fd;
-		cursor: pointer;
-	}
-
-	.dt-control-btn:hover {
-		background: #eaf2fb;
-	}
-
-	/* ── Tabs ── */
-	.dt-tabs {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.3rem;
-	}
-
-	.dt-tab {
-		min-height: 1.88rem;
-		border: 1px solid #d2dbe8;
-		border-radius: 0.52rem;
-		background: #ffffff;
-		padding: 0.26rem 0.68rem;
-		font-family: var(--font-ui);
-		font-size: 0.63rem;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		color: #2f425b;
-		cursor: pointer;
-	}
-
-	.dt-tab:hover {
-		background: #f4f8fd;
-	}
-
-	.dt-tab-active {
-		border-color: #2e84b7;
-		background: #e8f3ff;
-		color: #1e4f72;
-	}
-
-	/* ── Loading ── */
-	.dt-loading {
-		padding: 0.72rem 0.74rem;
-		border: 1px solid #d4dde8;
-		border-radius: 0.7rem;
-		background: #f8fbff;
-		font-size: 0.88rem;
-		color: var(--ink-soft);
-	}
-
-	/* ── Board ── */
-	.dt-board {
-		display: grid;
-		gap: 0.58rem;
-	}
-
-	.dt-section {
-		display: grid;
-		gap: 0.42rem;
-		border-radius: 0.92rem;
-		padding: 0.62rem 0.58rem 0.58rem;
-	}
-
-	/* Out Now — blue (#016aa5) tint */
-	.dt-section-sky {
-		background: linear-gradient(180deg, #ddeef8 0%, #d4e8f4 100%);
-	}
-
-	/* Eligible — green (#3aaf2a) tint */
-	.dt-section-sage {
-		background: linear-gradient(180deg, #ddf0d8 0%, #d5ebd0 100%);
-	}
-
-	/* Not Eligible — purple (#933980) tint */
-	.dt-section-sand {
-		background: linear-gradient(180deg, #f0e4ee 0%, #e9dde8 100%);
-	}
-
-	.dt-section-dim {
-		opacity: 0.82;
-	}
-
-	.dt-section-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.44rem;
-	}
-
-	.dt-section-title {
-		font-family: var(--font-ui);
-		font-size: 0.7rem;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: #4a5a6e;
-		line-height: 1;
-	}
-
-	.dt-section-count {
-		font-size: 0.66rem;
-		font-weight: 700;
-		padding: 0.1rem 0.4rem;
-		border-radius: 999px;
-		color: #ffffff;
-		background: rgba(50, 80, 110, 0.45);
-	}
-
-	.dt-section-empty {
-		font-size: 0.7rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--ink-soft);
-		padding: 0.1rem 0;
-	}
-
-	/* ── Rows (inside sections) ── */
-	.dt-row {
-		display: flex;
-		flex-direction: column;
-		gap: 0.36rem;
-		border: 1px solid rgba(96, 109, 123, 0.15);
-		border-radius: 0.36rem;
-		background: rgba(255, 255, 255, 0.56);
-		padding: 0.52rem 0.56rem;
-	}
-
-	.dt-row-out {
-		border-color: rgba(50, 120, 180, 0.22);
-		background: rgba(255, 255, 255, 0.7);
-	}
-
-	.dt-row-overdue {
-		border-color: rgba(200, 140, 50, 0.3);
-		background: rgba(255, 252, 244, 0.75);
-	}
-
-	.dt-row-ineligible {
-		opacity: 0.72;
-		padding: 0.28rem 0.56rem;
-		gap: 0.18rem;
-	}
-
-	.dt-row-ineligible .dt-row-info {
-		display: flex;
-		flex-direction: row;
 		align-items: center;
 		gap: 0.4rem;
 	}
 
-	.dt-row-ineligible .dt-row-meta {
-		font-size: 0.62rem;
+	.dt-chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.22rem 0.6rem;
+		border-radius: 999px;
+		background: #f1f3f4;
+		font-size: 0.72rem;
+		font-weight: 500;
+		color: #5f6368;
 	}
 
-	.dt-row-main {
+	.dt-chip-blue {
+		background: #e8f0fe;
+		color: #1a73e8;
+	}
+
+	.dt-month-input {
+		height: 2rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0 0.5rem;
+		font-size: 0.82rem;
+		color: #202124;
+		background: #fff;
+	}
+
+	.dt-btn-sm {
+		height: 2rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0 0.75rem;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: #3c4043;
+		background: #fff;
+		cursor: pointer;
+	}
+
+	.dt-btn-sm:hover { background: #f8f9fa; }
+
+	/* ── Tab bar ── */
+	.dt-tabbar {
 		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
+		border-bottom: 1px solid #dadce0;
+		margin-bottom: 0.9rem;
+		gap: 0;
+	}
+
+	.dt-tab {
+		position: relative;
+		padding: 0.6rem 0.9rem;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: #5f6368;
+		background: none;
+		border: none;
+		cursor: pointer;
+		letter-spacing: 0.01em;
+		white-space: nowrap;
+	}
+
+	.dt-tab:hover { color: #1a73e8; background: #f8f9fa; }
+
+	.dt-tab-active {
+		color: #1a73e8;
+	}
+
+	.dt-tab-active::after {
+		content: '';
+		position: absolute;
+		bottom: -1px;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: #1a73e8;
+		border-radius: 2px 2px 0 0;
+	}
+
+	/* ── Loading ── */
+	.dt-loading {
+		padding: 1.5rem;
+		color: #5f6368;
+		font-size: 0.88rem;
+	}
+
+	/* ── Calendar Board ── */
+	.cal-board {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.cal-col {
+		display: flex;
+		flex-direction: column;
 		gap: 0.5rem;
 	}
 
-	.dt-row-info {
-		min-width: 0;
-		flex: 1;
-		display: grid;
-		gap: 0.14rem;
-	}
-
-	.dt-row-name {
-		margin: 0;
-		font-family: var(--font-ui);
-		font-size: 0.92rem;
-		font-weight: 700;
-		color: var(--marker-black);
-		line-height: 1;
-	}
-
-	.dt-row-meta {
-		margin: 0;
-		font-size: 0.66rem;
-		letter-spacing: 0.04em;
-		color: var(--ink-soft);
-	}
-
-	.dt-row-pills {
+	.cal-col-head {
 		display: flex;
 		align-items: center;
-		gap: 0.3rem;
-		flex-wrap: wrap;
-		margin-top: 0.12rem;
+		justify-content: space-between;
+		padding: 0.4rem 0.6rem;
+		border-radius: 6px 6px 0 0;
+		border-bottom: 2px solid #dadce0;
 	}
 
-	.dt-row-aside {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.04rem;
-		flex-shrink: 0;
-	}
+	.cal-col-head-blue { border-bottom-color: #016aa5; }
+	.cal-col-head-green { border-bottom-color: #3aaf2a; }
 
-	.dt-alltime-num {
-		font-size: 1.44rem;
-		line-height: 1;
-		font-weight: 700;
-	}
-
-	.dt-alltime-label {
-		font-size: 0.56rem;
+	.cal-col-title {
+		font-size: 0.7rem;
+		font-weight: 600;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: var(--ink-soft);
+		color: #3c4043;
 	}
 
-	.dt-row-warning {
-		margin: 0;
-		font-size: 0.74rem;
-		color: var(--marker-red);
-		line-height: 1.2;
-	}
-
-	/* board-control-btn inherited from global — small variant */
-	.board-control-btn {
+	.cal-col-badge {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-height: 1.96rem;
-		border: 1px solid #cad7e8;
-		border-radius: 0.58rem;
-		padding: 0.28rem 0.66rem;
-		font-family: var(--font-ui);
-		font-size: 0.66rem;
+		min-width: 1.35rem;
+		height: 1.35rem;
+		padding: 0 0.3rem;
+		border-radius: 999px;
+		font-size: 0.68rem;
 		font-weight: 700;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
-		color: #2f435c;
-		background: #f4f8fd;
-		cursor: pointer;
-		align-self: flex-start;
+		background: #f1f3f4;
+		color: #5f6368;
 	}
 
-	.board-control-btn:hover {
-		background: #eaf2fb;
+	.cal-badge-blue { background: #e8f0fe; color: #1a73e8; }
+	.cal-badge-green { background: #e6f4ea; color: #1e7e34; }
+
+	.cal-empty {
+		font-size: 0.78rem;
+		color: #9aa0a6;
+		padding: 0.5rem 0.6rem;
 	}
 
-	.board-control-btn-sm {
-		min-height: 1.72rem;
+	/* ── Event chips ── */
+	.cal-event {
+		background: #fff;
+		border: 1px solid #dadce0;
+		border-left-width: 4px;
+		border-radius: 6px;
+		padding: 0.6rem 0.7rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		box-shadow: 0 1px 2px rgba(60,64,67,.06);
+	}
+
+	.cal-event-blue  { border-left-color: #016aa5; }
+	.cal-event-green { border-left-color: #3aaf2a; }
+	.cal-event-orange { border-left-color: #f29900; }
+	.cal-event-gray  { border-left-color: #bdc1c6; opacity: 0.7; }
+
+	.cal-event-name {
+		margin: 0;
+		font-size: 0.88rem;
+		font-weight: 600;
+		color: #202124;
+		line-height: 1.2;
+	}
+
+	.cal-event-meta {
+		margin: 0;
+		font-size: 0.72rem;
+		color: #5f6368;
+	}
+
+	.cal-event-count {
+		margin: 0;
+		font-size: 0.68rem;
+		color: #9aa0a6;
+	}
+
+	.cal-event-warning {
+		margin: 0;
+		font-size: 0.72rem;
+		color: #d93025;
+	}
+
+	.cal-event-tags {
+		display: flex;
+		gap: 0.3rem;
+		flex-wrap: wrap;
+	}
+
+	.cal-tag {
+		display: inline-flex;
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
 		font-size: 0.62rem;
-		padding: 0.22rem 0.56rem;
+		font-weight: 600;
+		letter-spacing: 0.03em;
 	}
 
-	/* ── Panel (Log / Dogs / Stats) ── */
+	.cal-tag-yellow { background: #fef7e0; color: #b06000; }
+	.cal-tag-red    { background: #fce8e6; color: #c5221f; }
+
+	.cal-btn {
+		margin-top: 0.3rem;
+		align-self: flex-start;
+		padding: 0.28rem 0.7rem;
+		border-radius: 4px;
+		font-size: 0.72rem;
+		font-weight: 500;
+		border: 1px solid #dadce0;
+		background: #fff;
+		cursor: pointer;
+		color: #3c4043;
+	}
+
+	.cal-btn:hover { background: #f8f9fa; }
+
+	.cal-btn-blue  { border-color: #aecbfa; color: #1a73e8; background: #e8f0fe; }
+	.cal-btn-blue:hover  { background: #d2e3fc; }
+	.cal-btn-green { border-color: #a8d5a2; color: #1e7e34; background: #e6f4ea; }
+	.cal-btn-green:hover { background: #ceead6; }
+
+	@media (min-width: 640px) {
+		.cal-board {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+
+	/* ── Panel (Log / Dogs / Stats / Import) ── */
 	.dt-panel {
-		border: 1px solid #d3dbe6;
-		border-radius: 0.92rem;
-		background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
-		box-shadow: 0 8px 18px rgba(28, 50, 71, 0.06);
-		padding: 0.78rem;
+		border: 1px solid #dadce0;
+		border-radius: 8px;
+		background: #fff;
+		box-shadow: 0 1px 3px rgba(60,64,67,.08);
+		padding: 1rem;
 		display: grid;
-		gap: 0.72rem;
+		gap: 0.8rem;
 	}
 
 	.dt-panel-head {
@@ -1359,32 +1247,28 @@
 	}
 
 	.dt-panel-title {
-		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-		font-size: clamp(1.1rem, 2vw, 1.5rem);
-		font-weight: 500;
-		color: #303948;
-		line-height: 1;
-		margin-bottom: 0.18rem;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #202124;
+		margin: 0 0 0.15rem;
 	}
 
 	.dt-panel-sub {
-		font-size: 0.66rem;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--ink-soft);
+		font-size: 0.72rem;
+		color: #5f6368;
+		margin: 0;
 	}
 
 	.dt-panel-empty {
-		font-size: 0.78rem;
-		color: var(--ink-soft);
-		letter-spacing: 0.04em;
+		font-size: 0.82rem;
+		color: #9aa0a6;
 	}
 
 	/* ── Table ── */
 	.dt-table-wrap {
 		overflow-x: auto;
-		border-radius: 0.52rem;
-		border: 1px solid #dde4ee;
+		border: 1px solid #dadce0;
+		border-radius: 6px;
 	}
 
 	.dt-table {
@@ -1395,156 +1279,98 @@
 	}
 
 	.dt-table th {
-		font-family: var(--font-ui);
-		font-size: 0.6rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
+		font-size: 0.66rem;
+		font-weight: 600;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: var(--ink-soft);
-		padding: 0.42rem 0.64rem;
-		border-bottom: 1px solid #dde4ee;
-		background: #f5f8fc;
+		color: #5f6368;
+		padding: 0.5rem 0.75rem;
+		border-bottom: 1px solid #dadce0;
+		background: #f8f9fa;
 		white-space: nowrap;
 	}
 
 	.dt-table td {
-		padding: 0.5rem 0.64rem;
-		border-top: 1px solid #edf1f7;
+		padding: 0.55rem 0.75rem;
+		border-top: 1px solid #f1f3f4;
 		vertical-align: middle;
-	}
-
-	.dt-table tbody tr:first-child td {
-		border-top: none;
-	}
-
-	.dt-table tbody tr:hover td {
-		background: #f8fbff;
-	}
-
-	.td-name {
-		font-family: var(--font-ui);
-		font-size: 0.88rem;
-		font-weight: 700;
-		color: var(--marker-black);
-	}
-
-	.td-muted {
-		font-size: 0.78rem;
-		color: #4a5e72;
-	}
-
-	.td-strong {
 		font-size: 0.82rem;
-		font-weight: 700;
-		color: var(--marker-black);
 	}
 
-	.td-center {
-		text-align: center;
-	}
+	.dt-table tbody tr:first-child td { border-top: none; }
+	.dt-table tbody tr:hover td { background: #f8f9fa; }
 
-	.th-center {
-		text-align: center;
-	}
+	.td-name { font-weight: 600; color: #202124; }
+	.td-muted { color: #5f6368; }
+	.td-strong { font-weight: 600; color: #202124; }
+	.td-center { text-align: center; }
+	.th-center { text-align: center; }
+	.td-month-name { font-weight: 600; color: #202124; }
 
-	.td-month-name {
-		font-family: var(--font-ui);
-		font-size: 0.86rem;
-		font-weight: 600;
-		color: #303948;
-	}
-
-	.dt-name-link {
-		color: inherit;
-		text-decoration: none;
-	}
-
-	.dt-name-link:hover {
-		text-decoration: underline;
-		color: #1e5a8a;
-	}
+	.dt-name-link { color: inherit; text-decoration: none; }
+	.dt-name-link:hover { color: #1a73e8; text-decoration: underline; }
 
 	.dt-table-foot td {
-		border-top: 2px solid #dde4ee;
-		background: #f5f8fc;
+		border-top: 2px solid #dadce0;
+		background: #f8f9fa;
 	}
 
 	.td-foot-label {
 		font-size: 0.66rem;
-		letter-spacing: 0.08em;
+		font-weight: 600;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: var(--ink-soft);
-		font-weight: 700;
+		color: #5f6368;
 	}
 
-	.tr-overdue td {
-		background: #fffdf5;
-	}
-
-	.tr-empty td {
-		color: #aab4c0;
-	}
+	.tr-overdue td { background: #fffbf0; }
+	.tr-empty td { color: #bdc1c6; }
 
 	/* ── Badges / Tags ── */
-	.dt-out-badge,
-	.dt-overdue-flag {
+	.dt-out-badge {
 		display: inline-block;
-		margin-left: 0.28rem;
-		padding: 0.06rem 0.3rem;
+		margin-left: 0.3rem;
+		padding: 0.06rem 0.35rem;
 		border-radius: 999px;
-		font-family: var(--font-typewriter);
-		font-size: 0.58rem;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
+		font-size: 0.6rem;
+		font-weight: 600;
+		background: #e8f0fe;
+		color: #1a73e8;
 		vertical-align: middle;
 	}
 
-	.dt-out-badge {
-		background: #d6eeff;
-		color: #1e5a8a;
-	}
-
 	.dt-overdue-flag {
-		background: #fde8c8;
-		color: #8a5010;
+		display: inline-block;
+		margin-left: 0.2rem;
+		padding: 0.04rem 0.28rem;
+		border-radius: 999px;
+		font-size: 0.6rem;
+		font-weight: 600;
+		background: #fce8e6;
+		color: #c5221f;
+		vertical-align: middle;
 	}
 
 	.dt-on-trip-tag {
 		display: inline-flex;
-		border: 1px solid #95bee1;
-		border-radius: 0.28rem;
-		background: #e8f5ff;
-		padding: 0.16rem 0.4rem;
-		font-family: var(--font-typewriter);
-		font-size: 0.62rem;
-		font-weight: 700;
-		color: #275982;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
+		padding: 0.15rem 0.4rem;
+		border-radius: 4px;
+		font-size: 0.66rem;
+		font-weight: 600;
+		background: #e8f0fe;
+		color: #1a73e8;
 	}
 
-	.pill-sm {
-		font-size: 0.62rem;
-		padding: 0.1rem 0.34rem;
+	.dt-alltime-num {
+		font-size: 0.88rem;
+		font-weight: 700;
+		color: #202124;
 	}
+
+	.pill-sm { font-size: 0.62rem; padding: 0.1rem 0.34rem; }
 
 	/* ── Import Tab ── */
-	.dt-tab-import {
-		border-color: #d2c8e8;
-		color: #5a3e7a;
-	}
-
-	.dt-tab-import.dt-tab-active {
-		border-color: #8b5fa8;
-		background: #f2eafa;
-		color: #5a2e7c;
-	}
-
-	.dt-import-panel {
-		display: grid;
-		gap: 0.9rem;
-	}
+	.dt-import-panel { display: grid; gap: 0.9rem; }
 
 	.dt-import-actions {
 		display: flex;
@@ -1556,167 +1382,97 @@
 	.dt-import-btn {
 		display: inline-flex;
 		align-items: center;
-		min-height: 2.1rem;
-		border: 1px solid #c8d4e4;
-		border-radius: 0.65rem;
-		padding: 0.3rem 0.9rem;
-		background: #f6f9fd;
-		font-family: var(--font-typewriter);
-		font-size: 0.74rem;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-		color: #2a3f55;
+		height: 2rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0 0.9rem;
+		background: #fff;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: #3c4043;
 		cursor: pointer;
 	}
 
-	.dt-import-btn:hover:not(:disabled) {
-		background: #eaf2fb;
-	}
-
-	.dt-import-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
+	.dt-import-btn:hover:not(:disabled) { background: #f8f9fa; }
+	.dt-import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	.dt-import-btn-go {
-		border-color: #7b4eab;
-		background: #f3ebfa;
-		color: #5c2d8a;
+		border-color: #a8d5a2;
+		background: #e6f4ea;
+		color: #1e7e34;
 	}
 
-	.dt-import-btn-go:hover:not(:disabled) {
-		background: #ead9f7;
-	}
+	.dt-import-btn-go:hover:not(:disabled) { background: #ceead6; }
 
-	.dt-import-done {
-		font-size: 0.74rem;
-		font-weight: 700;
-		color: #2f8d24;
-		letter-spacing: 0.04em;
-	}
+	.dt-import-done  { font-size: 0.74rem; font-weight: 600; color: #1e7e34; }
+	.dt-import-loaded { font-size: 0.74rem; font-weight: 500; color: #1a73e8; }
+	.dt-import-error  { font-size: 0.74rem; font-weight: 600; color: #d93025; }
 
-	.dt-import-loaded {
-		font-size: 0.74rem;
-		font-weight: 600;
-		color: #016aa5;
-		letter-spacing: 0.03em;
-	}
-
-	.dt-import-error {
-		font-size: 0.74rem;
-		font-weight: 600;
-		color: #cf4b4b;
-		letter-spacing: 0.03em;
-	}
-
-	.dt-import-preview,
-	.dt-import-log {
-		display: grid;
-		gap: 0.38rem;
-	}
+	.dt-import-preview, .dt-import-log { display: grid; gap: 0.38rem; }
 
 	.dt-import-section-label {
-		font-size: 0.64rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
+		font-size: 0.66rem;
+		font-weight: 600;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: var(--ink-soft);
+		color: #5f6368;
 		margin: 0;
 	}
 
-	.dt-import-table td,
-	.dt-import-table th {
-		white-space: nowrap;
-	}
-
-	.dt-import-row-miss td {
-		opacity: 0.55;
-	}
-
-	.dt-import-row-new td {
-		background: #fdf8f0;
-	}
+	.dt-import-table td, .dt-import-table th { white-space: nowrap; }
+	.dt-import-row-miss td { opacity: 0.5; }
+	.dt-import-row-new td { background: #fffbf0; }
 
 	.dt-import-create {
 		font-size: 0.72rem;
 		font-weight: 600;
-		color: #a06c10;
+		color: #b06000;
 		display: block;
-		margin-bottom: 0.25rem;
+		margin-bottom: 0.2rem;
 	}
 
-	.dt-import-match {
-		color: #2a6e3a;
-		font-weight: 600;
-		font-size: 0.82rem;
-	}
-
-	.dt-import-miss {
-		color: #b84a4a;
-		font-size: 0.74rem;
-	}
+	.dt-import-match { color: #1e7e34; font-weight: 600; font-size: 0.82rem; }
+	.dt-import-miss  { color: #d93025; font-size: 0.74rem; }
 
 	.dt-import-override {
 		font-size: 0.76rem;
-		font-family: var(--font-typewriter);
-		border: 1px solid #c8d4e4;
-		border-radius: 0.4rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
 		padding: 0.2rem 0.4rem;
-		background: #f6f9fd;
-		color: #2a3f55;
+		background: #fff;
+		color: #202124;
 		max-width: 14rem;
 	}
 
-	.dt-import-dates {
-		font-size: 0.72rem;
-		color: #56698a;
-	}
+	.dt-import-dates { font-size: 0.72rem; color: #5f6368; }
 
 	.dt-import-log-pre {
 		margin: 0;
-		padding: 0.62rem 0.74rem;
-		background: #f4f8fd;
-		border: 1px solid #d0dcea;
-		border-radius: 0.6rem;
+		padding: 0.7rem 0.9rem;
+		background: #f8f9fa;
+		border: 1px solid #dadce0;
+		border-radius: 6px;
 		font-size: 0.75rem;
 		line-height: 1.7;
-		color: #253545;
+		color: #202124;
 		white-space: pre-wrap;
 	}
 
-	.dt-merge-section {
-		display: grid;
-		gap: 0.5rem;
-	}
-
-	.dt-merge-desc {
-		font-size: 0.74rem;
-		color: #6b5530;
-		margin: 0;
-	}
+	.dt-merge-section { display: grid; gap: 0.5rem; }
+	.dt-merge-desc { font-size: 0.74rem; color: #5f6368; margin: 0; }
 
 	.dt-import-note {
-		padding: 0.52rem 0.68rem;
-		background: #fefaf2;
-		border: 1px solid #edd9a0;
-		border-radius: 0.6rem;
+		padding: 0.6rem 0.75rem;
+		background: #fffbf0;
+		border: 1px solid #fdd663;
+		border-radius: 6px;
 	}
 
-	.dt-import-note p {
-		margin: 0;
-		font-size: 0.74rem;
-		color: #6b5530;
-		line-height: 1.5;
+	.dt-import-note p { margin: 0; font-size: 0.74rem; color: #594300; line-height: 1.5; }
+
+	/* ── Responsive ── */
+	@media (min-width: 768px) {
+		.dt-panel { padding: 1.2rem; }
 	}
 
-	/* ── Desktop ── */
-	@media (min-width: 900px) {
-		.dt-board {
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-		}
-
-		.dt-panel {
-			padding: 0.95rem;
-		}
-	}
 </style>
