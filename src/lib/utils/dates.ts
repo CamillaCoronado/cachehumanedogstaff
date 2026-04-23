@@ -238,22 +238,11 @@ export function checkDayTripEligibility(
 	return { eligible, status, reasons };
 }
 
-const NEW_INTAKE_RED_MS = 24 * 60 * 60 * 1000;
-
 export function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
 	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly, dog.isolationStatus);
 	if (dog.isolationStatus !== 'none') return 'red';
 	if (level === 'manager_only' || level === 'staff_only') return 'red';
-	if (!dog.isVaccinated || !dog.isFixed) return 'red';
-	const dobMs = toDate(dog.dateOfBirth)?.getTime() ?? null;
-	const ageWeeks = dobMs !== null ? (Date.now() - dobMs) / (7 * 86_400_000) : null;
-	const isPuppy = ageWeeks !== null && ageWeeks < 26;
-	if (isPuppy && !dog.vaccinatedDate) return 'red';
-	const intakeAt = toDate(dog.intakeDate)?.getTime() ?? 0;
-	const createdAt = toDate(dog.createdAt)?.getTime() ?? 0;
-	const baseline = Math.max(intakeAt, createdAt);
-	if (baseline && Date.now() - baseline < NEW_INTAKE_RED_MS) return 'red';
-	if (dog.dayTripStatus === 'ineligible' && !dog.isOutOnDayTrip) return 'red';
+	if (dog.awaitingEvaluation) return 'red';
 	if (dog.dayTripStatus === 'difficult') return 'yellow';
 	return 'green';
 }

@@ -1280,6 +1280,31 @@ export async function clearDayTripLogs(dogId: string): Promise<void> {
 	await deleteDogSubcollection(dogId, 'dayTripLogs');
 }
 
+export async function mergeDayTripLogs(fromDogId: string, toDogId: string): Promise<number> {
+	const ref = dogSubcollectionRef(fromDogId, 'dayTripLogs');
+	if (!ref) return 0;
+	const snapshot = await getDocs(ref);
+	if (snapshot.empty) return 0;
+	const destRef = dogSubcollectionRef(toDogId, 'dayTripLogs');
+	if (!destRef) return 0;
+	for (const docSnap of snapshot.docs) {
+		const data = { ...docSnap.data(), dogId: toDogId } as StoredDayTripLog;
+		await setDoc(doc(destRef, docSnap.id), data);
+		await deleteDoc(docSnap.ref);
+	}
+	// Update lastDayTripDate on destination dog
+	const destLogs = await getDocs(destRef);
+	let latestMs = 0;
+	destLogs.forEach((d) => {
+		const t = toDate((d.data() as StoredDayTripLog).endedAt ?? (d.data() as StoredDayTripLog).startedAt)?.getTime() ?? 0;
+		if (t > latestMs) latestMs = t;
+	});
+	if (latestMs > 0) {
+		await updateDog(toDogId, { lastDayTripDate: new Date(latestMs) });
+	}
+	return snapshot.size;
+}
+
 export async function importHistoricalDayTrip(
 	dogId: string,
 	tripDate: Date,

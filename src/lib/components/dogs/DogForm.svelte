@@ -558,6 +558,17 @@
 					on:change={(event) => handleDateChange('leftShelterDate', event.currentTarget.value)}
 				/>
 			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Shelter Since (Foster Return)</label>
+				<input
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.shelterSince)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('shelterSince', event.currentTarget.value)}
+				/>
+				<p class="form-hint">Set when a dog returns from foster. Resets the day trip clock from this date.</p>
+			</div>
 		</div>
 		<div class="form-field">
 			<label class="form-label typewriter">Re-entry Dates (Returns)</label>
@@ -1052,17 +1063,13 @@
 			<input
 				type="checkbox"
 				class="form-checkbox"
-				disabled={disabled || !canClearEval}
+				disabled={disabled}
 				checked={value.awaitingEvaluation ?? false}
 				on:change={(event) => handleCheckbox('awaitingEvaluation', event.currentTarget.checked)}
 			/>
 			<span class="text-sm" style="color: var(--marker-black);">Awaiting evaluation</span>
 		</label>
-		{#if !canClearEval}
-			<p class="form-hint">Can be cleared after 7 days at shelter ({Math.max(0, 7 - evalDaysAtShelter)} day(s) remaining).</p>
-		{:else}
-			<p class="form-hint">Uncheck once dog compatibility has been assessed.</p>
-		{/if}
+		<p class="form-hint">Uncheck once dog compatibility has been assessed.</p>
 	</div>
 
 	<div class="form-field md:col-span-2">

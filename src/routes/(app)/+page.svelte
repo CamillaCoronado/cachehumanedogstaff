@@ -187,7 +187,7 @@
 					{ id: 'movement', label: 'Bring Dogs In @ 4:15', done: movementDone },
 					{ id: 'slack', label: 'Slack Update (PM)', done: slackDone }
 				];
-	$: attentionItems = buildAttentionItems(playgroupSessions);
+	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs);
 
 	function buildOpenTripMap(logs: DayTripLog[]) {
 		return logs.reduce<Record<string, DayTripLog>>((map, log) => {
@@ -346,7 +346,7 @@
 			.slice(0, 5);
 	}
 
-	function buildAttentionItems(sessions: PlaygroupSession[]): AttentionItem[] {
+	function buildAttentionItems(sessions: PlaygroupSession[], tripLogs: DayTripLog[]): AttentionItem[] {
 		const items: AttentionItem[] = [];
 
 		// Last playgroup date per dog
@@ -356,6 +356,16 @@
 			if (!t) continue;
 			for (const id of s.dogIds) {
 				if (!lastPgMs[id] || t > lastPgMs[id]) lastPgMs[id] = t;
+			}
+		}
+
+		// Last day trip date per dog — from actual logs, not denormalized field
+		const lastTripMsByDog: Record<string, number> = {};
+		for (const log of tripLogs) {
+			const t = toDate(log.endedAt ?? log.startedAt)?.getTime();
+			if (!t) continue;
+			if (!lastTripMsByDog[log.dogId] || t > lastTripMsByDog[log.dogId]) {
+				lastTripMsByDog[log.dogId] = t;
 			}
 		}
 
@@ -387,9 +397,9 @@
 			const readyDate = toDate(dog.playgroupReadyDate) ?? new Date(availableMs + 7 * 86_400_000);
 			if (today < readyDate) continue;
 
-			const lastTripMs = toDate(dog.lastDayTripDate)?.getTime() ?? 0;
-			const effectiveLastTrip = dog.lastDayTripDate && lastTripMs >= availableMs ? dog.lastDayTripDate : null;
-			const tripDays = daysSince(effectiveLastTrip, today);
+			const lastTripMs = lastTripMsByDog[dog.id] ?? 0;
+			const effectiveLastTripMs = lastTripMs >= availableMs ? lastTripMs : null;
+			const tripDays = effectiveLastTripMs !== null ? (daysSince(new Date(effectiveLastTripMs), today) ?? null) : null;
 			const readyDays = daysSince(readyDate, today) ?? 0;
 			const days = tripDays ?? readyDays;
 			if (days >= 7) {

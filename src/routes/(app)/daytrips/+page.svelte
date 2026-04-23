@@ -4,7 +4,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog } from '$lib/data/dogs';
+	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, mergeDayTripLogs, updateDog, createDog, deleteDog } from '$lib/data/dogs';
 	import type { DayTripLog, Dog, UserRole } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, formatDateTime, toDate } from '$lib/utils/dates';
 
@@ -59,6 +59,107 @@
 	let importDone = false;
 	let importLog: string[] = [];
 
+	// ── Merge duplicates ──
+	let merging = false;
+	let mergeDryRunDone = false;
+	let mergeLog: string[] = [];
+
+	interface MergePreviewRow {
+		created: Dog;
+		match: Dog | null;
+		tripDates: string[];
+		datesMatch: boolean;
+	}
+	let mergePreview: MergePreviewRow[] = [];
+
+	// Strict name match: first word must be identical (case-insensitive), or base name matches exactly
+	function strictMatchName(candidate: string, target: string): boolean {
+		const a = candidate.toLowerCase().trim();
+		const b = target.toLowerCase().trim();
+		if (a === b) return true;
+		// Strip parentheticals from either side and compare
+		const aBase = a.replace(/\s*\(.*?\)\s*$/, '').trim();
+		const bBase = b.replace(/\s*\(.*?\)\s*$/, '').trim();
+		if (aBase === bBase) return true;
+		if (aBase === b || a === bBase) return true;
+		return false;
+	}
+
+	async function runMergeDryRun() {
+		mergeLog = [];
+		mergeDryRunDone = false;
+		mergePreview = [];
+
+		// Build trip date lookup from loaded logs
+		const tripDatesByDog: Record<string, string[]> = {};
+		for (const log of logs) {
+			const d = toDate(log.startedAt);
+			if (!d) continue;
+			const ds = `${d.getMonth() + 1}/${d.getDate()}`;
+			(tripDatesByDog[log.dogId] ??= []).push(ds);
+		}
+
+		const realDogs = dogs.filter((d) => d.status === 'active');
+
+		const candidates = dogs.filter((d) =>
+			d.status !== 'active' ||
+			(d.hiddenComments ?? '').includes('Auto-created during day trip import')
+		);
+
+		if (candidates.length === 0) {
+			mergeLog = ['No duplicate candidates found.'];
+			mergeDryRunDone = true;
+			return;
+		}
+
+		mergePreview = candidates
+			.map((created) => {
+				const match = realDogs.find((r) => strictMatchName(created.name, r.name));
+				const tripDates = tripDatesByDog[created.id] ?? [];
+
+				let datesMatch = false;
+				if (match && tripDates.length > 0) {
+					const intakeMs = toDate(match.intakeDate ?? match.shelterSince)?.getTime() ?? 0;
+					const leftMs = toDate(match.leftShelterDate)?.getTime() ?? Date.now();
+					// At least one trip date falls within the real dog's shelter stay
+					datesMatch = tripDates.some((ds) => {
+						const [m, day] = ds.split('/').map(Number);
+						const year = new Date().getFullYear();
+						const t = new Date(year, m - 1, day).getTime();
+						return intakeMs === 0 || (t >= intakeMs && t <= leftMs + 86_400_000);
+					});
+				}
+
+				return { created, match: match ?? null, tripDates, datesMatch };
+			})
+			.filter((row) => row.match !== null);
+
+		if (mergePreview.length === 0) {
+			mergeLog = ['No matches found — nothing to merge.'];
+		}
+		mergeDryRunDone = true;
+	}
+
+	async function runMerge() {
+		if (!mergeDryRunDone) return;
+		merging = true;
+		mergeLog = [];
+		for (const row of mergePreview) {
+			if (!row.match || !row.datesMatch) {
+				mergeLog = [...mergeLog, `⚠ Skipped "${row.created.name}" — ${!row.match ? 'no match' : 'dates do not align'}`];
+				continue;
+			}
+			const count = await mergeDayTripLogs(row.created.id, row.match.id);
+			await deleteDog(row.created.id);
+			mergeLog = [...mergeLog, `✓ "${row.created.name}" → "${row.match.name}" — ${count} trip${count === 1 ? '' : 's'} moved, record deleted`];
+		}
+		mergeLog = [...mergeLog, '', 'Merge complete.'];
+		merging = false;
+		mergeDryRunDone = false;
+		mergePreview = [];
+		await refresh();
+	}
+
 	function normalizeName(n: string): string {
 		return n.toLowerCase().replace(/[^a-z]/g, '');
 	}
@@ -69,6 +170,12 @@
 		for (const dog of dogs) {
 			exact[dog.name.toLowerCase().trim()] = dog;
 			fuzzy[normalizeName(dog.name)] = dog;
+			// Also index by base name with any parenthetical stripped (e.g. "Sadie (Jazmine)" → "sadie")
+			const baseName = dog.name.replace(/\s*\(.*?\)\s*$/, '').toLowerCase().trim();
+			if (baseName !== dog.name.toLowerCase().trim()) {
+				exact[baseName] = dog;
+				fuzzy[normalizeName(baseName)] = dog;
+			}
 		}
 		return { exact, fuzzy };
 	}
@@ -826,7 +933,59 @@
 				{/if}
 
 				<div class="dt-import-note">
-					<p class="typewriter">Note: All trips will be logged with 00:00 duration (start = end time). Dogs marked adopted in Firestore will be skipped by the name matcher since they won't appear in the active dog list.</p>
+					<p class="typewriter">After importing, use <strong>Merge Duplicates</strong> to consolidate any auto-created records back to the real dog.</p>
+				</div>
+
+				<div class="dt-merge-section">
+					<p class="dt-import-section-label typewriter">Merge Duplicates</p>
+					<p class="dt-merge-desc typewriter">Finds dogs auto-created during import, matches them to real shelter dogs by name, moves their trips over, and deletes the duplicates.</p>
+					<div class="dt-import-actions">
+						<button class="dt-import-btn" on:click={runMergeDryRun} disabled={merging}>Preview</button>
+						{#if mergeDryRunDone && mergePreview.length > 0}
+							<button class="dt-import-btn dt-import-btn-go" on:click={runMerge} disabled={merging}>
+								{merging ? 'Merging…' : 'Merge Now'}
+							</button>
+						{/if}
+					</div>
+					{#if mergeDryRunDone && mergePreview.length > 0}
+						<div class="dt-table-wrap">
+							<table class="dt-table dt-import-table">
+								<thead>
+									<tr>
+										<th>Duplicate Record</th>
+										<th>Will Merge Into</th>
+										<th>Trip Dates</th>
+										<th>Dates OK?</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each mergePreview as row}
+										<tr class:dt-import-row-miss={!row.datesMatch}>
+											<td class="typewriter">{row.created.name}</td>
+											<td>
+												{#if row.match}
+													<span class="dt-import-match">{row.match.name}</span>
+												{:else}
+													<span class="dt-import-miss">No match</span>
+												{/if}
+											</td>
+											<td class="typewriter dt-import-dates">{row.tripDates.join(', ') || '—'}</td>
+											<td class="typewriter">
+												{#if row.datesMatch}
+													<span style="color:#2a6e3a">✓</span>
+												{:else}
+													<span style="color:#b84a4a">✗</span>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+					{#if mergeLog.length > 0}
+						<pre class="dt-import-log-pre typewriter">{mergeLog.join('\n')}</pre>
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -1523,6 +1682,17 @@
 		line-height: 1.7;
 		color: #253545;
 		white-space: pre-wrap;
+	}
+
+	.dt-merge-section {
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.dt-merge-desc {
+		font-size: 0.74rem;
+		color: #6b5530;
+		margin: 0;
 	}
 
 	.dt-import-note {

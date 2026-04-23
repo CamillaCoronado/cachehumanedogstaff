@@ -225,6 +225,7 @@ function defaultStoredFields(now: string) {
 		lastDayTripDate: null,
 		isOutOnDayTrip: false,
 		currentDayTripStartedAt: null,
+		awaitingEvaluation: true,
 		surgeryDate: null,
 		dayTripStatus: 'eligible',
 		dayTripIneligibleReason: null,
@@ -315,8 +316,35 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			if (isNew) {
 				batch.set(ref, { id: docId, ...defaultStoredFields(now), ...asmFields }, { merge: true });
 			} else {
-				batch.set(ref, asmFields, { merge: true });
+				const existing = existingDocs.get(docId);
+				const returningFromFoster = existing?.inFoster === true && asmFields.inFoster === false;
+				const intakeMs = asmFields.intakeDate ? new Date(asmFields.intakeDate).getTime() : 0;
+				const recentIntake = intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000;
+				const needsEvalFlag = existing?.awaitingEvaluation === undefined && recentIntake;
+				const extra = {
+					...(returningFromFoster ? { shelterSince: now } : {}),
+					...(needsEvalFlag ? { awaitingEvaluation: true } : {})
+				};
+				batch.set(ref, Object.keys(extra).length ? { ...asmFields, ...extra } : asmFields, { merge: true });
 			}
+		}
+		await batch.commit();
+	}
+
+	// Backfill awaitingEvaluation for existing dogs with recent intake where field was never set
+	const evalBackfill: { id: string }[] = [];
+	for (const [docId, data] of existingDocs) {
+		if (data.awaitingEvaluation !== undefined) continue;
+		if (data.status === 'adopted') continue;
+		const intakeMs = data.intakeDate ? new Date(data.intakeDate).getTime() : 0;
+		if (intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000) {
+			evalBackfill.push({ id: docId });
+		}
+	}
+	for (let i = 0; i < evalBackfill.length; i += BATCH_SIZE) {
+		const batch = writeBatch(db);
+		for (const { id } of evalBackfill.slice(i, i + BATCH_SIZE)) {
+			batch.set(doc(db, 'dogs', id), { awaitingEvaluation: true }, { merge: true });
 		}
 		await batch.commit();
 	}

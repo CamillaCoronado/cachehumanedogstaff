@@ -8,7 +8,6 @@
 	import type { Dog, UserRole } from '$lib/types';
 
 	type RunId = number | 'puppy' | 'rock';
-	const MAX_DOGS_PER_RUN = 2;
 
 	type KennelCell = {
 		id: string;
@@ -407,6 +406,11 @@
 		return target;
 	}
 
+	function ghostPortal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return { destroy() { node.remove(); } };
+	}
+
 	function resetTouchDragState() {
 		touchPointerId = null;
 		touchDraggingId = null;
@@ -454,14 +458,6 @@
 		selectedDogId = selectedDogId === dog.id ? null : dog.id;
 	}
 
-	function isRunFull(runId: RunId, movingDogId?: string) {
-		const occupants = assignments[runIdToKey(runId)] ?? [];
-		const count = movingDogId
-			? occupants.filter((occupant) => occupant.id !== movingDogId).length
-			: occupants.length;
-		return count >= MAX_DOGS_PER_RUN;
-	}
-
 	async function assignDog(dog: Dog, runId: RunId | null) {
 		if (!canEdit) return;
 		if (dog.inFoster && runId !== null) {
@@ -470,11 +466,6 @@
 		}
 		const currentRun = getDogRun(dog);
 		if (currentRun === runId) return;
-
-		if (runId && isRunFull(runId, dog.id)) {
-			toast.error(`${runIdToLabel(runId)} already has ${MAX_DOGS_PER_RUN} dogs.`);
-			return;
-		}
 
 		dogs = dogs.map((item) => {
 			if (item.id === dog.id) {
@@ -679,6 +670,7 @@
 
 {#if touchDraggingId}
 	<div
+		use:ghostPortal
 		class="kennel-touch-ghost"
 		style={`left: ${touchDragX}px; top: ${touchDragY}px;`}
 		aria-hidden="true"
