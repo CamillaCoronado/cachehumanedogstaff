@@ -237,6 +237,7 @@ const today = new Date();
 			dog.handlingLevel,
 			dog.surgeryDate,
 			dog.surgeryRestDays,
+			dog.awaitingEvaluation,
 			role,
 			today
 		);

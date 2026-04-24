@@ -129,6 +129,7 @@ export function checkDayTripEligibility(
 	handlingLevel: DogHandlingLevel | null | undefined,
 	surgeryDate: DateValue | string | null | undefined,
 	surgeryRestDays: number | null | undefined,
+	awaitingEvaluation: boolean | null | undefined = null,
 	actorRole: UserRole | null | undefined = null,
 	today = new Date()
 ): DayTripEligibility {
@@ -155,6 +156,10 @@ export function checkDayTripEligibility(
 	const blockedBySurgery =
 		surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < restDays;
 	const isSurgeryDay = surgeryDaysAgo === 0 && restDays === 0;
+
+	if (awaitingEvaluation) {
+		reasons.push('Awaiting evaluation');
+	}
 
 	if (isSurgeryDay) {
 		reasons.push('Surgery today — no day trips');
@@ -216,11 +221,13 @@ export function checkDayTripEligibility(
 	void intakeDate;
 	const blockedByRequirements = !isVaccinated || !isFixed;
 	const blockedByStatus =
-		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay;
+		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay || Boolean(awaitingEvaluation);
 	const eligible = !(blockedByRequirements || blockedByStatus);
 
 	let status: DayTripStatus = 'ineligible';
-	if (isolationStatus !== 'none') {
+	if (awaitingEvaluation) {
+		status = 'ineligible';
+	} else if (isolationStatus !== 'none') {
 		status = 'ineligible';
 	} else if (manuallyBlocked) {
 		status = 'ineligible';

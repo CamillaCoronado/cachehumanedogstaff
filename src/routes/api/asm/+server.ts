@@ -11,7 +11,7 @@ export async function GET() {
 	let res: Response;
 	try {
 		res = await fetch(
-			`${ASM_URL}/asmservice?method=json_shelter_animals&account=${encodeURIComponent(ASM_ACCOUNT)}&username=${encodeURIComponent(ASM_USER)}&password=${encodeURIComponent(ASM_PASS)}`
+			`${ASM_URL}/asmservice?method=json_shelter_animals&account=${encodeURIComponent(ASM_ACCOUNT)}&username=${encodeURIComponent(ASM_USER)}&password=${encodeURIComponent(ASM_PASS)}&sensitive=1`
 		);
 	} catch (e) {
 		throw error(502, `ASM network error: ${e instanceof Error ? e.message : String(e)}`);

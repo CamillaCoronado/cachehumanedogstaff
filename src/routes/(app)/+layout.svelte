@@ -10,7 +10,7 @@
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
-	import { canAccessPlaygroups, canEditDogs } from '$lib/utils/permissions';
+	import { canAccessDayTrips, canAccessPlaygroups, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { backfillBathLogsFromDogs } from '$lib/data/dogs';
 
@@ -34,9 +34,9 @@
 		{ href: '/dogs', label: 'Dogs', colorClass: 'tab-accent', icon: 'dogs' },
 		{ href: '/kennels', label: 'Kennels', colorClass: 'tab-green', icon: 'kennels' },
 		{ href: '/feeding', label: 'Feeding', colorClass: 'tab-blue', icon: 'feeding' },
-		{ href: '/cleaning', label: 'Cleaning', colorClass: 'tab-green', icon: 'cleaning' },
-		{ href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' }
+		{ href: '/cleaning', label: 'Cleaning', colorClass: 'tab-green', icon: 'cleaning' }
 	];
+	const dayTripsTab: TabItem = { href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' };
 	const playgroupsTab: TabItem = { href: '/playgroups', label: 'Playgroups', colorClass: 'tab-blue', icon: 'playgroups' };
 	const adminTab: TabItem = { href: '/admin', label: 'Admin', colorClass: 'tab-accent', icon: 'admin' };
 	let tabs: TabItem[] = baseTabs;
@@ -111,8 +111,10 @@
 	$: currentPath = $page.url.pathname;
 	$: isAdmin = $authProfile?.role === 'admin';
 	$: canViewPlaygroups = canAccessPlaygroups($authProfile?.role);
+	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
 	$: tabs = [
 		...baseTabs,
+		...(canViewDayTrips ? [dayTripsTab] : []),
 		...(canViewPlaygroups ? [playgroupsTab] : []),
 		...(isAdmin ? [adminTab] : [])
 	];

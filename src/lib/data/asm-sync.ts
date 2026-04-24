@@ -20,6 +20,8 @@ const FIELD_LABELS: Record<string, string> = {
 	sex: 'Sex',
 	markings: 'Markings',
 	description: 'Notes',
+	hiddenComments: 'Hidden comments',
+	warningNotes: 'Warning',
 	healthProblems: 'Health',
 	isMicrochipped: 'Microchip',
 	microchipDate: 'Microchip date',
@@ -50,7 +52,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 // Long-form or opaque fields where showing the value isn't useful
 const TEXT_ONLY_FIELDS = new Set([
-	'description', 'markings', 'healthProblems', 'origin',
+	'description', 'hiddenComments', 'warningNotes', 'markings', 'healthProblems', 'origin',
 	'microchipDate', 'fixedDate', 'vaccinatedDate', 'dateOfBirth',
 	'intakeDate', 'originalIntakeDate', 'photoUrl', 'asmShelterCode'
 ]);
@@ -78,6 +80,8 @@ interface AsmAnimal {
 	DISPLAYLOCATIONNAME: string;
 	SHELTERCODE: string;
 	ANIMALCOMMENTS: string;
+	HIDDENANIMALDETAILS: string;
+	POPUPWARNING: string;
 	MARKINGS: string;
 	HEALTHPROBLEMS: string;
 	// Microchip
@@ -116,6 +120,7 @@ interface AsmAnimal {
 	ACTIVEMOVEMENTDATE: string | null;
 	DECEASEDDATE: string | null;
 	BROUGHTINBYOWNERNAME: string | null;
+	BROUGHTINBYOWNERCOUNTY: string | null;
 	ORIGINALOWNERNAME: string | null;
 	// 1 = transferred in from another organization
 	ISTRANSFER: number;
@@ -171,6 +176,8 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		// outdoorKennelAssignment intentionally omitted — managed by app only
 		markings: animal.MARKINGS ?? '',
 		description: animal.ANIMALCOMMENTS ?? '',
+		hiddenComments: animal.HIDDENANIMALDETAILS ?? '',
+		warningNotes: animal.POPUPWARNING ?? '',
 		healthProblems: animal.HEALTHPROBLEMS ?? '',
 		isMicrochipped: animal.IDENTICHIPPED === 1,
 		microchipDate: animal.IDENTICHIPDATE || null,
@@ -193,7 +200,14 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		pottyTrained: normalizeHouseTrained(animal.ISHOUSETRAINED),
 		energyLevel: normalizeEnergy(animal.ENERGYLEVEL),
 		photoUrl,
-		origin: animal.BROUGHTINBYOWNERNAME || animal.ORIGINALOWNERNAME || animal.ENTRYTYPENAME || 'ASM',
+		origin: (() => {
+			if (animal.ISTRANSFER === 1) {
+				const name = animal.BROUGHTINBYOWNERNAME || animal.ORIGINALOWNERNAME || 'Transfer';
+				const state = animal.BROUGHTINBYOWNERCOUNTY;
+				return state ? `${name}, ${state}` : name;
+			}
+			return animal.ENTRYTYPENAME || 'Unknown';
+		})(),
 		inFoster,
 		isIncoming,
 		permanentFoster: isPermanentFoster,

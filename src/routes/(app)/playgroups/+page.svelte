@@ -15,7 +15,7 @@
 	import type { PendingPlaygroup } from '$lib/data/playgroups';
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
-	import { formatDateTime, toDate } from '$lib/utils/dates';
+	import { daysSince, formatDateTime, toDate } from '$lib/utils/dates';
 	import { canAccessPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
@@ -109,9 +109,17 @@
 		return weeks !== null && weeks < 26; // under 6 months
 	}
 
+	function isOnMedicalRest(dog: Dog): boolean {
+		const surgeryDaysAgo = daysSince(dog.surgeryDate);
+		if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) return true;
+		if (dog.dayTripStatus === 'ineligible' && dog.dayTripIneligibleReason === 'medical') return true;
+		return false;
+	}
+
 	function getReadiness(dog: Dog): DogReadiness {
 		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no') return 'hold';
 		if (!dog.isFixed) return 'hold';
+		if (isOnMedicalRest(dog)) return 'hold';
 		const weeks = ageWeeks(dog);
 		if (weeks !== null && weeks < 26) {
 			// Under 12 weeks or not yet vaccinated → hold
@@ -135,6 +143,14 @@
 			if (dog.isolationStatus !== 'none') return 'In isolation: do not schedule.';
 			if (dog.goodWithDogs === 'no') return 'Marked not dog-social: behavior team only.';
 			if (!dog.isFixed) return 'Not fixed: cannot participate in playgroups.';
+			const surgeryDaysAgo = daysSince(dog.surgeryDate);
+			if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) {
+				const daysLeft = (dog.surgeryRestDays ?? 0) - surgeryDaysAgo;
+				return `Post-surgery rest — ${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining.`;
+			}
+			if (dog.dayTripStatus === 'ineligible' && dog.dayTripIneligibleReason === 'medical') {
+				return dog.dayTripNotes?.trim() ? `Medical hold: ${dog.dayTripNotes.trim()}` : 'Medical hold: do not schedule.';
+			}
 			const weeks = ageWeeks(dog);
 			if (weeks !== null && weeks < 12) return `Too young for playgroup (${weeks} wks — minimum 12 weeks).`;
 			if (isPuppy(dog) && !dog.isVaccinated) return 'Needs 2 sets of vaccines before playgroup.';

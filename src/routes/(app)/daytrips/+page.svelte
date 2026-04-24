@@ -3,10 +3,10 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
-	import { resolveRole } from '$lib/utils/permissions';
+	import { canAccessDayTrips, resolveRole } from '$lib/utils/permissions';
 	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog } from '$lib/data/dogs';
 	import type { DayTripLog, Dog, UserRole } from '$lib/types';
-	import { checkDayTripEligibility, daysSince, formatDateTime, toDate } from '$lib/utils/dates';
+	import { checkDayTripEligibility, daysSince, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -17,6 +17,7 @@
 	let monthFilter = defaultMonth;
 	let loaded = false;
 	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'import' = 'board';
+	let boardColorFilter: 'green' | 'yellow' | null = null;
 
 	// ── Import state ──
 	let sheetData: { name: string; dates: string[] }[] = [];
@@ -358,6 +359,7 @@
 		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
 		.sort((a, b) => a.name.localeCompare(b.name));
 	$: role = resolveRole($authProfile, $localRole as UserRole);
+	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
 
 	$: monthStart = (() => {
 		const [year, month] = monthFilter.split('-').map(Number);
@@ -501,6 +503,7 @@
 			dog.handlingLevel,
 			dog.surgeryDate,
 			dog.surgeryRestDays,
+			dog.awaitingEvaluation,
 			role,
 			new Date()
 		);
@@ -542,6 +545,12 @@
 </script>
 
 <section class="dt-page">
+{#if !canViewDayTrips}
+	<div class="dt-restricted">
+		<p class="dt-restricted-title">Manager only</p>
+		<p class="dt-restricted-sub">Day trips are available to manager and admin accounts only.</p>
+	</div>
+{:else}
 	<div class="dt-shell">
 
 		<!-- Top bar -->
@@ -572,6 +581,11 @@
 
 		<!-- ───── BOARD ───── -->
 		{:else if activeTab === 'board'}
+			<div class="cal-filters">
+				<button class="cal-filter-pill" class:cal-filter-active={boardColorFilter === null} on:click={() => boardColorFilter = null}>All</button>
+				<button class="cal-filter-pill cal-filter-green" class:cal-filter-active={boardColorFilter === 'green'} on:click={() => boardColorFilter = boardColorFilter === 'green' ? null : 'green'}>Green</button>
+				<button class="cal-filter-pill cal-filter-yellow" class:cal-filter-active={boardColorFilter === 'yellow'} on:click={() => boardColorFilter = boardColorFilter === 'yellow' ? null : 'yellow'}>Yellow</button>
+			</div>
 			<div class="cal-board">
 
 				<!-- Out Now -->
@@ -606,12 +620,14 @@
 					{#if dogsEligible.length === 0}
 						<p class="cal-empty">None ready</p>
 					{:else}
-						{#each dogsEligible as dog}
+						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
 							{@const days = daysSince(dog.lastDayTripDate)}
-							{@const overdue = days === null || days >= 14}
+							{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
+							{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
+							{@const stripe = dogStripeColor(dog)}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
-							<div class="cal-event" class:cal-event-orange={overdue} class:cal-event-green={!overdue}>
+							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name">{dog.name}</p>
 								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'} · {days !== null ? `${days}d ago` : 'No trips yet'}</p>
 								<div class="cal-event-tags">
@@ -637,9 +653,10 @@
 					{#if dogsIneligible.length === 0}
 						<p class="cal-empty">None</p>
 					{:else}
-						{#each dogsIneligible as dog}
+						{#each dogsIneligible.filter(d => !boardColorFilter || dogStripeColor(d) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
-							<div class="cal-event cal-event-gray">
+							{@const stripe = dogStripeColor(dog)}
+							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name">{dog.name}</p>
 								<p class="cal-event-meta">{eligibility.reasons[0] ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
 							</div>
@@ -729,7 +746,8 @@
 						<tbody>
 							{#each dogStatsRows as dog}
 								{@const days = daysSince(dog.lastDayTripDate)}
-								{@const overdue = days === null || days >= 14}
+								{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
+								{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
 								{@const eligibility = getEligibility(dog)}
 								{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 								<tr class:tr-overdue={overdue && eligibility.eligible && !dog.isOutOnDayTrip}>
@@ -966,11 +984,27 @@
 		{/if}
 
 	</div>
+{/if}
 </section>
 
 <style>
 	/* ── Shell ── */
 	.dt-page { width: 100%; }
+
+	.dt-restricted {
+		padding: 3rem 1.5rem;
+		text-align: center;
+	}
+	.dt-restricted-title {
+		font-size: 1.1rem;
+		font-weight: 600;
+		margin: 0 0 0.4rem;
+	}
+	.dt-restricted-sub {
+		font-size: 0.85rem;
+		color: #5f6368;
+		margin: 0;
+	}
 
 	.dt-shell {
 		display: grid;
@@ -1140,6 +1174,26 @@
 		padding: 0.5rem 0.6rem;
 	}
 
+	/* ── Board filters ── */
+	.cal-filters {
+		display: flex;
+		gap: 0.5rem;
+		padding: 0.75rem 1rem 0;
+	}
+	.cal-filter-pill {
+		padding: 0.25rem 0.75rem;
+		border-radius: 999px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: #5f6368;
+		cursor: pointer;
+	}
+	.cal-filter-pill.cal-filter-active { border-color: #5f6368; background: #f1f3f4; color: #202124; }
+	.cal-filter-green.cal-filter-active { border-color: #3aaf2a; background: #e8f5e9; color: #2a6248; }
+	.cal-filter-yellow.cal-filter-active { border-color: #f29900; background: #fff8e1; color: #7a5100; }
+
 	/* ── Event chips ── */
 	.cal-event {
 		background: #fff;
@@ -1156,6 +1210,7 @@
 	.cal-event-blue  { border-left-color: #016aa5; }
 	.cal-event-green { border-left-color: #3aaf2a; }
 	.cal-event-orange { border-left-color: #f29900; }
+	.cal-event-red   { border-left-color: #cf4b4b; }
 	.cal-event-gray  { border-left-color: #bdc1c6; opacity: 0.7; }
 
 	.cal-event-name {

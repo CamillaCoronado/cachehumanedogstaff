@@ -413,284 +413,157 @@
 	}
 </script>
 
-<div class="grid gap-4 md:grid-cols-2">
-	<div class="form-field">
-		<label class="form-label typewriter">Name</label>
-		<input
-			class="form-input"
-			disabled={disabled}
-			bind:value={value.name}
-			on:input={(event) => handleInput('name', event.currentTarget.value)}
-		/>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Breed</label>
-		<input
-			class="form-input"
-			disabled={disabled}
-			bind:value={value.breed}
-			on:input={(event) => handleInput('breed', event.currentTarget.value)}
-		/>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Sex</label>
-		<select
-			class="form-input"
-			disabled={disabled}
-			bind:value={value.sex}
-			on:change={(event) => handleSelect('sex', event.currentTarget.value)}
-		>
-			{#each sexOptions as option}
-				<option value={option.value}>{option.label}</option>
-			{/each}
-		</select>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Outdoor Kennel</label>
-		<input
-			class="form-input"
-			disabled={disabled}
-			bind:value={value.outdoorKennelAssignment}
-			on:input={(event) => handleInput('outdoorKennelAssignment', event.currentTarget.value)}
-		/>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Date of Birth</label>
-		<input
-			type="date"
-			class="form-input"
-			disabled={disabled}
-			value={toDate(value.dateOfBirth)?.toISOString().slice(0, 10) ?? ''}
-			on:change={(event) => handleDateChange('dateOfBirth', event.currentTarget.value)}
-		/>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Weight (lbs)</label>
-		<input
-			type="number"
-			min="0"
-			step="0.1"
-			class="form-input"
-			disabled={disabled}
-			value={value.weightLbs ?? ''}
-			on:input={(event) => handleWeightInput(event.currentTarget.value)}
-		/>
-		{#if suggestedFoodAmount}
-			<p class="form-hint">Chart suggestion: {suggestedFoodAmount} per meal.</p>
-		{/if}
-	</div>
-	<div class="form-field md:col-span-2">
-		<label class="form-label typewriter">Photo</label>
-		<div class="form-photo-shell">
-			<div class="form-photo-preview-wrap">
-				{#if value.photoUrl}
-					<img
-						class="form-photo-preview"
-						src={value.photoUrl}
-						alt={`Photo of ${value.name || 'dog'}`}
-						loading="lazy"
-					/>
-				{:else}
-					<div class="form-photo-placeholder typewriter">No photo uploaded</div>
+<div class="form-sections">
+	<details class="form-section-block" open>
+		<summary class="form-section-summary permanent-marker">Basic Info</summary>
+		<div class="form-section-body grid gap-4 md:grid-cols-2">
+			<div class="form-field">
+				<label class="form-label typewriter">Name</label>
+				<input
+					class="form-input"
+					disabled={disabled}
+					bind:value={value.name}
+					on:input={(event) => handleInput('name', event.currentTarget.value)}
+				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Breed</label>
+				<input
+					class="form-input"
+					disabled={disabled}
+					bind:value={value.breed}
+					on:input={(event) => handleInput('breed', event.currentTarget.value)}
+				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Sex</label>
+				<select
+					class="form-input"
+					disabled={disabled}
+					bind:value={value.sex}
+					on:change={(event) => handleSelect('sex', event.currentTarget.value)}
+				>
+					{#each sexOptions as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Outdoor Kennel</label>
+				<input
+					class="form-input"
+					disabled={disabled}
+					bind:value={value.outdoorKennelAssignment}
+					on:input={(event) => handleInput('outdoorKennelAssignment', event.currentTarget.value)}
+				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Date of Birth</label>
+				<input
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.dateOfBirth)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('dateOfBirth', event.currentTarget.value)}
+				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Weight (lbs)</label>
+				<input
+					type="number"
+					min="0"
+					step="0.1"
+					class="form-input"
+					disabled={disabled}
+					value={value.weightLbs ?? ''}
+					on:input={(event) => handleWeightInput(event.currentTarget.value)}
+				/>
+				{#if suggestedFoodAmount}
+					<p class="form-hint">Chart suggestion: {suggestedFoodAmount} per meal.</p>
 				{/if}
 			</div>
-				<div class="form-photo-actions">
-					<input
-						type="file"
-						accept="image/*"
-						class="form-input form-file-input"
-						disabled={disabled || photoUploading}
-						on:change={handlePhotoUpload}
-					/>
-					{#if value.photoUrl}
-						<button
-							type="button"
-							class="form-choice-btn"
-							disabled={disabled || photoUploading}
-							on:click={clearPhoto}
-						>
-							Remove Photo
-						</button>
-					{/if}
-				</div>
-			</div>
-			<p class="form-hint">
-				{#if photoUploading}
-					Uploading to Firebase...
-				{:else}
-					Upload from your phone or computer. Saved to Firebase with this dog profile.
-				{/if}
-			</p>
-			{#if photoUploadError}
-				<p class="form-error">{photoUploadError}</p>
-			{/if}
-		</div>
-	<div class="form-section md:col-span-2">
-		<h4 class="form-section-title permanent-marker">Shelter Entry History</h4>
-		<div class="grid gap-4 md:grid-cols-2">
-			<div class="form-field">
-				<label class="form-label typewriter">Original Entry Date</label>
-				<input
-					type="date"
-					class="form-input"
-					disabled={disabled}
-					value={toDate(value.originalIntakeDate)?.toISOString().slice(0, 10) ?? ''}
-					on:change={(event) => handleDateChange('originalIntakeDate', event.currentTarget.value)}
-				/>
-			</div>
-			<div class="form-field">
-				<label class="form-label typewriter">Current Entry Date</label>
-				<input
-					type="date"
-					class="form-input"
-					disabled={disabled}
-					value={toDate(value.intakeDate)?.toISOString().slice(0, 10) ?? ''}
-					on:change={(event) => handleDateChange('intakeDate', event.currentTarget.value)}
-				/>
-			</div>
-			<div class="form-field">
-				<label class="form-label typewriter">Left Shelter Date</label>
-				<input
-					type="date"
-					class="form-input"
-					disabled={disabled}
-					value={toDate(value.leftShelterDate)?.toISOString().slice(0, 10) ?? ''}
-					on:change={(event) => handleDateChange('leftShelterDate', event.currentTarget.value)}
-				/>
-			</div>
-			<div class="form-field">
-				<label class="form-label typewriter">Shelter Since (Foster Return)</label>
-				<input
-					type="date"
-					class="form-input"
-					disabled={disabled}
-					value={toDate(value.shelterSince)?.toISOString().slice(0, 10) ?? ''}
-					on:change={(event) => handleDateChange('shelterSince', event.currentTarget.value)}
-				/>
-				<p class="form-hint">Set when a dog returns from foster. Resets the day trip clock from this date.</p>
-			</div>
-		</div>
-		<div class="form-field">
-			<label class="form-label typewriter">Re-entry Dates (Returns)</label>
-			{#if (value.reentryDates ?? []).length === 0}
-				<p class="form-hint">No re-entry dates logged yet.</p>
-			{:else}
-				<div class="entry-history-list">
-					{#each value.reentryDates as reentryDate, index}
-						<div class="entry-history-row">
-							<input
-								type="date"
-								class="form-input"
-								disabled={disabled}
-								value={toDate(reentryDate)?.toISOString().slice(0, 10) ?? ''}
-								on:change={(event) => setReentryDate(index, event.currentTarget.value)}
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Photo</label>
+				<div class="form-photo-shell">
+					<div class="form-photo-preview-wrap">
+						{#if value.photoUrl}
+							<img
+								class="form-photo-preview"
+								src={value.photoUrl}
+								alt={`Photo of ${value.name || 'dog'}`}
+								loading="lazy"
 							/>
+						{:else}
+							<div class="form-photo-placeholder typewriter">No photo uploaded</div>
+						{/if}
+					</div>
+					<div class="form-photo-actions">
+						<input
+							type="file"
+							accept="image/*"
+							class="form-input form-file-input"
+							disabled={disabled || photoUploading}
+							on:change={handlePhotoUpload}
+						/>
+						{#if value.photoUrl}
 							<button
 								type="button"
-								class="entry-history-remove"
-								disabled={disabled}
-								on:click={() => removeReentryDate(index)}
+								class="form-choice-btn"
+								disabled={disabled || photoUploading}
+								on:click={clearPhoto}
 							>
-								Remove
+								Remove Photo
 							</button>
-						</div>
-					{/each}
+						{/if}
+					</div>
 				</div>
-			{/if}
-			<button
-				type="button"
-				class="form-choice-btn entry-history-add"
-				disabled={disabled}
-				on:click={addReentryDate}
-			>
-				Add Re-entry Date
-			</button>
-			<p class="form-hint">Use one row for each time this dog was brought back to the shelter.</p>
+				<p class="form-hint">
+					{#if photoUploading}
+						Uploading to Firebase...
+					{:else}
+						Upload from your phone or computer. Saved to Firebase with this dog profile.
+					{/if}
+				</p>
+				{#if photoUploadError}
+					<p class="form-error">{photoUploadError}</p>
+				{/if}
+			</div>
 		</div>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Food Type</label>
-		<select
-			class="form-input"
-			disabled={disabled}
-			bind:value={value.foodType}
-			on:change={(event) => handleSelect('foodType', event.currentTarget.value)}
-		>
-			{#each foodTypes as food}
-				<option value={food}>{food}</option>
-			{/each}
-		</select>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Food Amount</label>
-		<input
-			class="form-input"
-			disabled={disabled}
-			bind:value={value.foodAmount}
-			on:input={(event) => handleInput('foodAmount', event.currentTarget.value)}
-		/>
-		{#if suggestedFoodAmount}
-			<p class="form-hint">Auto-filled from chart using current weight.</p>
-		{/if}
-	</div>
-	<div class="form-field md:col-span-2">
-		<label class="form-label typewriter">Dietary Notes</label>
-		<textarea
-			class="form-textarea"
-			disabled={disabled}
-			bind:value={value.dietaryNotes}
-			on:input={(event) => handleInput('dietaryNotes', event.currentTarget.value)}
-		></textarea>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Has Own Food</label>
-		<label class="flex items-center gap-2 cursor-pointer">
-			<input
-				type="checkbox"
-				class="form-checkbox"
-				disabled={disabled}
-				checked={value.hasOwnFood ?? false}
-				on:change={(event) => handleOwnFoodChange(event.currentTarget.checked)}
-			/>
-			<span class="text-sm" style="color: var(--marker-black);">Dog came with personal food</span>
-		</label>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Food Allergies</label>
-		<div class="allergy-checkboxes">
-			{#each allergyOptions as allergyType}
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						class="form-checkbox"
-						disabled={disabled}
-						checked={(value.allergyTypes ?? []).includes(allergyType)}
-						on:change={(event) => handleAllergyToggle(allergyType, event.currentTarget.checked)}
-					/>
-					<span class="text-sm" style="color: var(--marker-black);">{allergyType}</span>
-				</label>
-			{/each}
-		</div>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Transition to Hills</label>
-		<select
-			class="form-input"
-			disabled={disabled || !(value.hasOwnFood ?? false)}
-			value={value.transitionToHills === true ? 'yes' : value.transitionToHills === false ? 'no' : ''}
-			on:change={(event) => handleTransitionToHillsSelect(event.currentTarget.value)}
-		>
-			<option value="">Select plan</option>
-			<option value="yes">Yes, transition to Hills</option>
-			<option value="no">No, keep own food</option>
-		</select>
-		{#if !(value.hasOwnFood ?? false)}
-			<p class="form-hint">Only applies when dog has own food.</p>
-		{/if}
-	</div>
-	<div class="form-section md:col-span-2">
-		<h4 class="form-section-title permanent-marker">Meet and Greet Profile</h4>
-		<div class="grid gap-4 md:grid-cols-2">
+	</details>
+
+	<details class="form-section-block">
+		<summary class="form-section-summary permanent-marker">Behavior & Home Fit</summary>
+		<div class="form-section-body grid gap-4 md:grid-cols-2">
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Description</label>
+				<textarea
+					class="form-textarea"
+					disabled={disabled}
+					placeholder="Public-facing dog description."
+					value={value.description ?? ''}
+					on:input={(event) => handleInput('description', event.currentTarget.value)}
+				></textarea>
+			</div>
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Hidden Comments (Staff)</label>
+				<textarea
+					class="form-textarea"
+					disabled={disabled}
+					placeholder="Internal staff-only comments."
+					value={value.hiddenComments ?? ''}
+					on:input={(event) => handleInput('hiddenComments', event.currentTarget.value)}
+				></textarea>
+			</div>
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Markings</label>
+				<textarea
+					class="form-textarea"
+					disabled={disabled}
+					placeholder="Distinctive markings or appearance notes."
+					value={value.markings ?? ''}
+					on:input={(event) => handleInput('markings', event.currentTarget.value)}
+				></textarea>
+			</div>
 			<div class="form-field">
 				<label class="form-label typewriter">Where They Came From</label>
 				<input
@@ -829,29 +702,391 @@
 				></textarea>
 			</div>
 		</div>
-	</div>
-	<div class="form-section md:col-span-2">
-		<h4 class="form-section-title permanent-marker">Behavior and Notes</h4>
-		<div class="grid gap-4 md:grid-cols-2">
-			<div class="form-field md:col-span-2">
-				<label class="form-label typewriter">Description</label>
-				<textarea
-					class="form-textarea"
+	</details>
+
+	<details class="form-section-block">
+		<summary class="form-section-summary permanent-marker">Food & Care</summary>
+		<div class="form-section-body grid gap-4 md:grid-cols-2">
+			<div class="form-field">
+				<label class="form-label typewriter">Food Type</label>
+				<select
+					class="form-input"
 					disabled={disabled}
-					placeholder="Public-facing dog description."
-					value={value.description ?? ''}
-					on:input={(event) => handleInput('description', event.currentTarget.value)}
-				></textarea>
+					bind:value={value.foodType}
+					on:change={(event) => handleSelect('foodType', event.currentTarget.value)}
+				>
+					{#each foodTypes as food}
+						<option value={food}>{food}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Food Amount</label>
+				<input
+					class="form-input"
+					disabled={disabled}
+					bind:value={value.foodAmount}
+					on:input={(event) => handleInput('foodAmount', event.currentTarget.value)}
+				/>
+				{#if suggestedFoodAmount}
+					<p class="form-hint">Auto-filled from chart using current weight.</p>
+				{/if}
 			</div>
 			<div class="form-field md:col-span-2">
-				<label class="form-label typewriter">Markings</label>
+				<label class="form-label typewriter">Dietary Notes</label>
 				<textarea
 					class="form-textarea"
 					disabled={disabled}
-					placeholder="Distinctive markings or appearance notes."
-					value={value.markings ?? ''}
-					on:input={(event) => handleInput('markings', event.currentTarget.value)}
+					bind:value={value.dietaryNotes}
+					on:input={(event) => handleInput('dietaryNotes', event.currentTarget.value)}
 				></textarea>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Has Own Food</label>
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={value.hasOwnFood ?? false}
+						on:change={(event) => handleOwnFoodChange(event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Dog came with personal food</span>
+				</label>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Food Allergies</label>
+				<div class="allergy-checkboxes">
+					{#each allergyOptions as allergyType}
+						<label class="flex items-center gap-2 cursor-pointer">
+							<input
+								type="checkbox"
+								class="form-checkbox"
+								disabled={disabled}
+								checked={(value.allergyTypes ?? []).includes(allergyType)}
+								on:change={(event) => handleAllergyToggle(allergyType, event.currentTarget.checked)}
+							/>
+							<span class="text-sm" style="color: var(--marker-black);">{allergyType}</span>
+						</label>
+					{/each}
+				</div>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Transition to Hills</label>
+				<select
+					class="form-input"
+					disabled={disabled || !(value.hasOwnFood ?? false)}
+					value={value.transitionToHills === true ? 'yes' : value.transitionToHills === false ? 'no' : ''}
+					on:change={(event) => handleTransitionToHillsSelect(event.currentTarget.value)}
+				>
+					<option value="">Select plan</option>
+					<option value="yes">Yes, transition to Hills</option>
+					<option value="no">No, keep own food</option>
+				</select>
+				{#if !(value.hasOwnFood ?? false)}
+					<p class="form-hint">Only applies when dog has own food.</p>
+				{/if}
+			</div>
+		</div>
+	</details>
+
+	<details class="form-section-block">
+		<summary class="form-section-summary permanent-marker">Medical</summary>
+		<div class="form-section-body grid gap-4 md:grid-cols-2">
+			<div class="form-field">
+				<label class="form-label typewriter">Surgery Date</label>
+				<input
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.surgeryDate)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('surgeryDate', event.currentTarget.value)}
+				/>
+				{#if value.surgeryDate}
+					<p class="form-hint">Currently: {formatDate(value.surgeryDate)}</p>
+				{/if}
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter" for="surgery-rest-days">Post-Surgery Rest (days)</label>
+				<input
+					id="surgery-rest-days"
+					type="number"
+					class="form-input"
+					disabled={disabled}
+					min="0"
+					placeholder="e.g. 14"
+					value={value.surgeryRestDays ?? ''}
+					on:change={(event) => {
+						const n = parseInt(event.currentTarget.value, 10);
+						value = { ...value, surgeryRestDays: Number.isFinite(n) && n >= 0 ? n : null };
+					}}
+				/>
+				<p class="form-hint">Blocks day trips and playgroups until this many days after surgery.</p>
+			</div>
+			<div class="form-inline-row">
+				<label class="flex items-center gap-2 cursor-pointer min-w-0">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={value.isMicrochipped}
+						on:change={(event) => handleCheckbox('isMicrochipped', event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Microchipped</span>
+				</label>
+				{#if value.isMicrochipped}
+					<input
+						type="date"
+						class="form-input form-inline-date"
+						disabled={disabled}
+						placeholder="Date"
+						value={toDate(value.microchipDate)?.toISOString().slice(0, 10) ?? ''}
+						on:change={(event) => handleDateChange('microchipDate', event.currentTarget.value)}
+					/>
+				{/if}
+			</div>
+			<div class="form-inline-row">
+				<label class="flex items-center gap-2 cursor-pointer min-w-0">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={value.isVaccinated}
+						on:change={(event) => handleCheckbox('isVaccinated', event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Vaccinated</span>
+				</label>
+				{#if value.isVaccinated}
+					<input
+						type="date"
+						class="form-input form-inline-date"
+						disabled={disabled}
+						placeholder="Date"
+						value={toDate(value.vaccinatedDate)?.toISOString().slice(0, 10) ?? ''}
+						on:change={(event) => handleDateChange('vaccinatedDate', event.currentTarget.value)}
+					/>
+				{/if}
+			</div>
+			<div class="form-inline-row">
+				<label class="flex items-center gap-2 cursor-pointer min-w-0">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={value.isFixed}
+						on:change={(event) => handleCheckbox('isFixed', event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Spayed/Neutered</span>
+				</label>
+				{#if value.isFixed}
+					<input
+						type="date"
+						class="form-input form-inline-date"
+						disabled={disabled}
+						placeholder="Date"
+						value={toDate(value.fixedDate)?.toISOString().slice(0, 10) ?? ''}
+						on:change={(event) => handleDateChange('fixedDate', event.currentTarget.value)}
+					/>
+				{/if}
+			</div>
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Health Problems</label>
+				<textarea
+					class="form-textarea"
+					disabled={disabled}
+					placeholder="Known health issues or monitoring needs."
+					value={value.healthProblems ?? ''}
+					on:input={(event) => handleInput('healthProblems', event.currentTarget.value)}
+				></textarea>
+			</div>
+		</div>
+	</details>
+
+	<details class="form-section-block">
+		<summary class="form-section-summary permanent-marker">Shelter & Status</summary>
+		<div class="form-section-body grid gap-4 md:grid-cols-2">
+			<div class="form-field">
+				<label class="form-label typewriter">Original Entry Date</label>
+				<input
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.originalIntakeDate)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('originalIntakeDate', event.currentTarget.value)}
+				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Current Entry Date</label>
+				<input
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.intakeDate)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('intakeDate', event.currentTarget.value)}
+				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Left Shelter Date</label>
+				<input
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.leftShelterDate)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('leftShelterDate', event.currentTarget.value)}
+				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Shelter Since (Foster Return)</label>
+				<input
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.shelterSince)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('shelterSince', event.currentTarget.value)}
+				/>
+				<p class="form-hint">Set when a dog returns from foster. Resets the day trip clock from this date.</p>
+			</div>
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Re-entry Dates (Returns)</label>
+				{#if (value.reentryDates ?? []).length === 0}
+					<p class="form-hint">No re-entry dates logged yet.</p>
+				{:else}
+					<div class="entry-history-list">
+						{#each value.reentryDates as reentryDate, index}
+							<div class="entry-history-row">
+								<input
+									type="date"
+									class="form-input"
+									disabled={disabled}
+									value={toDate(reentryDate)?.toISOString().slice(0, 10) ?? ''}
+									on:change={(event) => setReentryDate(index, event.currentTarget.value)}
+								/>
+								<button
+									type="button"
+									class="entry-history-remove"
+									disabled={disabled}
+									on:click={() => removeReentryDate(index)}
+								>
+									Remove
+								</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
+				<button
+					type="button"
+					class="form-choice-btn entry-history-add"
+					disabled={disabled}
+					on:click={addReentryDate}
+				>
+					Add Re-entry Date
+				</button>
+				<p class="form-hint">Use one row for each time this dog was brought back to the shelter.</p>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter" for="playgroupReadyDate">Playgroup Ready From</label>
+				<input
+					id="playgroupReadyDate"
+					type="date"
+					class="form-input"
+					disabled={disabled}
+					value={toDate(value.playgroupReadyDate)?.toISOString().slice(0, 10) ?? ''}
+					on:change={(event) => handleDateChange('playgroupReadyDate', event.currentTarget.value)}
+				/>
+				<p class="form-hint">Defaults to 7 days after intake. Adjust if this dog needs more or less time to decompress.</p>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Dog Evaluation</label>
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={value.awaitingEvaluation ?? false}
+						on:change={(event) => handleCheckbox('awaitingEvaluation', event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Awaiting evaluation</span>
+				</label>
+				<p class="form-hint">Uncheck once dog compatibility has been assessed.</p>
+			</div>
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Foster Status</label>
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={value.inFoster}
+						on:change={(event) => handleCheckbox('inFoster', event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Currently in foster</span>
+				</label>
+				<p class="form-hint">If checked, this dog appears in the dashboard foster list.</p>
+			</div>
+			<div class="form-field">
+				<label class="form-label typewriter">Record Status</label>
+				<select
+					class="form-input"
+					disabled={disabled}
+					bind:value={value.status}
+					on:change={(event) => handleSelect('status', event.currentTarget.value)}
+				>
+					{#each statusOptions as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="form-section md:col-span-2">
+				<h4 class="form-section-title permanent-marker">Isolation Status</h4>
+				<div class="flex flex-wrap gap-2">
+					{#each isolationStatuses as iso}
+						<button
+							type="button"
+							class={`form-choice-btn ${
+								value.isolationStatus === iso.value
+									? iso.value === 'none' ? 'form-choice-green'
+									: 'form-choice-red'
+									: ''
+							}`}
+							disabled={disabled}
+							on:click={() => handleSelect('isolationStatus', iso.value)}
+						>
+							{iso.label}
+						</button>
+					{/each}
+				</div>
+				<div class="form-inline-row mt-3">
+					<label class="form-hint">Start Date:</label>
+					<input
+						type="date"
+						class="form-input form-inline-date"
+						disabled={disabled}
+						value={toDate(value.isolationStartDate)?.toISOString().slice(0, 10) ?? ''}
+						on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
+					/>
+				</div>
+			</div>
+		</div>
+	</details>
+
+	<details class="form-section-block">
+		<summary class="form-section-summary permanent-marker">Handling & Day Trips</summary>
+		<div class="form-section-body grid gap-4 md:grid-cols-2">
+			<div class="form-section md:col-span-2">
+				<h4 class="form-section-title permanent-marker">Handling Access</h4>
+				<div class="flex flex-wrap gap-2">
+					{#each handlingLevelOptions as option}
+						<button
+							type="button"
+							class={`form-choice-btn ${value.handlingLevel === option.value ? option.toneClass : ''}`}
+							disabled={disabled}
+							on:click={() => handleSelect('handlingLevel', option.value)}
+						>
+							{option.label}
+						</button>
+					{/each}
+				</div>
+				<p class="form-hint mt-1">{selectedHandlingLevel.description}</p>
 			</div>
 			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Warning Notes</label>
@@ -874,338 +1109,113 @@
 				></textarea>
 			</div>
 			<div class="form-field md:col-span-2">
-				<label class="form-label typewriter">Hidden Comments (Staff)</label>
-				<textarea
-					class="form-textarea"
-					disabled={disabled}
-					placeholder="Internal staff-only comments."
-					value={value.hiddenComments ?? ''}
-					on:input={(event) => handleInput('hiddenComments', event.currentTarget.value)}
-				></textarea>
-			</div>
-		</div>
-	</div>
-	<div class="form-section md:col-span-2">
-		<h4 class="form-section-title permanent-marker">Handling Access</h4>
-		<div class="flex flex-wrap gap-2">
-			{#each handlingLevelOptions as option}
-				<button
-					type="button"
-					class={`form-choice-btn ${value.handlingLevel === option.value ? option.toneClass : ''}`}
-					disabled={disabled}
-					on:click={() => handleSelect('handlingLevel', option.value)}
-				>
-					{option.label}
-				</button>
-			{/each}
-		</div>
-		<p class="form-hint mt-1">{selectedHandlingLevel.description}</p>
-	</div>
-	<div class="form-section md:col-span-2">
-		<h4 class="form-section-title permanent-marker">Medical Status</h4>
-			<div class="grid gap-4 md:grid-cols-2">
-				<div class="form-field">
-					<label class="form-label typewriter">Surgery Date</label>
-					<input
-						type="date"
-						class="form-input"
-						disabled={disabled}
-						value={toDate(value.surgeryDate)?.toISOString().slice(0, 10) ?? ''}
-						on:change={(event) => handleDateChange('surgeryDate', event.currentTarget.value)}
-					/>
-					{#if value.surgeryDate}
-						<p class="form-hint">Currently: {formatDate(value.surgeryDate)}</p>
-					{/if}
-				</div>
-				<div class="form-field">
-					<label class="form-label typewriter" for="surgery-rest-days">Post-Surgery Rest (days)</label>
-					<input
-						id="surgery-rest-days"
-						type="number"
-						class="form-input"
-						disabled={disabled}
-						min="0"
-						placeholder="e.g. 14"
-						value={value.surgeryRestDays ?? ''}
-						on:change={(event) => {
-							const n = parseInt(event.currentTarget.value, 10);
-							value = { ...value, surgeryRestDays: Number.isFinite(n) && n >= 0 ? n : null };
-						}}
-					/>
-					<p class="form-hint">Blocks day trips and playgroups until this many days after surgery.</p>
-				</div>
-				<div class="form-inline-row">
-					<label class="flex items-center gap-2 cursor-pointer min-w-0">
-						<input
-							type="checkbox"
-							class="form-checkbox"
-							disabled={disabled}
-							checked={value.isMicrochipped}
-							on:change={(event) => handleCheckbox('isMicrochipped', event.currentTarget.checked)}
-						/>
-						<span class="text-sm" style="color: var(--marker-black);">Microchipped</span>
-					</label>
-					{#if value.isMicrochipped}
-						<input
-							type="date"
-							class="form-input form-inline-date"
-							disabled={disabled}
-							placeholder="Date"
-							value={toDate(value.microchipDate)?.toISOString().slice(0, 10) ?? ''}
-							on:change={(event) => handleDateChange('microchipDate', event.currentTarget.value)}
-						/>
-					{/if}
-				</div>
-				<div class="form-inline-row">
-					<label class="flex items-center gap-2 cursor-pointer min-w-0">
-						<input
-							type="checkbox"
-							class="form-checkbox"
-						disabled={disabled}
-						checked={value.isVaccinated}
-						on:change={(event) => handleCheckbox('isVaccinated', event.currentTarget.checked)}
-					/>
-					<span class="text-sm" style="color: var(--marker-black);">Vaccinated</span>
-				</label>
-					{#if value.isVaccinated}
-						<input
-							type="date"
-							class="form-input form-inline-date"
-							disabled={disabled}
-							placeholder="Date"
-							value={toDate(value.vaccinatedDate)?.toISOString().slice(0, 10) ?? ''}
-							on:change={(event) => handleDateChange('vaccinatedDate', event.currentTarget.value)}
-						/>
-					{/if}
-				</div>
-				<div class="form-inline-row">
-					<label class="flex items-center gap-2 cursor-pointer min-w-0">
-						<input
-							type="checkbox"
-							class="form-checkbox"
-						disabled={disabled}
-						checked={value.isFixed}
-						on:change={(event) => handleCheckbox('isFixed', event.currentTarget.checked)}
-					/>
-					<span class="text-sm" style="color: var(--marker-black);">Spayed/Neutered</span>
-				</label>
-					{#if value.isFixed}
-						<input
-							type="date"
-							class="form-input form-inline-date"
-							disabled={disabled}
-							placeholder="Date"
-							value={toDate(value.fixedDate)?.toISOString().slice(0, 10) ?? ''}
-							on:change={(event) => handleDateChange('fixedDate', event.currentTarget.value)}
-						/>
-					{/if}
-				</div>
-			<div class="form-field md:col-span-2">
-				<label class="form-label typewriter">Health Problems</label>
-				<textarea
-					class="form-textarea"
-					disabled={disabled}
-					placeholder="Known health issues or monitoring needs."
-					value={value.healthProblems ?? ''}
-					on:input={(event) => handleInput('healthProblems', event.currentTarget.value)}
-				></textarea>
-			</div>
-		</div>
-	</div>
-
-	<div class="form-section md:col-span-2">
-		<h4 class="form-section-title permanent-marker">Isolation Status</h4>
-		<div class="flex flex-wrap gap-2">
-			{#each isolationStatuses as iso}
-				<button
-					type="button"
-					class={`form-choice-btn ${
-						value.isolationStatus === iso.value
-							? iso.value === 'none' ? 'form-choice-green'
-							: 'form-choice-red'
-							: ''
-					}`}
-					disabled={disabled}
-					on:click={() => handleSelect('isolationStatus', iso.value)}
-				>
-					{iso.label}
-				</button>
-			{/each}
-		</div>
-			<div class="form-inline-row mt-3">
-				<label class="form-hint">Start Date:</label>
-				<input
-					type="date"
-					class="form-input form-inline-date"
-					disabled={disabled}
-					value={toDate(value.isolationStartDate)?.toISOString().slice(0, 10) ?? ''}
-					on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
-			/>
-		</div>
-	</div>
-
-	<div class="form-field">
-		<label class="form-label typewriter" for="playgroupReadyDate">Playgroup Ready From</label>
-		<input
-			id="playgroupReadyDate"
-			type="date"
-			class="form-input"
-			disabled={disabled}
-			value={toDate(value.playgroupReadyDate)?.toISOString().slice(0, 10) ?? ''}
-			on:change={(event) => handleDateChange('playgroupReadyDate', event.currentTarget.value)}
-		/>
-		<p class="form-hint">Defaults to 7 days after intake. Adjust if this dog needs more or less time to decompress.</p>
-	</div>
-
-	<div class="form-field">
-		<label class="form-label typewriter">Dog Evaluation</label>
-		<label class="flex items-center gap-2 cursor-pointer">
-			<input
-				type="checkbox"
-				class="form-checkbox"
-				disabled={disabled}
-				checked={value.awaitingEvaluation ?? false}
-				on:change={(event) => handleCheckbox('awaitingEvaluation', event.currentTarget.checked)}
-			/>
-			<span class="text-sm" style="color: var(--marker-black);">Awaiting evaluation</span>
-		</label>
-		<p class="form-hint">Uncheck once dog compatibility has been assessed.</p>
-	</div>
-
-	<div class="form-field md:col-span-2">
-		<label class="form-label typewriter">Foster Status</label>
-		<label class="flex items-center gap-2 cursor-pointer">
-			<input
-				type="checkbox"
-				class="form-checkbox"
-				disabled={disabled}
-				checked={value.inFoster}
-				on:change={(event) => handleCheckbox('inFoster', event.currentTarget.checked)}
-			/>
-			<span class="text-sm" style="color: var(--marker-black);">Currently in foster</span>
-		</label>
-		<p class="form-hint">If checked, this dog appears in the dashboard foster list.</p>
-	</div>
-	<div class="form-field">
-		<label class="form-label typewriter">Record Status</label>
-		<select
-			class="form-input"
-			disabled={disabled}
-			bind:value={value.status}
-			on:change={(event) => handleSelect('status', event.currentTarget.value)}
-		>
-			{#each statusOptions as option}
-				<option value={option.value}>{option.label}</option>
-			{/each}
-		</select>
-	</div>
-
-	<div class="form-field md:col-span-2">
-		<label class="form-label typewriter">Day Trip Status</label>
-		{#if isInIsolation}
-			<p class="form-error">Automatically ineligible due to isolation ({value.isolationStatus === 'sick' ? 'Sick' : 'Bite Quarantine'})</p>
-		{:else}
-			<label class="flex items-center gap-2 cursor-pointer mb-2">
-				<input
-					type="checkbox"
-					class="form-checkbox"
-					disabled={disabled}
-					checked={isManagerOnly}
-					on:change={(event) => handleManagerOnlyToggle(event.currentTarget.checked)}
-				/>
-				<span class="text-sm" style="color: var(--marker-black);">Manager only</span>
-			</label>
-
-			{#if isManagerOnly}
-				<div class="mb-2">
-					<p class="form-hint mb-1">Manager-only reason:</p>
-					<div class="flex flex-wrap gap-2">
-						{#each managerOnlyReasons as reason}
-							<button
-								type="button"
-								class={`form-choice-btn ${selectedManagerOnlyReason === reason.value ? 'form-choice-purple' : ''}`}
-								disabled={disabled}
-								on:click={() => handleManagerOnlyReasonSelect(reason.value)}
-							>
-								{reason.label}
-							</button>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			<div class="flex flex-wrap gap-2">
-				{#each dayTripStatuses as status}
-					<button
-						type="button"
-						class={`form-choice-btn ${
-							value.dayTripStatus === status.value
-								? status.value === 'eligible' ? 'form-choice-green'
-								: status.value === 'difficult' ? 'form-choice-yellow'
-								: 'form-choice-red'
-								: ''
-						}`}
-						disabled={disabled || isManagerOnly}
-						on:click={() => handleSelect('dayTripStatus', status.value)}
-					>
-						{status.label}
-					</button>
-				{/each}
-			</div>
-
-			{#if isManualIneligible}
-				<div class="mt-2">
-					<p class="form-hint mb-1">No day-trip reason:</p>
-					<div class="flex flex-wrap gap-2">
-						{#each ineligibleReasons as reason}
-							<button
-								type="button"
-								class={`form-choice-btn ${selectedIneligibleReason === reason.value ? 'form-choice-red' : ''}`}
-								disabled={disabled}
-								on:click={() => handleIneligibleReasonSelect(reason.value)}
-							>
-								{reason.label}
-							</button>
-						{/each}
-					</div>
-				</div>
-			{/if}
-			<p class="form-hint mt-1">
-				{#if isManagerOnly}
-					Manager only automatically means no day trips
-				{:else if value.dayTripStatus === 'ineligible'}
-					Blocked from day trips
-				{:else if value.dayTripStatus === 'eligible'}
-					Anyone can take on day trips
+				<label class="form-label typewriter">Day Trip Status</label>
+				{#if isInIsolation}
+					<p class="form-error">Automatically ineligible due to isolation ({value.isolationStatus === 'sick' ? 'Sick' : 'Bite Quarantine'})</p>
 				{:else}
-					Adults only
-				{/if}
-			</p>
-		{/if}
-		<div class="mt-2">
-			<label class="form-hint">Reason {needsReason && !isInIsolation ? '(required)' : '(optional)'}:</label>
-			<input
-				type="text"
-				class="form-input mt-1"
-				disabled={disabled}
-				placeholder={
-					isManagerOnly
-						? 'Why is this dog manager only?'
-						: isManualIneligible
-							? 'Why are day trips blocked?'
-							: value.dayTripStatus === 'difficult'
-								? 'Reason for adults-only status'
-								: 'Reason for status (optional)'
-				}
-				value={value.dayTripNotes ?? ''}
-				on:input={(event) => handleInput('dayTripNotes', event.currentTarget.value)}
-			/>
-		</div>
-	</div>
+					<label class="flex items-center gap-2 cursor-pointer mb-2">
+						<input
+							type="checkbox"
+							class="form-checkbox"
+							disabled={disabled}
+							checked={isManagerOnly}
+							on:change={(event) => handleManagerOnlyToggle(event.currentTarget.checked)}
+						/>
+						<span class="text-sm" style="color: var(--marker-black);">Manager only</span>
+					</label>
 
-	<div class="form-section md:col-span-2">
-		<h4 class="form-section-title permanent-marker">Activity Overrides</h4>
-		<div class="grid gap-4 md:grid-cols-2">
+					{#if isManagerOnly}
+						<div class="mb-2">
+							<p class="form-hint mb-1">Manager-only reason:</p>
+							<div class="flex flex-wrap gap-2">
+								{#each managerOnlyReasons as reason}
+									<button
+										type="button"
+										class={`form-choice-btn ${selectedManagerOnlyReason === reason.value ? 'form-choice-purple' : ''}`}
+										disabled={disabled}
+										on:click={() => handleManagerOnlyReasonSelect(reason.value)}
+									>
+										{reason.label}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<div class="flex flex-wrap gap-2">
+						{#each dayTripStatuses as status}
+							<button
+								type="button"
+								class={`form-choice-btn ${
+									value.dayTripStatus === status.value
+										? status.value === 'eligible' ? 'form-choice-green'
+										: status.value === 'difficult' ? 'form-choice-yellow'
+										: 'form-choice-red'
+										: ''
+								}`}
+								disabled={disabled || isManagerOnly}
+								on:click={() => handleSelect('dayTripStatus', status.value)}
+							>
+								{status.label}
+							</button>
+						{/each}
+					</div>
+
+					{#if isManualIneligible}
+						<div class="mt-2">
+							<p class="form-hint mb-1">No day-trip reason:</p>
+							<div class="flex flex-wrap gap-2">
+								{#each ineligibleReasons as reason}
+									<button
+										type="button"
+										class={`form-choice-btn ${selectedIneligibleReason === reason.value ? 'form-choice-red' : ''}`}
+										disabled={disabled}
+										on:click={() => handleIneligibleReasonSelect(reason.value)}
+									>
+										{reason.label}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+					<p class="form-hint mt-1">
+						{#if isManagerOnly}
+							Manager only automatically means no day trips
+						{:else if value.dayTripStatus === 'ineligible'}
+							Blocked from day trips
+						{:else if value.dayTripStatus === 'eligible'}
+							Anyone can take on day trips
+						{:else}
+							Adults only
+						{/if}
+					</p>
+				{/if}
+				<div class="mt-2">
+					<label class="form-hint">Reason {needsReason && !isInIsolation ? '(required)' : '(optional)'}:</label>
+					<input
+						type="text"
+						class="form-input mt-1"
+						disabled={disabled}
+						placeholder={
+							isManagerOnly
+								? 'Why is this dog manager only?'
+								: isManualIneligible
+									? 'Why are day trips blocked?'
+									: value.dayTripStatus === 'difficult'
+										? 'Reason for adults-only status'
+										: 'Reason for status (optional)'
+						}
+						value={value.dayTripNotes ?? ''}
+						on:input={(event) => handleInput('dayTripNotes', event.currentTarget.value)}
+					/>
+				</div>
+			</div>
+		</div>
+	</details>
+
+	<details class="form-section-block">
+		<summary class="form-section-summary permanent-marker">Activity Overrides</summary>
+		<div class="form-section-body grid gap-4 md:grid-cols-2">
 			<div class="form-field">
 				<label class="form-label typewriter">Last Bath Date</label>
 				<input
@@ -1259,7 +1269,7 @@
 				/>
 			</div>
 		</div>
-	</div>
+	</details>
 </div>
 
 <style>
@@ -1490,6 +1500,52 @@
 
 	.entry-history-add {
 		width: fit-content;
+	}
+
+	.form-sections {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.form-section-block {
+		border: 1.5px solid #d8dde4;
+		border-radius: 0.35rem;
+		overflow: hidden;
+	}
+
+	.form-section-summary {
+		font-size: 0.72rem;
+		letter-spacing: 0.08em;
+		color: var(--marker-black);
+		padding: 0.65rem 0.9rem;
+		cursor: pointer;
+		background: #f7f9fc;
+		user-select: none;
+		list-style: none;
+	}
+
+	.form-section-summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.form-section-summary::before {
+		content: '▶';
+		display: inline-block;
+		margin-right: 0.5rem;
+		font-size: 0.6rem;
+		transition: transform 0.15s ease;
+		color: var(--ink-soft);
+		vertical-align: middle;
+	}
+
+	details[open] > .form-section-summary::before {
+		transform: rotate(90deg);
+	}
+
+	.form-section-body {
+		padding: 1rem;
+		border-top: 1.5px solid #d8dde4;
 	}
 
 	@media (max-width: 640px) {

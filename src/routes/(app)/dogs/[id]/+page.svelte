@@ -90,6 +90,7 @@
 				dog.handlingLevel,
 				dog.surgeryDate,
 				dog.surgeryRestDays,
+				dog.awaitingEvaluation,
 				role,
 				today
 			)
@@ -675,19 +676,6 @@
 						<div class="kennel-sheet-main">
 							<div class="kennel-sections typewriter">
 								<details class="kennel-section" open>
-									<summary>Intake & Shelter</summary>
-									<div class="kennel-section-body kennel-facts">
-										<p><span>Original Entry:</span> <strong class="detail-value">{formatDate(dog.originalIntakeDate)}</strong></p>
-										<p><span>Current Entry:</span> <strong class="detail-value">{formatDate(dog.intakeDate)}</strong></p>
-										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate)}</strong></p>
-										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
-										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
-										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
-										<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : 'Adopted'}</strong></p>
-									</div>
-								</details>
-
-								<details class="kennel-section">
 									<summary>Profile</summary>
 									<div class="kennel-section-body kennel-facts">
 										<p><span>Breed:</span> <strong class="detail-value">{dog.breed || 'Unknown'}</strong></p>
@@ -698,6 +686,19 @@
 										<p><span>Weight:</span> <strong class="detail-value">{dog.weightLbs ? `${dog.weightLbs} lbs` : 'Unknown'}</strong></p>
 										<p><span>Energy:</span> <strong class="detail-value">{energyLabel(dog.energyLevel)}</strong></p>
 										<p><span>Microchipped:</span> <strong class="detail-value">{dog.isMicrochipped ? 'Yes' : 'No'}</strong></p>
+									</div>
+								</details>
+
+								<details class="kennel-section">
+									<summary>Intake & Shelter</summary>
+									<div class="kennel-section-body kennel-facts">
+										<p><span>Original Entry:</span> <strong class="detail-value">{formatDate(dog.originalIntakeDate)}</strong></p>
+										<p><span>Current Entry:</span> <strong class="detail-value">{formatDate(dog.intakeDate)}</strong></p>
+										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate)}</strong></p>
+										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
+										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
+										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
+										<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : 'Adopted'}</strong></p>
 									</div>
 								</details>
 
@@ -719,7 +720,10 @@
 								<details class="kennel-section">
 									<summary>Behavior & Home Fit</summary>
 									<div class="kennel-section-body kennel-facts">
-											<p><span>Description:</span> <strong class="detail-note">{dog.description || 'No additional profile notes logged yet.'}</strong></p>
+										<p><span>Description:</span> <strong class="detail-note">{dog.description || 'No additional profile notes logged yet.'}</strong></p>
+										{#if dog.hiddenComments}
+											<p><span>Hidden Comments:</span> <strong class="detail-note">{dog.hiddenComments}</strong></p>
+										{/if}
 										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
 										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
 										<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
@@ -737,13 +741,6 @@
 					{#if whiteboardNote}
 						<p class={`whiteboard-note ${whiteboardNoteToneClass}`}>{whiteboardNote}</p>
 					{/if}
-					{#if canEdit}
-						<div class="hidden-comments-block">
-							<p class="hidden-comments-label typewriter">Staff note</p>
-							<p class="hidden-comments-text {dog.hiddenComments ? '' : 'hidden-comments-empty'}">{dog.hiddenComments || 'No staff notes — edit to add.'}</p>
-						</div>
-					{/if}
-
 				<dl class="whiteboard-facts typewriter">
 					<div>
 						<dt>Isolation</dt>
