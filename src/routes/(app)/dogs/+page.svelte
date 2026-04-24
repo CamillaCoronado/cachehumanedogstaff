@@ -450,46 +450,53 @@ const today = new Date();
 			});
 		}
 
-		const dayTripGap = daysSince(dog.lastDayTripDate, today);
-		if (dayTripGap === null) {
-			items.push({
-				label: 'No day trip logged yet.',
-				tone: 'info',
-				priority: 68
-			});
-		} else if (dayTripGap >= ACTIVITY_DUE_DAYS) {
-			items.push({
-				label: `${dayTripGap} days since last day trip.`,
-				tone: 'info',
-				priority: 66
-			});
-		} else if (dayTripGap >= ACTIVITY_WARNING_DAYS) {
-			items.push({
-				label: `${dayTripGap} days since last day trip (watch).`,
-				tone: 'info',
-				priority: 64
-			});
+		if (tripEligibility.eligible) {
+			const dayTripGap = daysSince(dog.lastDayTripDate, today);
+			if (dayTripGap === null) {
+				items.push({
+					label: 'No day trip logged yet.',
+					tone: 'info',
+					priority: 68
+				});
+			} else if (dayTripGap >= ACTIVITY_DUE_DAYS) {
+				items.push({
+					label: `${dayTripGap} days since last day trip.`,
+					tone: 'info',
+					priority: 66
+				});
+			} else if (dayTripGap >= ACTIVITY_WARNING_DAYS) {
+				items.push({
+					label: `${dayTripGap} days since last day trip (watch).`,
+					tone: 'info',
+					priority: 64
+				});
+			}
 		}
 
-		const playgroupGap = daysSince(lastPlaygroupDate, today);
-		if (playgroupGap === null) {
-			items.push({
-				label: 'No playgroup logged yet.',
-				tone: 'info',
-				priority: 63
-			});
-		} else if (playgroupGap >= ACTIVITY_DUE_DAYS) {
-			items.push({
-				label: `${playgroupGap} days since last playgroup.`,
-				tone: 'info',
-				priority: 62
-			});
-		} else if (playgroupGap >= ACTIVITY_WARNING_DAYS) {
-			items.push({
-				label: `${playgroupGap} days since last playgroup (watch).`,
-				tone: 'info',
-				priority: 61
-			});
+		const playgroupReadyCutoff = toDate(dog.playgroupReadyDate) ??
+			(toDate(dog.intakeDate) ? new Date(toDate(dog.intakeDate)!.getTime() + 7 * 86_400_000) : null);
+		const isPlaygroupReady = playgroupReadyCutoff ? today >= playgroupReadyCutoff : false;
+		if (isPlaygroupReady) {
+			const playgroupGap = daysSince(lastPlaygroupDate, today);
+			if (playgroupGap === null) {
+				items.push({
+					label: 'No playgroup logged yet.',
+					tone: 'info',
+					priority: 63
+				});
+			} else if (playgroupGap >= ACTIVITY_DUE_DAYS) {
+				items.push({
+					label: `${playgroupGap} days since last playgroup.`,
+					tone: 'info',
+					priority: 62
+				});
+			} else if (playgroupGap >= ACTIVITY_WARNING_DAYS) {
+				items.push({
+					label: `${playgroupGap} days since last playgroup (watch).`,
+					tone: 'info',
+					priority: 61
+				});
+			}
 		}
 
 		const pendingEvaluation = missingEvaluations(dog);
