@@ -58,6 +58,8 @@ export function getAdoptionAvailability(
 		| 'dayTripManagerOnlyReason'
 		| 'dayTripNotes'
 		| 'handlingLevel'
+		| 'notAdoptable'
+		| 'notAdoptableReason'
 	>
 ): AdoptionAvailability {
 	const missingMedicalRequirements = missingAdoptionMedicalRequirements(dog);
@@ -68,6 +70,15 @@ export function getAdoptionAvailability(
 		dog.dayTripManagerOnly,
 		dog.isolationStatus
 	);
+
+	if (dog.notAdoptable) {
+		return {
+			available: false,
+			state: 'not_available',
+			missingMedicalRequirements: [],
+			holdReason: dog.notAdoptableReason ?? 'not adoptable'
+		};
+	}
 
 	if (dog.status === 'adopted') {
 		return {

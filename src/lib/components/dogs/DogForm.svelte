@@ -899,6 +899,36 @@
 					on:input={(event) => handleInput('healthProblems', event.currentTarget.value)}
 				></textarea>
 			</div>
+			<div class="form-section md:col-span-2">
+				<h4 class="form-section-title permanent-marker">Isolation Status</h4>
+				<div class="flex flex-wrap gap-2">
+					{#each isolationStatuses as iso}
+						<button
+							type="button"
+							class={`form-choice-btn ${
+								value.isolationStatus === iso.value
+									? iso.value === 'none' ? 'form-choice-green'
+									: 'form-choice-red'
+									: ''
+							}`}
+							disabled={disabled}
+							on:click={() => handleSelect('isolationStatus', iso.value)}
+						>
+							{iso.label}
+						</button>
+					{/each}
+				</div>
+				<div class="form-inline-row mt-3">
+					<label class="form-hint">Start Date:</label>
+					<input
+						type="date"
+						class="form-input form-inline-date"
+						disabled={disabled}
+						value={toDate(value.isolationStartDate)?.toISOString().slice(0, 10) ?? ''}
+						on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
+					/>
+				</div>
+			</div>
 		</div>
 	</details>
 
@@ -995,7 +1025,7 @@
 				/>
 				<p class="form-hint">Defaults to 7 days after intake. Adjust if this dog needs more or less time to decompress.</p>
 			</div>
-			<div class="form-field">
+			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Dog Evaluation</label>
 				<label class="flex items-center gap-2 cursor-pointer">
 					<input
@@ -1008,6 +1038,13 @@
 					<span class="text-sm" style="color: var(--marker-black);">Awaiting evaluation</span>
 				</label>
 				<p class="form-hint">Uncheck once dog compatibility has been assessed.</p>
+				<textarea
+					class="form-textarea mt-2"
+					disabled={disabled}
+					placeholder="Evaluation notes (behavior observations, compatibility results, etc.)"
+					value={value.evaluationNotes ?? ''}
+					on:input={(event) => handleInput('evaluationNotes', event.currentTarget.value)}
+				></textarea>
 			</div>
 			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Foster Status</label>
@@ -1023,6 +1060,29 @@
 				</label>
 				<p class="form-hint">If checked, this dog appears in the dashboard foster list.</p>
 			</div>
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Adoptability</label>
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled}
+						checked={value.notAdoptable ?? false}
+						on:change={(event) => handleCheckbox('notAdoptable', event.currentTarget.checked)}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Not adoptable</span>
+				</label>
+				{#if value.notAdoptable}
+					<input
+						type="text"
+						class="form-input mt-2"
+						disabled={disabled}
+						placeholder="Reason (e.g. bite risk, permanent foster)"
+						value={value.notAdoptableReason ?? ''}
+						on:input={(event) => handleInput('notAdoptableReason', event.currentTarget.value)}
+					/>
+				{/if}
+			</div>
 			<div class="form-field">
 				<label class="form-label typewriter">Record Status</label>
 				<select
@@ -1035,36 +1095,6 @@
 						<option value={option.value}>{option.label}</option>
 					{/each}
 				</select>
-			</div>
-			<div class="form-section md:col-span-2">
-				<h4 class="form-section-title permanent-marker">Isolation Status</h4>
-				<div class="flex flex-wrap gap-2">
-					{#each isolationStatuses as iso}
-						<button
-							type="button"
-							class={`form-choice-btn ${
-								value.isolationStatus === iso.value
-									? iso.value === 'none' ? 'form-choice-green'
-									: 'form-choice-red'
-									: ''
-							}`}
-							disabled={disabled}
-							on:click={() => handleSelect('isolationStatus', iso.value)}
-						>
-							{iso.label}
-						</button>
-					{/each}
-				</div>
-				<div class="form-inline-row mt-3">
-					<label class="form-hint">Start Date:</label>
-					<input
-						type="date"
-						class="form-input form-inline-date"
-						disabled={disabled}
-						value={toDate(value.isolationStartDate)?.toISOString().slice(0, 10) ?? ''}
-						on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
-					/>
-				</div>
 			</div>
 		</div>
 	</details>

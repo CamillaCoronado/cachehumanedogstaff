@@ -320,8 +320,8 @@ const today = new Date();
 		}
 		if (adoption.state === 'handling_hold') {
 			return adoption.holdReason
-				? `Adoption: Restricted (${adoption.holdReason})`
-				: 'Adoption: Restricted (handling plan)';
+				? `Adoption: Blocked (${adoption.holdReason})`
+				: 'Adoption: Blocked (handling plan)';
 		}
 		if (adoption.state === 'day_trip_hold') {
 			return adoption.holdReason
@@ -342,6 +342,7 @@ const today = new Date();
 	}
 
 	function isBathDue(dog: Dog) {
+		if (dog.inFoster) return false;
 		if (!bathEligible(dog.surgeryDate, today)) return false;
 		const sinceLastBath = daysSince(dog.lastBathDate, today);
 		return sinceLastBath === null || sinceLastBath >= BATH_DUE_DAYS;
@@ -383,6 +384,10 @@ const today = new Date();
 		} else {
 			for (const reason of tripEligibility.reasons) {
 				const normalized = reason.toLowerCase();
+				if (normalized.includes('difficult')) continue;
+				if (normalized.includes('must be vaccinated')) continue;
+				if (normalized.includes('must be spayed/neutered')) continue;
+				if (normalized.includes('blocked') || normalized.includes('hold')) continue;
 				let priority = 50;
 				if (normalized.includes('isolation')) priority = 95;
 				else if (normalized.includes('must be vaccinated')) priority = 90;
@@ -391,10 +396,8 @@ const today = new Date();
 				else if (normalized.includes('handling')) priority = 79;
 				else if (normalized.includes('manager only')) priority = 76;
 				else if (normalized.includes('behavior check')) priority = 75;
-				else if (normalized.includes('difficult')) priority = 60;
 				const managerOnlyNotice = normalized.includes('manager only');
-				const infoTone =
-					normalized.includes('difficult') || (managerOnlyNotice && tripEligibility.eligible);
+				const infoTone = managerOnlyNotice && tripEligibility.eligible;
 
 				items.push({
 					label: reason,
@@ -411,46 +414,9 @@ const today = new Date();
 				tone: 'info',
 				priority: 78
 			});
-		} else if (effectiveHandlingLevel === 'staff_only') {
-			items.push({
-				label: 'Handling level: staff-only.',
-				tone: 'info',
-				priority: 74
-			});
 		}
 
-		const adoption = getAdoptionAvailability(dog);
-		if (adoption.state === 'medical_hold') {
-			for (const requirement of adoption.missingMedicalRequirements) {
-				const action = adoptionRequirementAction(requirement);
-				items.push({
-					label: action.label,
-					tone: 'blocked',
-					priority: action.priority
-				});
-			}
-		} else if (adoption.state === 'handling_hold') {
-			items.push({
-				label: `Adoption restricted: ${adoption.holdReason ?? 'handling plan'}.`,
-				tone: 'blocked',
-				priority: 93
-			});
-		} else if (adoption.state === 'day_trip_hold') {
-			items.push({
-				label: `Adoption blocked: ${adoption.holdReason ?? 'care hold'}.`,
-				tone: 'blocked',
-				priority: 93
-			});
-		} else if (adoption.state === 'isolation_hold') {
-			const isolationReason = dog.isolationStatus === 'sick' ? 'Sick isolation' : 'Bite quarantine';
-			items.push({
-				label: `Adoption blocked: ${isolationReason}.`,
-				tone: 'blocked',
-				priority: 94
-			});
-		}
-
-		if (tripEligibility.eligible) {
+		if (!dog.awaitingEvaluation && tripEligibility.eligible) {
 			const dayTripGap = daysSince(dog.lastDayTripDate, today);
 			if (dayTripGap === null) {
 				items.push({
@@ -476,7 +442,7 @@ const today = new Date();
 		const playgroupReadyCutoff = toDate(dog.playgroupReadyDate) ??
 			(toDate(dog.intakeDate) ? new Date(toDate(dog.intakeDate)!.getTime() + 7 * 86_400_000) : null);
 		const isPlaygroupReady = playgroupReadyCutoff ? today >= playgroupReadyCutoff : false;
-		if (isPlaygroupReady) {
+		if (!dog.awaitingEvaluation && isPlaygroupReady) {
 			const playgroupGap = daysSince(lastPlaygroupDate, today);
 			if (playgroupGap === null) {
 				items.push({
@@ -517,14 +483,6 @@ const today = new Date();
 			});
 		}
 
-		if (dog.inFoster) {
-			items.push({
-				label: 'In foster: keep foster updates current.',
-				tone: 'info',
-				priority: 20
-			});
-		}
-
 		return items.sort((a, b) => b.priority - a.priority);
 	}
 
@@ -552,7 +510,6 @@ const today = new Date();
 	function adoptionColorClass(dog: Dog): string {
 		const adoption = getAdoptionAvailability(dog);
 		if (adoption.state === 'available') return 'card-pill-green';
-		if (adoption.state === 'handling_hold' || adoption.state === 'day_trip_hold' || adoption.state === 'isolation_hold') return 'card-pill-yellow';
 		return 'card-pill-red';
 	}
 

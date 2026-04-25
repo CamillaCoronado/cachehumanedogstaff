@@ -86,6 +86,9 @@ export interface Dog {
 	shelterSince?: DateValue | null;
 	playgroupReadyDate?: DateValue | null;
 	awaitingEvaluation?: boolean;
+	evaluationNotes?: string | null;
+	notAdoptable?: boolean;
+	notAdoptableReason?: string | null;
 	permanentFoster?: boolean;
 	isIncoming?: boolean;
 	asmId?: number | null;
