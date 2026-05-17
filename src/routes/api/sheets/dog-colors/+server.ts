@@ -1,5 +1,7 @@
 import { json, error } from '@sveltejs/kit';
-import { PUBLIC_FIREBASE_API_KEY } from '$env/static/public';
+import { env } from '$env/dynamic/public';
+
+const API_KEY = env.PUBLIC_FIREBASE_API_KEY ?? 'AIzaSyBYBJpvxuZ1XZjym7cu_nWG2SR-e-lmAZM';
 
 const SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
 const SHEET_NAME = 'DT Numbers';
@@ -17,11 +19,11 @@ function classifyColor(r: number, g: number, b: number): 'green' | 'yellow' | 'r
 }
 
 export async function GET() {
-	if (!PUBLIC_FIREBASE_API_KEY) throw error(503, 'API key not configured');
+	if (!API_KEY) throw error(503, 'API key not configured');
 
 	const range = encodeURIComponent(`${SHEET_NAME}!A:A`);
 	const fields = encodeURIComponent('sheets(data(rowData(values(userEnteredFormat/backgroundColor,formattedValue))))');
-	const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?ranges=${range}&fields=${fields}&key=${PUBLIC_FIREBASE_API_KEY}`;
+	const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?ranges=${range}&fields=${fields}&key=${API_KEY}`;
 
 	let res: Response;
 	try {
