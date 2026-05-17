@@ -40,6 +40,7 @@ const today = new Date();
 	let filterGoodWithDogs = false;
 	let filterGoodWithCats = false;
 	let filterGoodWithKids = false;
+	let filterAdoptable = false;
 	let expandedPill = new Map<string, 'handling' | 'adoption' | 'trip'>();
 
 	function togglePill(dogId: string, pill: 'handling' | 'adoption' | 'trip') {
@@ -78,6 +79,7 @@ const today = new Date();
 		.filter((dog) => filterGoodWithDogs ? dog.goodWithDogs === 'yes' : true)
 		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
 		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
+		.filter((dog) => filterAdoptable ? getAdoptionAvailability(dog).available : true)
 		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog, sheetColors) === stripeFilter)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
@@ -704,6 +706,12 @@ const today = new Date();
 						class={`sort-chip ${filterGoodWithKids ? 'sort-chip-active' : ''}`}
 						on:click={() => (filterGoodWithKids = !filterGoodWithKids)}
 					>kids</button>
+				</div>
+				<div class="archived-filter-group">
+					<button
+						class={`sort-chip ${filterAdoptable ? 'sort-chip-active' : ''}`}
+						on:click={() => (filterAdoptable = !filterAdoptable)}
+					>adoptable only</button>
 				</div>
 				<div class="archived-filter-group" role="group" aria-label="Filter by status color">
 					<span class="control-label typewriter">status</span>
