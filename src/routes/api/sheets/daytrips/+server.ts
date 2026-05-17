@@ -4,7 +4,7 @@ const SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
 const GID = '1548223211';
 
 function parseDogName(raw: string): string {
-	return raw.replace(/\s*\(\d+\)\s*$/, '').trim();
+	return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
 }
 
 function parseSheetDate(raw: string): string | null {

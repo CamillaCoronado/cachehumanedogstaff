@@ -34,12 +34,14 @@
 		toDate,
 		checkDayTripEligibility
 	} from '$lib/utils/dates';
+	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 	let dog: Dog | null = null;
+	let photoLoadFailed = false;
 	let loading = true;
 	let editMode = false;
 	let formValid = true;
@@ -216,7 +218,7 @@
 		: adoptionReasonBadge
 			? `Adoption: Unavailable (${adoptionReasonBadge})`
 			: 'Adoption: Unavailable';
-	$: whiteboardStatusTagClass = dog ? `whiteboard-tag-${dogStripeColor(dog)}` : 'whiteboard-tag-green';
+	$: whiteboardStatusTagClass = dog ? `whiteboard-tag-${dogStripeColor(dog, sheetColors)}` : 'whiteboard-tag-green';
 	$: stripHasCarefulWarning =
 		Boolean(dog) &&
 		!dog.isOutOnDayTrip &&
@@ -299,7 +301,11 @@
 	async function loadAll() {
 		loading = true;
 		activeStatusInfo = null;
-		dog = await getDog(dogId);
+		photoLoadFailed = false;
+		[dog] = await Promise.all([
+			getDog(dogId),
+			fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({})).then(c => { sheetColors = c; })
+		]);
 		if (dog) {
 			[notes, bathLogs, feedingLogs, stoolLogs, dayTripLogs] = await Promise.all([
 				listBehavioralNotes(dogId),
@@ -587,12 +593,13 @@
 						<div class="kennel-photo">
 							<div class="kennel-photo-frame">
 								<div class={`photo-corner-stripe ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
-								{#if dog.photoUrl}
+								{#if dog.photoUrl && !photoLoadFailed}
 									<img
 										class="kennel-photo-image"
 										src={dog.photoUrl}
 										alt={`Photo of ${dog.name}`}
 										loading="lazy"
+										on:error={() => { photoLoadFailed = true; }}
 									/>
 								{:else}
 									<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>

@@ -29,12 +29,17 @@
 const today = new Date();
 
 	let dogs: Dog[] = [];
+	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
+	let failedPhotos = new Set<string>();
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
 	let loading = true;
 	let search = '';
 	let viewMode: 'active' | 'all' | 'archived' = 'active';
 	let fosterOnly = false;
 	let incomingOnly = false;
+	let filterGoodWithDogs = false;
+	let filterGoodWithCats = false;
+	let filterGoodWithKids = false;
 	let expandedPill = new Map<string, 'handling' | 'adoption' | 'trip'>();
 
 	function togglePill(dogId: string, pill: 'handling' | 'adoption' | 'trip') {
@@ -70,7 +75,10 @@ const today = new Date();
 		)
 		.filter((dog) => fosterOnly ? dog.inFoster : true)
 		.filter((dog) => incomingOnly ? dog.isIncoming : true)
-		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
+		.filter((dog) => filterGoodWithDogs ? dog.goodWithDogs === 'yes' : true)
+		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
+		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
+		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog, sheetColors) === stripeFilter)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
 		const direction = sortDir === 'asc' ? 1 : -1;
@@ -174,7 +182,13 @@ const today = new Date();
 
 	async function refreshDogs() {
 		loading = true;
-		const [dogRows, playgroupRows] = await Promise.all([listDogs(), listPlaygroupSessions()]);
+		failedPhotos = new Set();
+		const [dogRows, playgroupRows, colorsRes] = await Promise.all([
+			listDogs(),
+			listPlaygroupSessions(),
+			fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+		]);
+		sheetColors = colorsRes;
 		dogs = dogRows;
 		lastPlaygroupByDogId = buildLastPlaygroupMap(playgroupRows);
 		loading = false;
@@ -497,9 +511,6 @@ const today = new Date();
 		return sortDir === 'asc' ? ' ↑' : ' ↓';
 	}
 
-	function photoStripeClass(dog: Dog): string {
-		return `card-stripe-${dogStripeColor(dog)}`;
-	}
 
 	function handlingColorClass(level: Dog['handlingLevel']): string {
 		if (level === 'manager_only') return 'card-pill-red';
@@ -679,6 +690,21 @@ const today = new Date();
 						incoming only
 					</button>
 				</div>
+				<div class="archived-filter-group" role="group" aria-label="Filter by compatibility">
+					<span class="control-label typewriter">good with</span>
+					<button
+						class={`sort-chip ${filterGoodWithDogs ? 'sort-chip-active' : ''}`}
+						on:click={() => (filterGoodWithDogs = !filterGoodWithDogs)}
+					>dogs</button>
+					<button
+						class={`sort-chip ${filterGoodWithCats ? 'sort-chip-active' : ''}`}
+						on:click={() => (filterGoodWithCats = !filterGoodWithCats)}
+					>cats</button>
+					<button
+						class={`sort-chip ${filterGoodWithKids ? 'sort-chip-active' : ''}`}
+						on:click={() => (filterGoodWithKids = !filterGoodWithKids)}
+					>kids</button>
+				</div>
 				<div class="archived-filter-group" role="group" aria-label="Filter by status color">
 					<span class="control-label typewriter">status</span>
 					<button
@@ -728,9 +754,9 @@ const today = new Date();
 								<header class="dog-card-header">
 									<div class="card-photo-wrap">
 										<div class="card-photo-frame">
-											<div class={`card-photo-stripe ${photoStripeClass(dog)}`} aria-hidden="true"></div>
-											{#if dog.photoUrl}
-												<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true" />
+											<div class={`card-photo-stripe card-stripe-${dogStripeColor(dog, sheetColors)}`} aria-hidden="true"></div>
+											{#if dog.photoUrl && !failedPhotos.has(dog.id)}
+												<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true" on:error={() => { failedPhotos = new Set([...failedPhotos, dog.id]); }} />
 											{:else}
 												<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>
 											{/if}

@@ -113,6 +113,9 @@ interface AsmAnimal {
 	MOSTRECENTENTRYDATE: string | null;
 	// Photos
 	PHOTOURLS: string[];
+	WEBSITEIMAGECOUNT?: number | null;
+	WEBSITEMEDIANAME?: string | null;
+	WEBSITEMEDIADATE?: string | null;
 	// 1 = permanent foster (will not return to shelter)
 	HASPERMANENTFOSTER: number;
 	// Non-zero = animal has left shelter. 2 = foster, 1 = adoption, 3 = transfer, etc.

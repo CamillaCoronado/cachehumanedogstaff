@@ -245,7 +245,15 @@ export function checkDayTripEligibility(
 	return { eligible, status, reasons };
 }
 
-export function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
+export function dogStripeColor(
+	dog: Dog,
+	sheetColors?: Record<string, 'green' | 'yellow' | 'red'>
+): 'green' | 'yellow' | 'red' {
+	if (sheetColors) {
+		const name = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+		const sheetColor = sheetColors[name];
+		if (sheetColor) return sheetColor;
+	}
 	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly, dog.isolationStatus);
 	if (dog.isolationStatus !== 'none') return 'red';
 	if (level === 'manager_only' || level === 'staff_only') return 'red';

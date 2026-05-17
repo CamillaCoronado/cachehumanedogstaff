@@ -12,6 +12,7 @@
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
 	let dogs: Dog[] = [];
+	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	let logs: DayTripLog[] = [];
 	let loading = true;
 	let monthFilter = defaultMonth;
@@ -512,7 +513,11 @@
 	async function refresh() {
 		loading = true;
 		try {
-			[dogs, logs] = await Promise.all([listDogs(), listAllDayTripLogs()]);
+			[dogs, logs, sheetColors] = await Promise.all([
+				listDogs(),
+				listAllDayTripLogs(),
+				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+			]);
 		} catch (error) {
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
 			toast.error(code ? `Unable to load day trip data (${code}).` : 'Unable to load day trip data.');
@@ -620,12 +625,12 @@
 					{#if dogsEligible.length === 0}
 						<p class="cal-empty">None ready</p>
 					{:else}
-						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d) === boardColorFilter) as dog}
+						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
 							{@const days = daysSince(dog.lastDayTripDate)}
 							{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
 							{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
-							{@const stripe = dogStripeColor(dog)}
+							{@const stripe = dogStripeColor(dog, sheetColors)}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name">{dog.name}</p>
@@ -653,9 +658,9 @@
 					{#if dogsIneligible.length === 0}
 						<p class="cal-empty">None</p>
 					{:else}
-						{#each dogsIneligible.filter(d => !boardColorFilter || dogStripeColor(d) === boardColorFilter) as dog}
+						{#each dogsIneligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
-							{@const stripe = dogStripeColor(dog)}
+							{@const stripe = dogStripeColor(dog, sheetColors)}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name">{dog.name}</p>
 								<p class="cal-event-meta">{eligibility.reasons[0] ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>

@@ -26,6 +26,8 @@
 	let lastAutoFoodAmount = '';
 	let photoUploadError = '';
 	let photoUploading = false;
+	let photoLoadFailed = false;
+	$: if (value.photoUrl) photoLoadFailed = false;
 	const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 	const MAX_PHOTO_DATA_URL_LENGTH = 900_000;
 	const MAX_PHOTO_SIDE = 1200;
@@ -486,12 +488,13 @@
 				<label class="form-label typewriter">Photo</label>
 				<div class="form-photo-shell">
 					<div class="form-photo-preview-wrap">
-						{#if value.photoUrl}
+						{#if value.photoUrl && !photoLoadFailed}
 							<img
 								class="form-photo-preview"
 								src={value.photoUrl}
 								alt={`Photo of ${value.name || 'dog'}`}
 								loading="lazy"
+								on:error={() => { photoLoadFailed = true; }}
 							/>
 						{:else}
 							<div class="form-photo-placeholder typewriter">No photo uploaded</div>
@@ -505,7 +508,7 @@
 							disabled={disabled || photoUploading}
 							on:change={handlePhotoUpload}
 						/>
-						{#if value.photoUrl}
+						{#if value.photoUrl && !photoLoadFailed}
 							<button
 								type="button"
 								class="form-choice-btn"

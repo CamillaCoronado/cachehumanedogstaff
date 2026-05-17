@@ -31,5 +31,18 @@ export async function GET() {
 		throw error(502, `ASM returned non-JSON: ${text.slice(0, 200)}`);
 	}
 
+	// When PHOTOURLS is absent or empty, inject a constructed animal_image URL.
+	// This covers photos that exist in ASM but aren't marked for web publication,
+	// which causes PHOTOURLS to be empty. The URL is stable (same animal ID),
+	// so the sync comparison won't flip on every run. Animals with no photo at all
+	// will get a URL that returns nothing — handled by onerror in the UI.
+	if (Array.isArray(data)) {
+		data = data.map((animal: Record<string, unknown>) => {
+			if (Array.isArray(animal.PHOTOURLS) && animal.PHOTOURLS.length > 0) return animal;
+			const fallbackUrl = `${ASM_URL}/asmservice?method=animal_image&account=${encodeURIComponent(ASM_ACCOUNT)}&animalid=${encodeURIComponent(String(animal.ID))}&seq=1`;
+			return { ...animal, PHOTOURLS: [fallbackUrl] };
+		});
+	}
+
 	return json(data);
 }
