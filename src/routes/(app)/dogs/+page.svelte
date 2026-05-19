@@ -762,10 +762,13 @@ const today = new Date();
 							<div class="dog-card-body">
 								<header class="dog-card-header">
 									<div class="card-photo-wrap">
-										<div class="card-photo-frame">
+										<div
+											class="card-photo-frame"
+											style={dog.photoUrl && !failedPhotos.has(dog.id) ? `background-image:url('${dog.photoUrl}')` : ''}
+										>
 											<div class={`card-photo-stripe card-stripe-${dogStripeColor(dog, sheetColors)}`} aria-hidden="true"></div>
 											{#if dog.photoUrl && !failedPhotos.has(dog.id)}
-												<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true"
+												<img src={dog.photoUrl} alt="" style="display:none"
 													on:error={() => { failedPhotos = new Set([...failedPhotos, dog.id]); }}
 													on:load={markPhotoFailed(dog.id)}
 												/>
@@ -1371,23 +1374,14 @@ const today = new Date();
 		aspect-ratio: 3 / 4;
 		border: 1px solid #d4deeb;
 		border-radius: 0.5rem;
-		background: #eef3fb;
+		background-color: #eef3fb;
+		background-size: cover;
+		background-position: center;
+		background-repeat: no-repeat;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		overflow: hidden;
-	}
-
-	.card-photo-img {
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-		display: block;
 	}
 
 	.card-photo-initial {

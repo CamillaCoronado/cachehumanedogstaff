@@ -592,17 +592,15 @@
 					<div class="kennel-sheet-inner">
 						<p class="kennel-name kennel-name-top">{dog.name}</p>
 						<div class="kennel-photo">
-							<div class="kennel-photo-frame">
+							<div
+								class="kennel-photo-frame"
+								style={dog.photoUrl && !photoLoadFailed ? `background-image:url('${dog.photoUrl}')` : ''}
+							>
 								<div class={`photo-corner-stripe ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
 								{#if dog.photoUrl && !photoLoadFailed}
-									<img
-										class="kennel-photo-image"
-										src={dog.photoUrl}
-										alt={`Photo of ${dog.name}`}
-										loading="lazy"
+									<img src={dog.photoUrl} alt="" style="display:none"
 										on:error={() => { photoLoadFailed = true; }}
 										on:load={handlePhotoLoad}
-
 									/>
 								{:else}
 									<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
@@ -1330,7 +1328,10 @@
 		aspect-ratio: 3 / 4;
 		border: 1px solid #d4deeb;
 		border-radius: 0.7rem;
-		background: #eef3fb;
+		background-color: #eef3fb;
+		background-size: cover;
+		background-position: center;
+		background-repeat: no-repeat;
 		color: #7e8fa3;
 		font-family: var(--font-ui);
 		font-size: 2.4rem;
@@ -1352,17 +1353,6 @@
 		z-index: 2;
 	}
 
-	.kennel-photo-image {
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-		display: block;
-	}
 
 	.kennel-photo-label {
 		margin: 0;
