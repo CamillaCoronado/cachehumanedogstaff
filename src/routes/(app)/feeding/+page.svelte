@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
-	import { listDogs, addFeedingLog, updateFeedingLog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
+	import { listDogs, addFeedingLog, updateFeedingLog, updateDog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
 	import { formatDate, isSameCalendarDay, isSurgeryToday } from '$lib/utils/dates';
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -178,6 +178,8 @@
 	let feedingLogs: Record<string, FeedingLog[]> = {};
 	let stoolLogs: Record<string, StoolLog[]> = {};
 	let loading = true;
+	let editingAmountId: string | null = null;
+	let editingAmountValue = '';
 	let mealTime: MealTime = new Date().getHours() < 12 ? 'am' : 'pm';
 	const selectedDay = new Date();
 	let markingAll = false;
@@ -301,6 +303,25 @@
 		if (value) return value;
 		const estimated = estimateFoodAmountPerMeal({ weightLbs: dog.weightLbs, dateOfBirth: dog.dateOfBirth, foodType: dog.foodType });
 		return estimated || '—';
+	}
+
+	function focusAndSelect(el: HTMLInputElement) { el.focus(); el.select(); }
+
+	function startEditAmount(dog: Dog) {
+		editingAmountId = dog.id;
+		editingAmountValue = dog.foodAmount?.trim() ?? '';
+	}
+
+	async function saveAmount(dog: Dog) {
+		const trimmed = editingAmountValue.trim();
+		editingAmountId = null;
+		if (trimmed === (dog.foodAmount?.trim() ?? '')) return;
+		try {
+			await updateDog(dog.id, { foodAmount: trimmed });
+			dogs = dogs.map((d) => d.id === dog.id ? { ...d, foodAmount: trimmed } : d);
+		} catch {
+			toast.error(`Could not update ${dog.name}'s food amount.`);
+		}
 	}
 
 	function hasSupplements(dog: Dog) {
@@ -650,7 +671,20 @@
 								<div class="feeding-feed-plan">
 									<p class="feeding-feed-amount">
 										<span class="feeding-feed-amount-label">Feed</span>
-										<span>{foodAmountLabel(dog)}</span>
+										{#if editingAmountId === dog.id}
+											<input
+												class="feeding-amount-input"
+												type="text"
+												bind:value={editingAmountValue}
+												on:blur={() => saveAmount(dog)}
+												on:keydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { editingAmountId = null; } }}
+												use:focusAndSelect
+											/>
+										{:else}
+											<button class="feeding-amount-btn" on:click={() => startEditAmount(dog)}>
+												{foodAmountLabel(dog)}
+											</button>
+										{/if}
 									</p>
 									<p class={`feeding-feed-type feeding-feed-type-${foodTypeTone(dog)}`}>
 										{foodTypeInstruction(dog)}
@@ -1378,6 +1412,35 @@
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 		color: #4f6681;
+	}
+
+	.feeding-amount-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+		text-decoration: underline;
+		text-decoration-style: dotted;
+		text-decoration-color: #9ab8d4;
+	}
+
+	.feeding-amount-btn:hover {
+		text-decoration-color: #2f79b6;
+	}
+
+	.feeding-amount-input {
+		width: 6rem;
+		font-family: var(--font-ui);
+		font-size: clamp(1.05rem, 4vw, 1.28rem);
+		font-weight: 700;
+		color: #2f79b6;
+		border: none;
+		border-bottom: 2px solid #2f79b6;
+		background: transparent;
+		outline: none;
+		padding: 0;
 	}
 
 	.feeding-feed-type {
