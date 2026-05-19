@@ -26,6 +26,7 @@
 			| 'cleaning'
 			| 'daytrips'
 			| 'playgroups'
+			| 'medical'
 			| 'admin';
 	};
 
@@ -38,6 +39,7 @@
 	];
 	const dayTripsTab: TabItem = { href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' };
 	const playgroupsTab: TabItem = { href: '/playgroups', label: 'Playgroups', colorClass: 'tab-blue', icon: 'playgroups' };
+	const medicalTab: TabItem = { href: '/medical', label: 'Medical', colorClass: 'tab-red', icon: 'medical' };
 	const adminTab: TabItem = { href: '/admin', label: 'Admin', colorClass: 'tab-accent', icon: 'admin' };
 	let tabs: TabItem[] = baseTabs;
 
@@ -116,6 +118,7 @@
 		...baseTabs,
 		...(canViewDayTrips ? [dayTripsTab] : []),
 		...(canViewPlaygroups ? [playgroupsTab] : []),
+		medicalTab,
 		...(isAdmin ? [adminTab] : [])
 	];
 	$: currentTabIndex = resolveTabIndex(currentPath);
@@ -325,6 +328,8 @@
 											<circle cx="16" cy="10.2" r="2"></circle>
 											<path d="M4.7 18c.6-2.2 2.5-3.7 4.3-3.7s3.7 1.5 4.3 3.7"></path>
 											<path d="M14.4 17.5c.4-1.6 1.8-2.7 3.3-2.7 1.2 0 2.2.6 2.9 1.7"></path>
+										{:else if tab.icon === 'medical'}
+											<path d="M12 5v14M5 12h14" stroke-linecap="round"></path>
 										{:else if tab.icon === 'admin'}
 											<path d="M12 3.8 18.7 6.7v4.1c0 4.2-2.6 7.7-6.7 9.4C7.9 18.5 5.3 15 5.3 10.8V6.7z"></path>
 											<path d="M12 8.4v4.7"></path>
@@ -891,6 +896,10 @@
 
 	.tab-accent {
 		--tab-accent: var(--layout-accent);
+	}
+
+	.tab-red {
+		--tab-accent: var(--layout-danger, #cf4b4b);
 	}
 
 	.menu-account {
