@@ -1323,6 +1323,7 @@
 	.kennel-photo-frame {
 		position: relative;
 		width: min(66vw, 10.5rem);
+		height: min(88vw, 14rem);
 		aspect-ratio: 3 / 4;
 		border: 1px solid #d4deeb;
 		border-radius: 0.7rem;

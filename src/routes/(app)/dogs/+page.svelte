@@ -1363,6 +1363,7 @@ const today = new Date();
 	.card-photo-frame {
 		position: relative;
 		width: 5rem;
+		height: 6.67rem;
 		aspect-ratio: 3 / 4;
 		border: 1px solid #d4deeb;
 		border-radius: 0.5rem;

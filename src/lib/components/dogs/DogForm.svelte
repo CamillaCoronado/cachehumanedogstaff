@@ -1417,6 +1417,7 @@
 
 	.form-photo-preview {
 		width: min(14rem, 100%);
+		height: min(18.67rem, calc(100% * 4 / 3));
 		aspect-ratio: 3 / 4;
 		object-fit: cover;
 		border: 1.5px solid #c0c8d2;
@@ -1426,6 +1427,7 @@
 
 	.form-photo-placeholder {
 		width: min(14rem, 100%);
+		height: min(18.67rem, calc(100% * 4 / 3));
 		aspect-ratio: 3 / 4;
 		display: flex;
 		align-items: center;
