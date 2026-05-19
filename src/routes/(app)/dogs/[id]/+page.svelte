@@ -42,6 +42,7 @@
 
 	let dog: Dog | null = null;
 	let photoLoadFailed = false;
+	function handlePhotoLoad(e: Event) { if ((e.currentTarget as HTMLImageElement).naturalWidth === 0) photoLoadFailed = true; }
 	let loading = true;
 	let editMode = false;
 	let formValid = true;
@@ -600,6 +601,8 @@
 										alt={`Photo of ${dog.name}`}
 										loading="lazy"
 										on:error={() => { photoLoadFailed = true; }}
+										on:load={handlePhotoLoad}
+
 									/>
 								{:else}
 									<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>

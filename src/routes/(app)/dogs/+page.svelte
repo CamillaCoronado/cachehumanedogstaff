@@ -31,6 +31,7 @@ const today = new Date();
 	let dogs: Dog[] = [];
 	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	let failedPhotos = new Set<string>();
+	function markPhotoFailed(dogId: string) { return (e: Event) => { if ((e.currentTarget as HTMLImageElement).naturalWidth === 0) failedPhotos = new Set([...failedPhotos, dogId]); }; }
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
 	let loading = true;
 	let search = '';
@@ -764,7 +765,10 @@ const today = new Date();
 										<div class="card-photo-frame">
 											<div class={`card-photo-stripe card-stripe-${dogStripeColor(dog, sheetColors)}`} aria-hidden="true"></div>
 											{#if dog.photoUrl && !failedPhotos.has(dog.id)}
-												<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true" on:error={() => { failedPhotos = new Set([...failedPhotos, dog.id]); }} />
+												<img class="card-photo-img" src={dog.photoUrl} alt="" aria-hidden="true"
+													on:error={() => { failedPhotos = new Set([...failedPhotos, dog.id]); }}
+													on:load={markPhotoFailed(dog.id)}
+												/>
 											{:else}
 												<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>
 											{/if}
