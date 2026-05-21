@@ -178,8 +178,9 @@
 	let feedingLogs: Record<string, FeedingLog[]> = {};
 	let stoolLogs: Record<string, StoolLog[]> = {};
 	let loading = true;
-	let editingAmountId: string | null = null;
-	let editingAmountValue = '';
+	let editingFeedId: string | null = null;
+	let feedDraft: { foodType: string; foodAmount: string; dietaryNotes: string; hasOwnFood: boolean; transitionToHills: boolean | null } = { foodType: '', foodAmount: '', dietaryNotes: '', hasOwnFood: false, transitionToHills: null };
+	let savingFeed = false;
 	let mealTime: MealTime = new Date().getHours() < 12 ? 'am' : 'pm';
 	const selectedDay = new Date();
 	let markingAll = false;
@@ -305,22 +306,40 @@
 		return estimated || '—';
 	}
 
-	function focusAndSelect(el: HTMLInputElement) { el.focus(); el.select(); }
-
-	function startEditAmount(dog: Dog) {
-		editingAmountId = dog.id;
-		editingAmountValue = dog.foodAmount?.trim() ?? '';
+	function startEditFeed(dog: Dog) {
+		editingFeedId = dog.id;
+		feedDraft = {
+			foodType: dog.foodType ?? '',
+			foodAmount: dog.foodAmount ?? '',
+			dietaryNotes: dog.dietaryNotes ?? '',
+			hasOwnFood: dog.hasOwnFood ?? false,
+			transitionToHills: dog.transitionToHills ?? null
+		};
 	}
 
-	async function saveAmount(dog: Dog) {
-		const trimmed = editingAmountValue.trim();
-		editingAmountId = null;
-		if (trimmed === (dog.foodAmount?.trim() ?? '')) return;
+	async function saveFeed(dog: Dog) {
+		savingFeed = true;
 		try {
-			await updateDog(dog.id, { foodAmount: trimmed });
-			dogs = dogs.map((d) => d.id === dog.id ? { ...d, foodAmount: trimmed } : d);
+			await updateDog(dog.id, {
+				foodType: feedDraft.foodType.trim(),
+				foodAmount: feedDraft.foodAmount.trim(),
+				dietaryNotes: feedDraft.dietaryNotes.trim(),
+				hasOwnFood: feedDraft.hasOwnFood,
+				transitionToHills: feedDraft.transitionToHills
+			});
+			dogs = dogs.map((d) => d.id === dog.id ? {
+				...d,
+				foodType: feedDraft.foodType.trim(),
+				foodAmount: feedDraft.foodAmount.trim(),
+				dietaryNotes: feedDraft.dietaryNotes.trim(),
+				hasOwnFood: feedDraft.hasOwnFood,
+				transitionToHills: feedDraft.transitionToHills
+			} : d);
+			editingFeedId = null;
 		} catch {
-			toast.error(`Could not update ${dog.name}'s food amount.`);
+			toast.error(`Could not update ${dog.name}'s feeding info.`);
+		} finally {
+			savingFeed = false;
 		}
 	}
 
@@ -669,35 +688,75 @@
 									{/if}
 								</div>
 								<div class="feeding-feed-plan">
-									<p class="feeding-feed-amount">
-										<span class="feeding-feed-amount-label">Feed</span>
-										{#if editingAmountId === dog.id}
-											<input
-												class="feeding-amount-input"
-												type="text"
-												bind:value={editingAmountValue}
-												on:blur={() => saveAmount(dog)}
-												on:keydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { editingAmountId = null; } }}
-												use:focusAndSelect
-											/>
-										{:else}
-											<button class="feeding-amount-btn" on:click={() => startEditAmount(dog)}>
+									{#if editingFeedId === dog.id}
+										<div class="feed-edit-panel">
+											<div class="feed-edit-row">
+												<label class="feed-edit-label typewriter" for="feed-type-{dog.id}">Type</label>
+												<input id="feed-type-{dog.id}" class="feed-edit-input" type="text" bind:value={feedDraft.foodType} placeholder="Normal" />
+											</div>
+											<div class="feed-edit-row">
+												<label class="feed-edit-label typewriter" for="feed-amount-{dog.id}">Amount</label>
+												<input id="feed-amount-{dog.id}" class="feed-edit-input" type="text" bind:value={feedDraft.foodAmount} placeholder="e.g. 2 cups" />
+											</div>
+											<div class="feed-edit-row">
+												<label class="feed-edit-label typewriter" for="feed-notes-{dog.id}">Notes</label>
+												<input id="feed-notes-{dog.id}" class="feed-edit-input" type="text" bind:value={feedDraft.dietaryNotes} placeholder="Dietary notes" />
+											</div>
+											<div class="feed-edit-checks">
+												<label class="feed-edit-check">
+													<input type="checkbox" bind:checked={feedDraft.hasOwnFood} />
+													Own food
+												</label>
+												{#if feedDraft.hasOwnFood}
+													<label class="feed-edit-check">
+														<input type="checkbox"
+															checked={feedDraft.transitionToHills === true}
+															on:change={(e) => { feedDraft.transitionToHills = e.currentTarget.checked ? true : null; }}
+														/>
+														Transition to Hills
+													</label>
+													<label class="feed-edit-check">
+														<input type="checkbox"
+															checked={feedDraft.transitionToHills === false}
+															on:change={(e) => { feedDraft.transitionToHills = e.currentTarget.checked ? false : null; }}
+														/>
+														No Hills transition
+													</label>
+												{/if}
+											</div>
+											<div class="feed-edit-actions">
+												<button class="feed-edit-save" on:click={() => saveFeed(dog)} disabled={savingFeed}>
+													{savingFeed ? '…' : 'Save'}
+												</button>
+												<button class="feed-edit-cancel" on:click={() => { editingFeedId = null; }}>Cancel</button>
+											</div>
+										</div>
+									{:else}
+										<p class="feeding-feed-amount">
+											<span class="feeding-feed-amount-label">Feed</span>
+											<button class="feeding-amount-btn" on:click={() => startEditFeed(dog)}>
 												{foodAmountLabel(dog)}
 											</button>
+										</p>
+										<p class={`feeding-feed-type feeding-feed-type-${foodTypeTone(dog)}`}>
+											<button class="feed-type-edit-btn" on:click={() => startEditFeed(dog)}>
+												{foodTypeInstruction(dog)}
+											</button>
+										</p>
+										{#if flags.length > 0}
+											<div class="feeding-feed-tags">
+												{#each flags as flag}
+													<span class={`feeding-feed-tag ${flag === 'Allergy' ? 'feeding-feed-tag-allergy' : ''}`}>{flag}</span>
+												{/each}
+											</div>
 										{/if}
-									</p>
-									<p class={`feeding-feed-type feeding-feed-type-${foodTypeTone(dog)}`}>
-										{foodTypeInstruction(dog)}
-									</p>
-									{#if flags.length > 0}
-										<div class="feeding-feed-tags">
-											{#each flags as flag}
-												<span class={`feeding-feed-tag ${flag === 'Allergy' ? 'feeding-feed-tag-allergy' : ''}`}>{flag}</span>
-											{/each}
-										</div>
-									{/if}
-									{#if notes}
-										<p class="feeding-feed-notes"><span>Notes:</span> {notes}</p>
+										{#if notes}
+											<p class="feeding-feed-notes">
+												<button class="feed-notes-edit-btn" on:click={() => startEditFeed(dog)}>
+													<span>Notes:</span> {notes}
+												</button>
+											</p>
+										{/if}
 									{/if}
 								</div>
 								<div class="feeding-feed-actions">
@@ -1430,17 +1489,107 @@
 		text-decoration-color: #2f79b6;
 	}
 
-	.feeding-amount-input {
-		width: 6rem;
-		font-family: var(--font-ui);
-		font-size: clamp(1.05rem, 4vw, 1.28rem);
-		font-weight: 700;
-		color: #2f79b6;
+	.feed-type-edit-btn,
+	.feed-notes-edit-btn {
+		background: none;
 		border: none;
-		border-bottom: 2px solid #2f79b6;
-		background: transparent;
-		outline: none;
 		padding: 0;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+		text-align: left;
+		text-decoration: underline;
+		text-decoration-style: dotted;
+		text-decoration-color: rgba(0,0,0,0.2);
+	}
+
+	.feed-type-edit-btn:hover,
+	.feed-notes-edit-btn:hover {
+		text-decoration-color: currentColor;
+	}
+
+	.feed-edit-panel {
+		display: grid;
+		gap: 0.4rem;
+	}
+
+	.feed-edit-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.feed-edit-label {
+		font-size: 0.6rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #7a8fa0;
+		flex-shrink: 0;
+		width: 3.2rem;
+	}
+
+	.feed-edit-input {
+		flex: 1;
+		font-family: var(--font-ui);
+		font-size: 0.82rem;
+		border: 1px solid #c4d6e8;
+		border-radius: 0.36rem;
+		padding: 0.22rem 0.42rem;
+		background: #f8fbff;
+		color: #133149;
+		min-width: 0;
+	}
+
+	.feed-edit-checks {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 0.9rem;
+		padding-left: 3.7rem;
+	}
+
+	.feed-edit-check {
+		display: flex;
+		align-items: center;
+		gap: 0.28rem;
+		font-family: var(--font-ui);
+		font-size: 0.75rem;
+		color: #3f5568;
+		cursor: pointer;
+	}
+
+	.feed-edit-actions {
+		display: flex;
+		gap: 0.4rem;
+		padding-left: 3.7rem;
+		margin-top: 0.1rem;
+	}
+
+	.feed-edit-save {
+		font-family: var(--font-typewriter);
+		font-size: 0.62rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		padding: 0.24rem 0.7rem;
+		border: none;
+		border-radius: 0.38rem;
+		background: #016aa5;
+		color: #fff;
+		cursor: pointer;
+	}
+
+	.feed-edit-save:disabled { opacity: 0.6; }
+
+	.feed-edit-cancel {
+		font-family: var(--font-typewriter);
+		font-size: 0.62rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		padding: 0.24rem 0.7rem;
+		border: 1px solid #c4d6e8;
+		border-radius: 0.38rem;
+		background: transparent;
+		color: #526b81;
+		cursor: pointer;
 	}
 
 	.feeding-feed-type {
