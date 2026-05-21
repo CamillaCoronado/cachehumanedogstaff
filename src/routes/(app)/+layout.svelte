@@ -260,6 +260,7 @@
 				</header>
 
 				{#if asmLogVisible}
+					<div class="sync-log-dismiss" on:click={() => { asmLogVisible = false; }} aria-hidden="true"></div>
 					<div class="sync-log" role="log" aria-live="polite">
 						<div class="sync-log-header">
 							<span class="sync-log-title">Last changes — {asmLastChangedAt ?? asmSyncedAt}</span>
@@ -550,6 +551,13 @@
 
 	@keyframes spin {
 		to { transform: rotate(360deg); }
+	}
+
+	.sync-log-dismiss {
+		position: fixed;
+		inset: 0;
+		z-index: 29;
+		cursor: default;
 	}
 
 	.sync-log {
