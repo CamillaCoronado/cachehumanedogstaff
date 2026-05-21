@@ -513,11 +513,26 @@
 	async function refresh() {
 		loading = true;
 		try {
-			[dogs, logs, sheetColors] = await Promise.all([
+			let dogRows: typeof dogs = [];
+			let colorsRes: Record<string, string> = {};
+			[dogRows, logs, colorsRes] = await Promise.all([
 				listDogs(),
 				listAllDayTripLogs(),
 				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
 			]);
+			sheetColors = colorsRes;
+			dogs = dogRows;
+
+			const evaluated = dogRows.filter((d) => {
+				if (!d.awaitingEvaluation) return false;
+				const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+				const color = colorsRes[key];
+				return color === 'green' || color === 'yellow';
+			});
+			if (evaluated.length > 0) {
+				await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false })));
+				dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false } : d);
+			}
 		} catch (error) {
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
 			toast.error(code ? `Unable to load day trip data (${code}).` : 'Unable to load day trip data.');
