@@ -11,6 +11,35 @@
 
 	let loading = true;
 	let dogs: Dog[] = [];
+	let addDogId = '';
+	let addDate = today.toISOString().slice(0, 10);
+	let addRestDays = '';
+	let adding = false;
+
+	$: eligibleToAdd = dogs
+		.filter((d) => d.status === 'active' && !d.surgeryDate)
+		.sort((a, b) => a.name.localeCompare(b.name));
+
+	async function addToSurgery() {
+		if (!addDogId || !addDate) return;
+		adding = true;
+		try {
+			const restDays = addRestDays.trim() ? Number(addRestDays) : null;
+			await updateDog(addDogId, {
+				surgeryDate: new Date(addDate + 'T12:00:00'),
+				surgeryRestDays: Number.isFinite(restDays) && restDays! >= 0 ? restDays : null
+			});
+			dogs = await listDogs();
+			addDogId = '';
+			addDate = new Date().toISOString().slice(0, 10);
+			addRestDays = '';
+			toast.success('Added to surgery list.');
+		} catch {
+			toast.error('Could not add to surgery list.');
+		} finally {
+			adding = false;
+		}
+	}
 
 	onMount(async () => {
 		dogs = await listDogs();
@@ -65,10 +94,26 @@
 		{/if}
 	</div>
 
+	{#if !loading}
+		<form class="surgery-add-form" on:submit|preventDefault={addToSurgery}>
+			<select class="surgery-add-select" bind:value={addDogId} required>
+				<option value="" disabled>Select dog…</option>
+				{#each eligibleToAdd as dog}
+					<option value={dog.id}>{dog.name}</option>
+				{/each}
+			</select>
+			<input class="surgery-add-input" type="date" bind:value={addDate} required />
+			<input class="surgery-add-input surgery-add-rest" type="number" min="0" max="60" placeholder="Rest days" bind:value={addRestDays} />
+			<button class="surgery-add-btn typewriter" type="submit" disabled={adding || !addDogId}>
+				{adding ? '…' : 'Add'}
+			</button>
+		</form>
+	{/if}
+
 	{#if loading}
 		<p class="medical-state">Loading…</p>
 	{:else if surgeryDogs.length === 0}
-		<p class="medical-state">No dogs currently on the surgery list.</p>
+		<p class="medical-state">No dogs on the surgery list.</p>
 	{:else}
 		<div class="surgery-list">
 			{#each surgeryDogs as { dog, surgeryDateObj, daysAgo, daysLeft, isToday, isResting, isComplete }}
@@ -146,6 +191,62 @@
 		color: #cf4b4b;
 		border: 1px solid rgba(207, 75, 75, 0.22);
 		white-space: nowrap;
+	}
+
+	.surgery-add-form {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
+		margin-bottom: 1.2rem;
+		padding: 0.75rem 0.9rem;
+		border: 1px solid #d4deeb;
+		border-radius: 0.65rem;
+		background: #f8fbff;
+	}
+
+	.surgery-add-select {
+		flex: 1;
+		min-width: 9rem;
+		font-family: var(--font-ui);
+		font-size: 0.82rem;
+		border: 1px solid #c4d6e8;
+		border-radius: 0.36rem;
+		padding: 0.3rem 0.5rem;
+		background: #fff;
+		color: #133149;
+	}
+
+	.surgery-add-input {
+		font-family: var(--font-ui);
+		font-size: 0.82rem;
+		border: 1px solid #c4d6e8;
+		border-radius: 0.36rem;
+		padding: 0.3rem 0.5rem;
+		background: #fff;
+		color: #133149;
+	}
+
+	.surgery-add-rest {
+		width: 6rem;
+	}
+
+	.surgery-add-btn {
+		font-size: 0.62rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		padding: 0.32rem 0.9rem;
+		border: none;
+		border-radius: 0.38rem;
+		background: #cf4b4b;
+		color: #fff;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.surgery-add-btn:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.medical-state {
