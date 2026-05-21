@@ -621,7 +621,7 @@
 							{@const openTrip = openTripByDog[dog.id]}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event cal-event-blue">
-								<p class="cal-event-name">{dog.name}</p>
+								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'}</p>
 								<p class="cal-event-meta">Out since {formatDateTime(openTrip?.startedAt ?? dog.currentDayTripStartedAt)}</p>
 								<p class="cal-event-count">{allTime} total trip{allTime !== 1 ? 's' : ''}</p>
@@ -648,7 +648,7 @@
 							{@const stripe = dogStripeColor(dog, sheetColors)}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
-								<p class="cal-event-name">{dog.name}</p>
+								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'} · {days !== null ? `${days}d ago` : 'No trips yet'}</p>
 								<div class="cal-event-tags">
 									{#if eligibility.status === 'difficult'}<span class="cal-tag cal-tag-yellow">Adults only</span>{/if}
@@ -677,7 +677,7 @@
 							{@const eligibility = getEligibility(dog)}
 							{@const stripe = dogStripeColor(dog, sheetColors)}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
-								<p class="cal-event-name">{dog.name}</p>
+								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<p class="cal-event-meta">{eligibility.reasons[0] ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
 							</div>
 						{/each}

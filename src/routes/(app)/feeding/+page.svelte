@@ -653,7 +653,7 @@
 						<div class="feeding-special-list">
 							{#each specialFeedDogs as dog}
 								<div class="feeding-special-row">
-									<span class="feeding-special-name">{dog.name}</span>
+									<a class="feeding-special-name dog-name-link" href="/dogs/{dog.id}">{dog.name}</a>
 									<span class="feeding-special-amount">{foodAmountLabel(dog)}</span>
 									<span class="feeding-special-reasons">{specialFeedingReasons(dog).join(' • ')}</span>
 								</div>
@@ -681,7 +681,7 @@
 							>
 								<div class="feeding-feed-order">{index + 1}</div>
 								<div class="feeding-feed-main">
-									<p class="feeding-feed-name">{dog.name}</p>
+									<p class="feeding-feed-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 									<p class="feeding-feed-run typewriter">{getRunLabel(dog)}</p>
 									{#if specialReasons.length > 0}
 										<p class="feeding-feed-special typewriter">* {specialReasons.join(' • ')}</p>
@@ -873,7 +873,7 @@
 							<p class="feeding-unassigned-label typewriter">Unassigned</p>
 							<div class="feeding-unassigned-list">
 								{#each unassignedDogs as dog}
-									<span class="feeding-unassigned-chip">{dog.name}: {foodSummary(dog)}</span>
+									<span class="feeding-unassigned-chip"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a>: {foodSummary(dog)}</span>
 								{/each}
 							</div>
 						</div>

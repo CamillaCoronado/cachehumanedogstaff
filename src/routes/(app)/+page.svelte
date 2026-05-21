@@ -724,13 +724,12 @@
 					<p class="planner-empty-row">No manager-only assignments.</p>
 				{:else}
 					{#each managerOnlyDogs as dog}
-						<div class="planner-row planner-row-static">
+						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
 							<span class="planner-row-main">
 								<span class="planner-bullet">⭐</span>
 								<span class="planner-row-text">{dog.name}</span>
 							</span>
-							<span class="planner-checkbox"></span>
-						</div>
+						</a>
 					{/each}
 				{/if}
 			</div>
@@ -748,13 +747,12 @@
 					<p class="planner-empty-row">No dogs in isolation.</p>
 				{:else}
 					{#each isolationDogs as dog}
-						<div class="planner-row planner-row-static">
+						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
 							<span class="planner-row-main">
 								<span class="planner-bullet">{isolationBullet(dog)}</span>
 								<span class="planner-row-text">{dog.name} ({isolationLabel(dog)})</span>
 							</span>
-							<span class="planner-checkbox"></span>
-						</div>
+						</a>
 					{/each}
 				{/if}
 			</div>
