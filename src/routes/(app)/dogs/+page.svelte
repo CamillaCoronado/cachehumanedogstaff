@@ -5,7 +5,7 @@
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
-	import { listDogs, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
+	import { listDogs, updateDog, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
@@ -195,6 +195,19 @@ const today = new Date();
 		dogs = dogRows;
 		lastPlaygroupByDogId = buildLastPlaygroupMap(playgroupRows);
 		loading = false;
+
+		// Auto-clear awaitingEvaluation for dogs that have been color-coded
+		// in the DT Numbers spreadsheet (green or yellow = already evaluated).
+		const evaluated = dogRows.filter((d) => {
+			if (!d.awaitingEvaluation) return false;
+			const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+			const color = (colorsRes as Record<string, string>)[key];
+			return color === 'green' || color === 'yellow';
+		});
+		if (evaluated.length > 0) {
+			await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false })));
+			dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false } : d);
+		}
 	}
 
 	function buildLastPlaygroupMap(sessions: PlaygroupSession[]) {
