@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { dev } from '$app/environment';
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 
@@ -45,8 +45,8 @@
 	let currentTabIndex = 0;
 
 	let loggingOut = false;
-	let previousTabIndex = 0;
 	let turnDirection: 'forward' | 'backward' = 'forward';
+	let animating = false;
 	let mobileNavOpen = false;
 	let asmAttempted = false;
 	let bathBackfillAttempted = false;
@@ -59,9 +59,21 @@
 
 	const STORAGE_KEY = 'asm_last_changes';
 
+	beforeNavigate(({ from, to }) => {
+		const fromIdx = tabs.findIndex(t => t.href === from?.url.pathname);
+		const toIdx = tabs.findIndex(t => t.href === to?.url.pathname);
+		if (fromIdx !== -1 && toIdx !== -1) {
+			turnDirection = toIdx > fromIdx ? 'forward' : 'backward';
+		}
+	});
+
+	afterNavigate(() => {
+		animating = false;
+		requestAnimationFrame(() => { animating = true; });
+	});
+
 	onMount(() => {
 		initAuthListener();
-		previousTabIndex = resolveTabIndex(window.location.pathname);
 		try {
 			const stored = localStorage.getItem(STORAGE_KEY);
 			if (stored) {
@@ -144,22 +156,6 @@
 	$: profileName = normalizeText($authProfile?.displayName) ?? normalizeText($authUser?.email) ?? 'Staff Member';
 	$: profileRole = normalizeText($authProfile?.role)?.toUpperCase() ?? 'STAFF';
 	$: profileInitial = profileName.trim().charAt(0).toUpperCase() || 'S';
-	$: if ($authReady) {
-		if (currentTabIndex > previousTabIndex) {
-			turnDirection = 'forward';
-		} else if (currentTabIndex < previousTabIndex) {
-			turnDirection = 'backward';
-		}
-		previousTabIndex = currentTabIndex;
-	}
-
-	function resolveTabIndex(pathname: string) {
-		const direct = tabs.findIndex(
-			(tab) => pathname === tab.href || (tab.href !== '/' && pathname.startsWith(`${tab.href}/`))
-		);
-		if (direct !== -1) return direct;
-		return tabs.findIndex((tab) => tab.href === '/');
-	}
 
 	async function handleLogout() {
 		loggingOut = true;
@@ -380,13 +376,11 @@
 
 					<div class="board-workspace">
 						<div class="page-stage">
-							{#key currentPath}
-								<div
-									class={`page-paper ${turnDirection === 'forward' ? 'page-turn-forward' : 'page-turn-backward'} ${isDashboardPage ? 'page-paper-dashboard' : ''}`}
-								>
-									<slot />
-								</div>
-							{/key}
+							<div
+								class={`page-paper ${animating ? (turnDirection === 'forward' ? 'page-turn-forward' : 'page-turn-backward') : ''} ${isDashboardPage ? 'page-paper-dashboard' : ''}`}
+							>
+								<slot />
+							</div>
 						</div>
 					</div>
 				</div>
