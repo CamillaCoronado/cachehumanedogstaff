@@ -18,9 +18,10 @@
 	<div
 		class="modal-overlay modal-overlay-{placement}"
 		use:portal
+		on:click={() => onClose?.()}
 	>
-		<div class="modal-backdrop" on:click={() => onClose?.()}></div>
-		<div class="modal-card">
+		<div class="modal-backdrop"></div>
+		<div class="modal-card" on:click|stopPropagation>
 			<!-- Washi tape decoration -->
 			<span class="modal-tape" aria-hidden="true"></span>
 			<div class="modal-header flex items-center justify-between gap-3">
