@@ -3,17 +3,23 @@
 	export let title = '';
 	export let onClose: (() => void) | undefined;
 	export let placement: 'center' | 'top' = 'center';
+
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return {
+			destroy() {
+				if (node.parentNode) node.parentNode.removeChild(node);
+			}
+		};
+	}
 </script>
 
 {#if open}
 	<div
-		class={`fixed inset-0 z-50 flex justify-center px-3 sm:px-4 ${
-			placement === 'top'
-				? 'items-start overflow-y-auto pt-3 pb-3 sm:pt-6 sm:pb-6'
-				: 'items-center'
-		}`}
+		class="modal-overlay modal-overlay-{placement}"
+		use:portal
 	>
-		<div class="absolute inset-0 bg-black/30 backdrop-blur-[2px]" on:click={() => onClose?.()}></div>
+		<div class="modal-backdrop" on:click={() => onClose?.()}></div>
 		<div class="modal-card">
 			<!-- Washi tape decoration -->
 			<span class="modal-tape" aria-hidden="true"></span>
@@ -40,6 +46,40 @@
 {/if}
 
 <style>
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 9999;
+		display: flex;
+		justify-content: center;
+		padding: 0.75rem 1rem;
+	}
+
+	.modal-overlay-center {
+		align-items: center;
+	}
+
+	.modal-overlay-top {
+		align-items: flex-start;
+		overflow-y: auto;
+		padding-top: 1.5rem;
+		padding-bottom: 1.5rem;
+	}
+
+	.modal-backdrop {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.3);
+		-webkit-backdrop-filter: blur(2px);
+		backdrop-filter: blur(2px);
+	}
+
 	.modal-card {
 		position: relative;
 		z-index: 10;
