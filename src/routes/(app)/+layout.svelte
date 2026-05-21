@@ -42,6 +42,7 @@
 	const medicalTab: TabItem = { href: '/medical', label: 'Medical', colorClass: 'tab-red', icon: 'medical' };
 	const adminTab: TabItem = { href: '/admin', label: 'Admin', colorClass: 'tab-accent', icon: 'admin' };
 	let tabs: TabItem[] = baseTabs;
+	let currentTabIndex = 0;
 
 	let loggingOut = false;
 	let previousTabIndex = 0;
@@ -121,12 +122,12 @@
 		medicalTab,
 		...(isAdmin ? [adminTab] : [])
 	];
-	$: currentTabIndex = (() => {
+	$: {
 		const i = tabs.findIndex(
 			(tab) => currentPath === tab.href || (tab.href !== '/' && currentPath.startsWith(`${tab.href}/`))
 		);
-		return i !== -1 ? i : tabs.findIndex((tab) => tab.href === '/');
-	})();
+		currentTabIndex = i !== -1 ? i : tabs.findIndex((tab) => tab.href === '/');
+	}
 	$: activeTab = tabs[currentTabIndex] ?? tabs.find((tab) => tab.href === '/') ?? tabs[0];
 	$: isDogDetailPage = currentPath.startsWith('/dogs/');
 	$: if (currentPath) {
