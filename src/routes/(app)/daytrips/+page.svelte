@@ -6,7 +6,7 @@
 	import { canAccessDayTrips, resolveRole } from '$lib/utils/permissions';
 	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog } from '$lib/data/dogs';
 	import type { DayTripLog, Dog, UserRole } from '$lib/types';
-	import { checkDayTripEligibility, daysSince, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
+	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -642,7 +642,7 @@
 					{:else}
 						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
-							{@const days = daysSince(dog.lastDayTripDate)}
+							{@const days = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince))}
 							{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
 							{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
 							{@const stripe = dogStripeColor(dog, sheetColors)}
@@ -765,7 +765,7 @@
 						</thead>
 						<tbody>
 							{#each dogStatsRows as dog}
-								{@const days = daysSince(dog.lastDayTripDate)}
+								{@const days = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince))}
 								{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
 								{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
 								{@const eligibility = getEligibility(dog)}

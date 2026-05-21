@@ -27,6 +27,7 @@
 		formatAge,
 		bathEligible,
 		daysSince,
+		sinceReturn,
 		dogStripeColor,
 		formatDate,
 		formatDateTime,
@@ -110,7 +111,7 @@
 	$: handlingLevelText = handlingLevelLabel(effectiveHandlingLevel);
 	$: isManagerHandlingOnly = effectiveHandlingLevel === 'manager_only';
 	$: isStaffHandlingOnly = effectiveHandlingLevel === 'staff_only';
-	$: daysSinceLastTrip = dog?.lastDayTripDate ? daysSince(dog.lastDayTripDate, today) : null;
+	$: daysSinceLastTrip = dog ? daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince), today) : null;
 	$: currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 	$: nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 	$: thisMonthTrips = dayTripLogs.filter((log) => {

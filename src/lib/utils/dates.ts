@@ -56,6 +56,19 @@ export function normalizeDay(value: DateValue | string | null | undefined) {
 	return date ? startOfDay(date) : null;
 }
 
+// Returns null if the activity date predates shelterSince (dog was away and starts fresh on return).
+export function sinceReturn(
+	activityDate: DateValue | string | null | undefined,
+	shelterSince: DateValue | string | null | undefined
+): DateValue | string | null {
+	if (!activityDate) return null;
+	if (!shelterSince) return activityDate as DateValue | string;
+	const a = toDate(activityDate);
+	const s = toDate(shelterSince);
+	if (!a || !s) return activityDate as DateValue | string;
+	return a >= s ? (activityDate as DateValue | string) : null;
+}
+
 export function daysSince(value: DateValue | string | null | undefined, now = new Date()) {
 	const date = toDate(value);
 	if (!date) return null;

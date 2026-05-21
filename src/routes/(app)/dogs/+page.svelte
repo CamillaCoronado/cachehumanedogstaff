@@ -8,7 +8,7 @@
 	import { listDogs, updateDog, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
-	import { bathEligible, daysSince, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -374,7 +374,7 @@ const today = new Date();
 	function isBathDue(dog: Dog) {
 		if (dog.inFoster) return false;
 		if (!bathEligible(dog.surgeryDate, today)) return false;
-		const sinceLastBath = daysSince(dog.lastBathDate, today);
+		const sinceLastBath = daysSince(sinceReturn(dog.lastBathDate, dog.shelterSince), today);
 		return sinceLastBath === null || sinceLastBath >= BATH_DUE_DAYS;
 	}
 
@@ -447,7 +447,7 @@ const today = new Date();
 		}
 
 		if (!dog.awaitingEvaluation && tripEligibility.eligible) {
-			const dayTripGap = daysSince(dog.lastDayTripDate, today);
+			const dayTripGap = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince), today);
 			if (dayTripGap === null) {
 				items.push({
 					label: 'No day trip logged yet.',
@@ -473,7 +473,7 @@ const today = new Date();
 			(toDate(dog.intakeDate) ? new Date(toDate(dog.intakeDate)!.getTime() + 7 * 86_400_000) : null);
 		const isPlaygroupReady = playgroupReadyCutoff ? today >= playgroupReadyCutoff : false;
 		if (!dog.awaitingEvaluation && isPlaygroupReady) {
-			const playgroupGap = daysSince(lastPlaygroupDate, today);
+			const playgroupGap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince), today);
 			if (playgroupGap === null) {
 				items.push({
 					label: 'No playgroup logged yet.',
