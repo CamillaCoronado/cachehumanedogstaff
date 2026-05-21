@@ -121,7 +121,12 @@
 		medicalTab,
 		...(isAdmin ? [adminTab] : [])
 	];
-	$: currentTabIndex = resolveTabIndex(currentPath);
+	$: currentTabIndex = (() => {
+		const i = tabs.findIndex(
+			(tab) => currentPath === tab.href || (tab.href !== '/' && currentPath.startsWith(`${tab.href}/`))
+		);
+		return i !== -1 ? i : tabs.findIndex((tab) => tab.href === '/');
+	})();
 	$: activeTab = tabs[currentTabIndex] ?? tabs.find((tab) => tab.href === '/') ?? tabs[0];
 	$: isDogDetailPage = currentPath.startsWith('/dogs/');
 	$: if (currentPath) {
