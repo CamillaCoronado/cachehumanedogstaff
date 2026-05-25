@@ -67,6 +67,13 @@ interface StoredDog {
 	surgeryDate: string | null;
 	surgeryRestDays?: number | null;
 	lastSurgeryDate?: string | null;
+	fortifloraDate?: string | null;
+	fortifloraDays?: number | null;
+	fortifloraTime?: string | null;
+	satinBalls?: boolean;
+	hasSupplements?: boolean;
+	hasSecondMeal?: boolean;
+	secondMealAmount?: string;
 	isMicrochipped?: boolean;
 	isFixed: boolean;
 	fixedDate: string | null;
@@ -87,8 +94,9 @@ interface StoredDog {
 	asmId?: number | null;
 	asmShelterCode?: string;
 	isIncoming?: boolean;
-	isolationStatus: 'none' | 'sick' | 'bite_quarantine';
-	isolationStartDate: string | null;
+	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
+	isolationReason?: 'sick' | 'bite_quarantine' | null;
+	isolationStartDate?: string | null;
 	status: 'active' | 'adopted';
 	createdAt: string;
 	updatedAt: string;
@@ -105,7 +113,7 @@ interface StoredNote {
 interface StoredFeedingLog {
 	id: string;
 	date: string;
-	mealTime: 'am' | 'pm';
+	mealTime: 'am' | 'pm' | 'second';
 	amountEaten: 'all' | 'most' | 'half' | 'little' | 'none';
 	notes: string | null;
 	loggedBy: string;
@@ -282,6 +290,10 @@ function serializeDog(dog: Dog): StoredDog {
 		photoUrl: dog.photoUrl ?? null,
 		hasOwnFood: dog.hasOwnFood ?? false,
 		transitionToHills: dog.transitionToHills ?? null,
+		satinBalls: dog.satinBalls ?? false,
+		hasSupplements: dog.hasSupplements ?? false,
+		hasSecondMeal: dog.hasSecondMeal ?? false,
+		secondMealAmount: dog.secondMealAmount ?? '',
 		origin: dog.origin,
 		markings: dog.markings ?? '',
 		hiddenComments: dog.hiddenComments ?? '',
@@ -329,6 +341,7 @@ function serializeDog(dog: Dog): StoredDog {
 		asmId: typeof dog.asmId === 'number' ? dog.asmId : null,
 		asmShelterCode: dog.asmShelterCode ?? '',
 		isolationStatus: dog.isolationStatus,
+		isolationReason: dog.isolationReason ?? null,
 		isolationStartDate: toDateString(dog.isolationStartDate),
 		status: dog.status,
 		createdAt: toDateString(dog.createdAt) ?? new Date().toISOString(),
@@ -378,6 +391,10 @@ function deserializeDog(stored: StoredDog): Dog {
 		photoUrl: typeof stored.photoUrl === 'string' ? stored.photoUrl : null,
 		hasOwnFood: stored.hasOwnFood ?? false,
 		transitionToHills: typeof stored.transitionToHills === 'boolean' ? stored.transitionToHills : null,
+		satinBalls: stored.satinBalls ?? false,
+		hasSupplements: stored.hasSupplements ?? false,
+		hasSecondMeal: stored.hasSecondMeal ?? false,
+		secondMealAmount: stored.secondMealAmount ?? '',
 		origin: stored.origin ?? '',
 		color: stored.color ?? '',
 		markings: stored.markings ?? '',
@@ -406,6 +423,9 @@ function deserializeDog(stored: StoredDog): Dog {
 		surgeryDate: stored.surgeryDate ? toDate(stored.surgeryDate) : null,
 		surgeryRestDays: typeof stored.surgeryRestDays === 'number' ? stored.surgeryRestDays : null,
 		lastSurgeryDate: stored.lastSurgeryDate ? toDate(stored.lastSurgeryDate) : null,
+		fortifloraDate: stored.fortifloraDate ? toDate(stored.fortifloraDate) : null,
+		fortifloraDays: typeof stored.fortifloraDays === 'number' ? stored.fortifloraDays : null,
+		fortifloraTime: (['am', 'pm', 'both'].includes(stored.fortifloraTime ?? '') ? stored.fortifloraTime as 'am' | 'pm' | 'both' : null),
 		isMicrochipped: stored.isMicrochipped ?? false,
 		isFixed: stored.isFixed ?? false,
 		fixedDate: stored.fixedDate ? toDate(stored.fixedDate) : null,
@@ -426,7 +446,8 @@ function deserializeDog(stored: StoredDog): Dog {
 		asmId: typeof stored.asmId === 'number' ? stored.asmId : null,
 		asmShelterCode: stored.asmShelterCode ?? '',
 		isIncoming: stored.isIncoming ?? false,
-		isolationStatus: stored.isolationStatus ?? 'none',
+		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
+		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
 		isolationStartDate: stored.isolationStartDate ? toDate(stored.isolationStartDate) : null,
 		status: stored.status,
 		createdAt: toDate(stored.createdAt) ?? new Date(),

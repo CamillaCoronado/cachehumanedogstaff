@@ -6,7 +6,7 @@
 	import { formatDate, isSameCalendarDay, isSurgeryToday } from '$lib/utils/dates';
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import { isPuppyFood, isOwnFood, isNormalFood, foodTypeTone, foodTypeInstruction, foodTypeLabel, estimateFoodAmountPerMeal } from '$lib/utils/feeding';
+	import { isOwnFood, foodTypeTone, foodTypeInstruction, foodTypeLabel, estimateFoodAmountPerMeal } from '$lib/utils/feeding';
 
 	type RunId = number | 'puppy' | 'rock';
 	const MAX_DOGS_PER_RUN = 2;
@@ -179,9 +179,12 @@
 	let stoolLogs: Record<string, StoolLog[]> = {};
 	let loading = true;
 	let editingFeedId: string | null = null;
-	let feedDraft: { foodType: string; foodAmount: string; dietaryNotes: string; hasOwnFood: boolean; transitionToHills: boolean | null } = { foodType: '', foodAmount: '', dietaryNotes: '', hasOwnFood: false, transitionToHills: null };
+	let feedDraft: { foodType: string; foodAmount: string; dietaryNotes: string; hasOwnFood: boolean; transitionToHills: boolean | null; satinBalls: boolean; hasSupplements: boolean; hasSecondMeal: boolean; secondMealAmount: string } = { foodType: 'Normal', foodAmount: '', dietaryNotes: '', hasOwnFood: false, transitionToHills: null, satinBalls: false, hasSupplements: false, hasSecondMeal: false, secondMealAmount: '' };
 	let savingFeed = false;
-	let mealTime: MealTime = new Date().getHours() < 12 ? 'am' : 'pm';
+	const _now = new Date();
+	const _day = _now.getDay(); // 0=Sun, 5=Fri, 6=Sat
+	const _closingHour = (_day === 5 || _day === 6) ? 16 : 17; // Fri/Sat close at 5, feed ~4pm
+	let mealTime: MealTime = _now.getHours() < 12 ? 'am' : (_now.getHours() < _closingHour ? 'pm' : 'second');
 	const selectedDay = new Date();
 	let markingAll = false;
 	let notesByDog: Record<string, string> = {};
@@ -210,10 +213,13 @@
 	$: kennelAssignments = getAssignments(shelterDogs);
 	$: unassignedDogs = shelterDogs.filter((dog) => !getDogRun(dog));
 	$: assignedCount = shelterDogs.length - unassignedDogs.length;
-	$: fedMap = getFedMap(shelterDogs, feedingLogs, selectedDay, mealTime);
+	$: fedMap = getFedMap(mealTime === 'second' ? secondMealDogs : shelterDogs, feedingLogs, selectedDay, mealTime);
 	$: fedCount = Object.values(fedMap).filter(Boolean).length;
 	$: abnormalCount = getAbnormalCount(shelterDogs, stoolLogs, selectedDay);
-	$: displayDogs = [...shelterDogs].sort((a, b) => compareByWalkPath(a, b, walkPath));
+	$: secondMealDogs = shelterDogs.filter((d) => d.hasSecondMeal);
+	$: displayDogs = mealTime === 'second'
+		? [...secondMealDogs].sort((a, b) => compareByWalkPath(a, b, walkPath))
+		: [...shelterDogs].sort((a, b) => compareByWalkPath(a, b, walkPath));
 	$: specialFeedDogs = displayDogs.filter((dog) => isSpecialFeeding(dog));
 	$: feedingHistoryEntries = getFeedingHistoryEntries(shelterDogs, feedingLogs).slice(0, HISTORY_LIMIT);
 
@@ -306,14 +312,26 @@
 		return estimated || '—';
 	}
 
+	function secondMealAmountLabel(dog: Dog) {
+		return dog.secondMealAmount?.trim() || foodAmountLabel(dog);
+	}
+
+	function activeFoodAmountLabel(dog: Dog) {
+		return mealTime === 'second' ? secondMealAmountLabel(dog) : foodAmountLabel(dog);
+	}
+
 	function startEditFeed(dog: Dog) {
 		editingFeedId = dog.id;
 		feedDraft = {
-			foodType: dog.foodType ?? '',
+			foodType: dog.foodType || 'Normal',
 			foodAmount: dog.foodAmount ?? '',
 			dietaryNotes: dog.dietaryNotes ?? '',
 			hasOwnFood: dog.hasOwnFood ?? false,
-			transitionToHills: dog.transitionToHills ?? null
+			transitionToHills: dog.transitionToHills ?? null,
+			satinBalls: dog.satinBalls ?? false,
+			hasSupplements: dog.hasSupplements ?? false,
+			hasSecondMeal: dog.hasSecondMeal ?? false,
+			secondMealAmount: dog.secondMealAmount ?? ''
 		};
 	}
 
@@ -321,19 +339,27 @@
 		savingFeed = true;
 		try {
 			await updateDog(dog.id, {
-				foodType: feedDraft.foodType.trim(),
+				foodType: feedDraft.foodType,
 				foodAmount: feedDraft.foodAmount.trim(),
 				dietaryNotes: feedDraft.dietaryNotes.trim(),
 				hasOwnFood: feedDraft.hasOwnFood,
-				transitionToHills: feedDraft.transitionToHills
+				transitionToHills: feedDraft.transitionToHills,
+				satinBalls: feedDraft.satinBalls,
+				hasSupplements: feedDraft.hasSupplements,
+				hasSecondMeal: feedDraft.hasSecondMeal,
+				secondMealAmount: feedDraft.secondMealAmount.trim()
 			});
 			dogs = dogs.map((d) => d.id === dog.id ? {
 				...d,
-				foodType: feedDraft.foodType.trim(),
+				foodType: feedDraft.foodType,
 				foodAmount: feedDraft.foodAmount.trim(),
 				dietaryNotes: feedDraft.dietaryNotes.trim(),
 				hasOwnFood: feedDraft.hasOwnFood,
-				transitionToHills: feedDraft.transitionToHills
+				transitionToHills: feedDraft.transitionToHills,
+				satinBalls: feedDraft.satinBalls,
+				hasSupplements: feedDraft.hasSupplements,
+				hasSecondMeal: feedDraft.hasSecondMeal,
+				secondMealAmount: feedDraft.secondMealAmount.trim()
 			} : d);
 			editingFeedId = null;
 		} catch {
@@ -343,40 +369,30 @@
 		}
 	}
 
-	function hasSupplements(dog: Dog) {
-		const merged = `${(dog.foodType ?? '').trim().toLowerCase()} ${(dog.dietaryNotes ?? '').trim().toLowerCase()}`;
-		return ['supplement', 'supplements', 'probiotic', 'pumpkin', 'vitamin', 'topper', 'add-in', 'med'].some((kw) => merged.includes(kw));
-	}
-
-	function hasSpecialDiet(dog: Dog) {
-		const merged = `${(dog.foodType ?? '').trim().toLowerCase()} ${(dog.dietaryNotes ?? '').trim().toLowerCase()}`;
-		return ['no chicken', 'no fish', 'allergy', 'sensitive', 'prescription', 'rx', 'special diet'].some((kw) => merged.includes(kw));
-	}
-
 	function feedingFlags(dog: Dog) {
 		const flags: string[] = [];
 		if ((dog.allergyTypes ?? []).length > 0) flags.push('Allergy');
-		if (hasSupplements(dog)) flags.push('Supplements');
-		if (hasSpecialDiet(dog)) flags.push('Special Diet');
+		if (dog.hasSupplements) flags.push('Supplements');
 		return flags;
 	}
 
-	function specialFeedingReasons(dog: Dog) {
+	function specialFeedingReasons(dog: Dog, meal?: MealTime) {
 		const reasons: string[] = [];
 		const allergies = dog.allergyTypes ?? [];
 		if (allergies.length > 0) reasons.push(`Allergy: ${allergies.join(', ')}`);
 		if (isOwnFood(dog)) reasons.push('Own Food');
-		if (dog.hasOwnFood && dog.transitionToHills === true) reasons.push('Transition to Hills');
+		if (dog.hasOwnFood && dog.transitionToHills === true) reasons.push('→ Transition to Hills');
 		if (dog.hasOwnFood && dog.transitionToHills === false) reasons.push('No Hills Transition');
-		if (isPuppyFood(dog)) reasons.push('Puppy Food');
-		if (hasSupplements(dog)) reasons.push('Supplements');
-		if (hasSpecialDiet(dog)) reasons.push('Special Diet');
-		if (!isNormalFood(dog) && !isOwnFood(dog) && !isPuppyFood(dog)) {
-			const rawType = dog.foodType?.trim();
-			if (rawType) reasons.push(rawType);
+		if (dog.foodType === 'No Fish') reasons.push('No Fish');
+		if (dog.foodType === 'No Chicken') reasons.push('No Chicken');
+		if (dog.satinBalls) reasons.push('Satin Balls');
+		if (dog.hasSupplements) reasons.push('Supplements');
+		if (dog.fortifloraDate && meal !== 'second') {
+			const ft = dog.fortifloraTime ?? 'both';
+			const forThisMeal = !meal || ft === 'both' || ft === meal;
+			if (forThisMeal) reasons.push(ft === 'both' ? 'FortiFlora' : `FortiFlora (${ft.toUpperCase()})`);
 		}
-		if ((dog.dietaryNotes?.trim() ?? '').length > 0) reasons.push('Diet Notes');
-		return Array.from(new Set(reasons));
+		return reasons;
 	}
 
 	function isSpecialFeeding(dog: Dog) {
@@ -597,7 +613,7 @@
 			<div class="feeding-header">
 			<div class="feeding-title">
 				<p class="feeding-summary whiteboard-hand erase-marker-blue">
-					{fedCount}/{shelterDogs.length} dogs fed • {abnormalCount} abnormal stools logged
+					{fedCount}/{mealTime === 'second' ? secondMealDogs.length : shelterDogs.length} dogs fed • {abnormalCount} abnormal stools logged
 				</p>
 			</div>
 			<div class="feeding-controls">
@@ -615,6 +631,13 @@
 						on:click={() => (mealTime = 'pm')}
 					>
 						PM
+					</button>
+					<button
+						class={`meal-switch-btn ${mealTime === 'second' ? 'meal-switch-btn-active' : ''}`}
+						type="button"
+						on:click={() => (mealTime = 'second')}
+					>
+						2nd
 					</button>
 				</div>
 				<button
@@ -654,8 +677,8 @@
 							{#each specialFeedDogs as dog}
 								<div class="feeding-special-row">
 									<a class="feeding-special-name dog-name-link" href="/dogs/{dog.id}">{dog.name}</a>
-									<span class="feeding-special-amount">{foodAmountLabel(dog)}</span>
-									<span class="feeding-special-reasons">{specialFeedingReasons(dog).join(' • ')}</span>
+									<span class="feeding-special-amount">{activeFoodAmountLabel(dog)}</span>
+									<span class="feeding-special-reasons">{specialFeedingReasons(dog, mealTime).join(' • ')}</span>
 								</div>
 							{/each}
 						</div>
@@ -672,7 +695,7 @@
 						{#each displayDogs as dog, index}
 							{@const flags = feedingFlags(dog)}
 							{@const notes = dog.dietaryNotes?.trim() ?? ''}
-							{@const specialReasons = specialFeedingReasons(dog)}
+							{@const specialReasons = specialFeedingReasons(dog, mealTime)}
 							{@const fedLog = fedMap[dog.id]}
 							<article
 								class={`feeding-feed-row ${fedLog ? 'feeding-feed-row-fed' : ''} ${
@@ -692,7 +715,12 @@
 										<div class="feed-edit-panel">
 											<div class="feed-edit-row">
 												<label class="feed-edit-label typewriter" for="feed-type-{dog.id}">Type</label>
-												<input id="feed-type-{dog.id}" class="feed-edit-input" type="text" bind:value={feedDraft.foodType} placeholder="Normal" />
+												<select id="feed-type-{dog.id}" class="feed-edit-input" bind:value={feedDraft.foodType}>
+													<option value="Normal">Normal</option>
+													<option value="Puppy">Puppy</option>
+													<option value="No Fish">No Fish</option>
+													<option value="No Chicken">No Chicken</option>
+												</select>
 											</div>
 											<div class="feed-edit-row">
 												<label class="feed-edit-label typewriter" for="feed-amount-{dog.id}">Amount</label>
@@ -723,6 +751,24 @@
 														No Hills transition
 													</label>
 												{/if}
+												<label class="feed-edit-check">
+													<input type="checkbox" bind:checked={feedDraft.satinBalls} />
+													Satin balls
+												</label>
+												<label class="feed-edit-check">
+													<input type="checkbox" bind:checked={feedDraft.hasSupplements} />
+													Supplements
+												</label>
+												<label class="feed-edit-check">
+													<input type="checkbox" bind:checked={feedDraft.hasSecondMeal} />
+													Gets closing meal
+												</label>
+												{#if feedDraft.hasSecondMeal}
+													<div class="feed-edit-row" style="padding-left: 1.2rem; margin-top: 0.2rem;">
+														<label class="feed-edit-label typewriter" for="feed-second-{dog.id}">2nd amount</label>
+														<input id="feed-second-{dog.id}" class="feed-edit-input" type="text" bind:value={feedDraft.secondMealAmount} placeholder="Same as regular" />
+													</div>
+												{/if}
 											</div>
 											<div class="feed-edit-actions">
 												<button class="feed-edit-save" on:click={() => saveFeed(dog)} disabled={savingFeed}>
@@ -735,7 +781,7 @@
 										<p class="feeding-feed-amount">
 											<span class="feeding-feed-amount-label">Feed</span>
 											<button class="feeding-amount-btn" on:click={() => startEditFeed(dog)}>
-												{foodAmountLabel(dog)}
+												{activeFoodAmountLabel(dog)}
 											</button>
 										</p>
 										<p class={`feeding-feed-type feeding-feed-type-${foodTypeTone(dog)}`}>

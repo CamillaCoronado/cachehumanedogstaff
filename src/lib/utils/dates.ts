@@ -153,11 +153,7 @@ export function checkDayTripEligibility(
 	const managerOnlyReason = dayTripManagerOnlyReason ?? 'other';
 	const requiresManagerOnly = dayTripManagerOnly === true;
 	const manuallyBlocked = dayTripStatus === 'ineligible' && isolationStatus === 'none' && !requiresManagerOnly;
-	const effectiveHandlingLevel = resolveDogHandlingLevel(
-		handlingLevel,
-		dayTripManagerOnly,
-		isolationStatus
-	);
+	const effectiveHandlingLevel = resolveDogHandlingLevel(handlingLevel, dayTripManagerOnly);
 	const roleRestrictionReason = handlingRestrictionReason(effectiveHandlingLevel, actorRole);
 	const blockedByHandlingRole = Boolean(roleRestrictionReason);
 
@@ -181,10 +177,8 @@ export function checkDayTripEligibility(
 		reasons.push(`Post-surgery rest — ${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining`);
 	}
 
-	if (isolationStatus === 'sick') {
-		reasons.push('In isolation: Sick');
-	} else if (isolationStatus === 'bite_quarantine') {
-		reasons.push('In isolation: Bite quarantine');
+	if (isolationStatus !== 'none') {
+		reasons.push('In isolation');
 	}
 
 	if (roleRestrictionReason) {
@@ -262,14 +256,14 @@ export function dogStripeColor(
 	dog: Dog,
 	sheetColors?: Record<string, 'green' | 'yellow' | 'red'>
 ): 'green' | 'yellow' | 'red' {
+	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
+	if (dog.isolationStatus !== 'none') return 'red';
+	if (level === 'manager_only' || level === 'staff_only') return 'red';
 	if (sheetColors) {
 		const name = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
 		const sheetColor = sheetColors[name];
 		if (sheetColor) return sheetColor;
 	}
-	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly, dog.isolationStatus);
-	if (dog.isolationStatus !== 'none') return 'red';
-	if (level === 'manager_only' || level === 'staff_only') return 'red';
 	if (dog.awaitingEvaluation) return 'red';
 	if (dog.dayTripStatus === 'difficult') return 'yellow';
 	return 'green';

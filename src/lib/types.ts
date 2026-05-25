@@ -15,7 +15,8 @@ export interface UserProfile {
 export type DogStatus = 'active' | 'adopted';
 export type DayTripStatus = 'ineligible' | 'difficult' | 'eligible';
 export type DayTripIneligibleReason = 'behavior' | 'medical' | 'other';
-export type IsolationStatus = 'none' | 'sick' | 'bite_quarantine';
+export type IsolationStatus = 'none' | 'iso';
+export type IsolationReason = 'sick' | 'bite_quarantine';
 export type DogHandlingLevel = 'manager_only' | 'staff_only' | 'volunteer';
 export type Compatibility = 'yes' | 'no' | 'unknown';
 export type PottyTrainedStatus = 'yes' | 'no' | 'working_on_it' | 'unknown';
@@ -39,6 +40,10 @@ export interface Dog {
 	photoUrl?: string | null;
 	hasOwnFood?: boolean;
 	transitionToHills?: boolean | null;
+	satinBalls?: boolean;
+	hasSupplements?: boolean;
+	hasSecondMeal?: boolean;
+	secondMealAmount?: string;
 	origin: string;
 	color?: string;
 	markings?: string;
@@ -69,6 +74,9 @@ export interface Dog {
 	surgeryDate: DateValue | null;
 	surgeryRestDays: number | null;
 	lastSurgeryDate: DateValue | null;
+	fortifloraDate: DateValue | null;
+	fortifloraDays: number | null;
+	fortifloraTime: 'am' | 'pm' | 'both' | null;
 	isMicrochipped: boolean;
 	isFixed: boolean;
 	fixedDate: DateValue | null;
@@ -94,6 +102,7 @@ export interface Dog {
 	asmId?: number | null;
 	asmShelterCode?: string;
 	isolationStatus: IsolationStatus;
+	isolationReason: IsolationReason | null;
 	isolationStartDate: DateValue | null;
 	status: DogStatus;
 	createdAt: DateValue;
@@ -123,7 +132,7 @@ export interface DayTripLog {
 	updatedAt: DateValue;
 }
 
-export type MealTime = 'am' | 'pm';
+export type MealTime = 'am' | 'pm' | 'second';
 export type AmountEaten = 'all' | 'most' | 'half' | 'little' | 'none';
 
 export interface BathLog {

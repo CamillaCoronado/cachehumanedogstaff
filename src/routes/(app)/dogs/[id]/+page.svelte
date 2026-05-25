@@ -106,12 +106,12 @@
 				? 'whiteboard-trip-pill-yellow'
 				: 'whiteboard-trip-pill-red';
 	$: effectiveHandlingLevel = dog
-		? resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly, dog.isolationStatus)
+		? resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly)
 		: 'volunteer';
 	$: handlingLevelText = handlingLevelLabel(effectiveHandlingLevel);
 	$: isManagerHandlingOnly = effectiveHandlingLevel === 'manager_only';
 	$: isStaffHandlingOnly = effectiveHandlingLevel === 'staff_only';
-	$: daysSinceLastTrip = dog ? daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince), today) : null;
+	$: daysSinceLastTrip = dog ? daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince ?? dog.intakeDate), today) : null;
 	$: currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 	$: nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 	$: thisMonthTrips = dayTripLogs.filter((log) => {
@@ -241,9 +241,11 @@
 		? dog.isOutOnDayTrip
 			? 'Day Trip'
 			: dog.isolationStatus !== 'none'
-				? dog.isolationStatus === 'sick'
+				? dog.isolationReason === 'sick'
 					? 'Manager only: sick isolation'
-					: 'Manager only: bite quarantine'
+					: dog.isolationReason === 'bite_quarantine'
+						? 'Manager only: bite quarantine'
+						: 'Manager only: isolation'
 				: isManagerOnly
 					? managerOnlyNote
 					: isManagerHandlingOnly
@@ -753,7 +755,7 @@
 				<dl class="whiteboard-facts typewriter">
 					<div>
 						<dt>Isolation</dt>
-						<dd>{dog.isolationStatus === 'none' ? 'None' : dog.isolationStatus === 'sick' ? 'Sick' : 'Bite Quarantine'}</dd>
+						<dd>{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : 'ISO'}</dd>
 					</div>
 					<div>
 						<dt>Vaccinated</dt>

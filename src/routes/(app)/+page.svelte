@@ -228,8 +228,8 @@
 	}
 
 	function isolationLabel(dog: Dog) {
-		if (dog.isolationStatus === 'sick') return 'sick';
-		if (dog.isolationStatus === 'bite_quarantine') return 'bite quarantine';
+		if (dog.isolationReason === 'sick') return 'sick';
+		if (dog.isolationReason === 'bite_quarantine') return 'bite quarantine';
 		return 'isolation';
 	}
 
@@ -246,8 +246,8 @@
 	}
 
 	function isolationBullet(dog: Dog) {
-		if (dog.isolationStatus === 'sick') return '🩺';
-		if (dog.isolationStatus === 'bite_quarantine') return '⚠';
+		if (dog.isolationReason === 'sick') return '🩺';
+		if (dog.isolationReason === 'bite_quarantine') return '⚠';
 		return '•';
 	}
 

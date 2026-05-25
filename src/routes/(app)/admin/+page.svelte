@@ -1,6 +1,7 @@
 <script lang="ts">
 	import toast from 'svelte-french-toast';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
+	import { migrateFoodTypes } from '$lib/data/migrate-food-types';
 	import { listUserProfiles, updateUserProfile } from '$lib/firebase/firestore';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import type { UserProfile, UserRole } from '$lib/types';
@@ -23,6 +24,9 @@
 	let auditError = '';
 	let auditChanges: SyncChange[] = [];
 	let auditRanAt: Date | null = null;
+
+	let migratingFood = false;
+	let foodMigrateResult = '';
 
 	$: isAdmin = $authProfile?.role === 'admin';
 	$: currentUserId = $authUser?.uid ?? '';
@@ -141,6 +145,21 @@
 		}
 	}
 
+	async function runFoodMigration() {
+		migratingFood = true;
+		foodMigrateResult = '';
+		try {
+			const { updated } = await migrateFoodTypes();
+			foodMigrateResult = updated === 0 ? 'All dogs already up to date.' : `Migrated ${updated} dog${updated === 1 ? '' : 's'}.`;
+			toast.success(foodMigrateResult);
+		} catch (error) {
+			foodMigrateResult = error instanceof Error ? error.message : 'Migration failed.';
+			toast.error(foodMigrateResult);
+		} finally {
+			migratingFood = false;
+		}
+	}
+
 	async function runFullChangeCheck() {
 		auditRunning = true;
 		auditError = '';
@@ -191,6 +210,22 @@
 		</div>
 
 		<div class="admin-grid">
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Migrate food types</h3>
+						<p class="section-copy">Maps existing food type values to Normal, Puppy, No Fish, or No Chicken. Sets supplements flag from notes keywords. Safe to run multiple times.</p>
+					</div>
+					<button class="action-btn" type="button" on:click={runFoodMigration} disabled={migratingFood}>
+						{migratingFood ? 'Migrating…' : 'Run migration'}
+					</button>
+				</div>
+				{#if foodMigrateResult}
+					<p class="status-pill">{foodMigrateResult}</p>
+				{/if}
+			</section>
+
 			<section class="admin-card">
 				<div class="card-header">
 					<div>

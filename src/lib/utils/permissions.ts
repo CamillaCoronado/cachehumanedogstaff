@@ -1,4 +1,4 @@
-import type { DogHandlingLevel, IsolationStatus, UserProfile, UserRole } from '$lib/types';
+import type { DogHandlingLevel, UserProfile, UserRole } from '$lib/types';
 
 export function canEditDogs(role: UserRole | null | undefined) {
 	return role === 'admin' || role === 'manager';
@@ -35,21 +35,18 @@ const handlingRank: Record<DogHandlingLevel, number> = {
 
 export function resolveDogHandlingLevel(
 	handlingLevel: DogHandlingLevel | null | undefined,
-	dayTripManagerOnly: boolean | null | undefined = false,
-	isolationStatus: IsolationStatus | null | undefined = 'none'
+	dayTripManagerOnly: boolean | null | undefined = false
 ): DogHandlingLevel {
-	if (isolationStatus !== 'none') return 'manager_only';
 	if (dayTripManagerOnly === true) return 'manager_only';
 	return handlingLevel ?? 'volunteer';
 }
 
 export function canHandleDog(
 	role: UserRole | null | undefined,
-	handlingLevel: DogHandlingLevel | null | undefined,
-	isolationStatus: IsolationStatus | null | undefined = 'none'
+	handlingLevel: DogHandlingLevel | null | undefined
 ) {
 	const normalizedRole = role ?? 'volunteer';
-	const normalizedHandling = resolveDogHandlingLevel(handlingLevel, false, isolationStatus);
+	const normalizedHandling = resolveDogHandlingLevel(handlingLevel, false);
 	return roleRank[normalizedRole] >= handlingRank[normalizedHandling];
 }
 
@@ -62,10 +59,9 @@ export function handlingRequirementLabel(level: DogHandlingLevel | null | undefi
 
 export function handlingRestrictionReason(
 	level: DogHandlingLevel | null | undefined,
-	role: UserRole | null | undefined,
-	isolationStatus: IsolationStatus | null | undefined = 'none'
+	role: UserRole | null | undefined
 ) {
-	if (canHandleDog(role, level, isolationStatus)) return null;
+	if (canHandleDog(role, level)) return null;
 	const required = handlingRequirementLabel(level);
 	const actor = role ?? 'volunteer';
 	if (required === 'manager') return `Manager-only handling (current role: ${actor})`;

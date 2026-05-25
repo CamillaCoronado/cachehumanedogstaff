@@ -69,8 +69,8 @@ function resolvePuppyBand(dateOfBirth: DateValue | null | undefined, foodType: s
 		const months = ageInMonths(dob, today);
 		if (months <= 3) return 'lt4';
 		if (months <= 9) return 'm4to9';
-		if (months <= 12) return 'm10to12';
-		if (months > 12) return null;
+		if (months < 12) return 'm10to12';
+		return null;
 	}
 
 	// If age is unknown but a puppy diet is explicitly selected, use mid puppy band.
@@ -125,22 +125,23 @@ function fractionToLabel(value: number) {
 
 // ─── Food type classification ───
 
-function includesAny(text: string, keywords: string[]): boolean {
-	return keywords.some((kw) => text.includes(kw));
-}
-
 export function isPuppyFood(dog: Dog): boolean {
-	return includesAny((dog.foodType ?? '').trim().toLowerCase(), ['puppy']);
+	const t = (dog.foodType ?? '').trim().toLowerCase();
+	if (t === 'puppy') return true;
+	if (t === '' || t === 'normal') {
+		const dob = toDate(dog.dateOfBirth ?? null);
+		if (dob) return ageInMonths(dob, new Date()) < 12;
+	}
+	return false;
 }
 
 export function isOwnFood(dog: Dog): boolean {
-	if (dog.hasOwnFood === true) return true;
-	const merged = `${(dog.foodType ?? '').trim().toLowerCase()} ${(dog.dietaryNotes ?? '').trim().toLowerCase()}`;
-	return includesAny(merged, ['own food', 'from home', 'home food', 'brought', 'personal food']);
+	return dog.hasOwnFood === true;
 }
 
 export function isNormalFood(dog: Dog): boolean {
-	return includesAny((dog.foodType ?? '').trim().toLowerCase(), ['normal']);
+	const t = (dog.foodType ?? '').trim().toLowerCase();
+	return t === 'normal' || t === '';
 }
 
 export function foodTypeTone(dog: Dog): 'own' | 'puppy' | 'normal' | 'special' {

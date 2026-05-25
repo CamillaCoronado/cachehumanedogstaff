@@ -161,6 +161,9 @@ const today = new Date();
 			surgeryDate: null,
 			surgeryRestDays: null,
 			lastSurgeryDate: null,
+			fortifloraDate: null,
+			fortifloraDays: null,
+			fortifloraTime: null,
 			isMicrochipped: false,
 			isFixed: false,
 			fixedDate: null,
@@ -175,6 +178,7 @@ const today = new Date();
 			handlingLevel: 'volunteer',
 			inFoster: false,
 			isolationStatus: 'none',
+			isolationReason: null,
 			isolationStartDate: null,
 			status: 'active',
 			createdAt: today,
@@ -339,7 +343,7 @@ const today = new Date();
 	}
 
 	function dogHandlingLevel(dog: Dog) {
-		return resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly, dog.isolationStatus);
+		return resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
 	}
 
 	function adoptionLabel(dog: Dog) {
@@ -374,7 +378,7 @@ const today = new Date();
 	function isBathDue(dog: Dog) {
 		if (dog.inFoster) return false;
 		if (!bathEligible(dog.surgeryDate, today)) return false;
-		const sinceLastBath = daysSince(sinceReturn(dog.lastBathDate, dog.shelterSince), today);
+		const sinceLastBath = daysSince(sinceReturn(dog.lastBathDate, dog.shelterSince ?? dog.intakeDate), today);
 		return sinceLastBath === null || sinceLastBath >= BATH_DUE_DAYS;
 	}
 
@@ -447,7 +451,7 @@ const today = new Date();
 		}
 
 		if (!dog.awaitingEvaluation && tripEligibility.eligible) {
-			const dayTripGap = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince), today);
+			const dayTripGap = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince ?? dog.intakeDate), today);
 			if (dayTripGap === null) {
 				items.push({
 					label: 'No day trip logged yet.',
@@ -473,7 +477,7 @@ const today = new Date();
 			(toDate(dog.intakeDate) ? new Date(toDate(dog.intakeDate)!.getTime() + 7 * 86_400_000) : null);
 		const isPlaygroupReady = playgroupReadyCutoff ? today >= playgroupReadyCutoff : false;
 		if (!dog.awaitingEvaluation && isPlaygroupReady) {
-			const playgroupGap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince), today);
+			const playgroupGap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince ?? dog.intakeDate), today);
 			if (playgroupGap === null) {
 				items.push({
 					label: 'No playgroup logged yet.',

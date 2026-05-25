@@ -45,6 +45,7 @@ const FIELD_LABELS: Record<string, string> = {
 	energyLevel: 'Energy',
 	photoUrl: 'Photo',
 	inFoster: 'Foster',
+	isolationStatus: 'Isolation',
 	status: 'Status',
 	asmShelterCode: 'Shelter code',
 	origin: 'Origin'
@@ -132,6 +133,14 @@ interface AsmAnimal {
 	[key: string]: unknown;
 }
 
+// Strip time/timezone from ASM date strings so format differences don't trigger false changes.
+// ASM may return "2024-01-15T00:00:00", "2024-01-15T00:00:00.000Z", "2024/01/15", etc.
+function normalizeDateStr(val: string | null | undefined): string | null {
+	if (!val) return null;
+	const m = val.match(/(\d{4})[-/](\d{2})[-/](\d{2})/);
+	return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
 function normalizeSex(sexName: string): 'male' | 'female' | 'unknown' {
 	const s = (sexName ?? '').toLowerCase();
 	if (s === 'male') return 'male';
@@ -165,7 +174,10 @@ function normalizeEnergy(value: number | undefined): 'low' | 'medium' | 'high' |
 function asmToStoredFields(animal: AsmAnimal, now: string) {
 	const inFoster = animal.ACTIVEMOVEMENTTYPE === 2;
 	const isPermanentFoster = animal.HASPERMANENTFOSTER === 1;
-	const isIncoming = (animal.DISPLAYLOCATIONNAME ?? '').toLowerCase().includes('incoming');
+	const locationName = (animal.DISPLAYLOCATIONNAME ?? '').toLowerCase();
+	const isIncoming = locationName.includes('incoming');
+	const isolationStatus: 'none' | 'iso' =
+		locationName.includes('iso') ? 'iso' : 'none';
 	const photoUrl =
 		Array.isArray(animal.PHOTOURLS) && animal.PHOTOURLS.length > 0
 			? animal.PHOTOURLS[0]
@@ -183,16 +195,16 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		warningNotes: animal.POPUPWARNING ?? '',
 		healthProblems: animal.HEALTHPROBLEMS ?? '',
 		isMicrochipped: animal.IDENTICHIPPED === 1,
-		microchipDate: animal.IDENTICHIPDATE || null,
+		microchipDate: normalizeDateStr(animal.IDENTICHIPDATE),
 		isFixed: animal.NEUTERED === 1,
-		fixedDate: animal.NEUTEREDDATE || null,
+		fixedDate: normalizeDateStr(animal.NEUTEREDDATE),
 		isVaccinated: (animal.VACCGIVENCOUNT ?? 0) > 0,
 		vaccineCount: animal.VACCGIVENCOUNT ?? 0,
-		vaccinatedDate: animal.VACCRABIESDATE || null,
+		vaccinatedDate: normalizeDateStr(animal.VACCRABIESDATE),
 		weightLbs: typeof animal.WEIGHT === 'number' && animal.WEIGHT > 0 ? animal.WEIGHT : null,
-		dateOfBirth: animal.DATEOFBIRTH || now,
-		intakeDate: animal.MOSTRECENTENTRYDATE || animal.DATEBROUGHTIN || now,
-		originalIntakeDate: animal.DATEBROUGHTIN || now,
+		dateOfBirth: normalizeDateStr(animal.DATEOFBIRTH),
+		intakeDate: normalizeDateStr(animal.MOSTRECENTENTRYDATE || animal.DATEBROUGHTIN),
+		originalIntakeDate: normalizeDateStr(animal.DATEBROUGHTIN),
 		goodWithDogs: normalizeCompat(animal.ISGOODWITHDOGS),
 		goodWithCats: normalizeCompat(animal.ISGOODWITHCATS),
 		goodWithKids: normalizeCompat(animal.ISGOODWITHCHILDREN),
@@ -213,6 +225,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		})(),
 		inFoster,
 		isIncoming,
+		isolationStatus,
 		permanentFoster: isPermanentFoster,
 		// Permanent fosters won't return to shelter — archive them
 		status: isPermanentFoster ? 'adopted' : 'active',
@@ -231,6 +244,10 @@ function defaultStoredFields(now: string) {
 		dietaryNotes: '',
 		hasOwnFood: false,
 		transitionToHills: null,
+		satinBalls: false,
+		hasSupplements: false,
+		hasSecondMeal: false,
+		secondMealAmount: '',
 		origin: '',
 		outdoorKennelAssignment: '',
 		hiddenComments: '',
@@ -244,13 +261,14 @@ function defaultStoredFields(now: string) {
 		currentDayTripStartedAt: null,
 		awaitingEvaluation: true,
 		surgeryDate: null,
+		fortifloraDate: null,
+		fortifloraDays: null,
 		dayTripStatus: 'eligible',
 		dayTripIneligibleReason: null,
 		dayTripManagerOnly: false,
 		dayTripManagerOnlyReason: null,
 		dayTripNotes: null,
 		handlingLevel: 'volunteer',
-		isolationStatus: 'none',
 		isolationStartDate: null,
 		createdAt: now,
 		updatedAt: now
@@ -312,8 +330,16 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		} else {
 			// Compare ASM-sourced fields only (exclude _lastSyncedAt — it always changes)
 			const { _lastSyncedAt: _ignored, ...comparable } = asmToStoredFields(animal, now);
+			const DATE_FIELDS = new Set(['dateOfBirth', 'intakeDate', 'originalIntakeDate', 'microchipDate', 'fixedDate', 'vaccinatedDate']);
 			const changedFields = (Object.entries(comparable) as [string, unknown][])
-				.filter(([k, v]) => existing[k] !== v)
+				.filter(([k, v]) => {
+					const stored = existing[k];
+					if (DATE_FIELDS.has(k)) {
+						// Normalize both sides — existing may be in old full-timestamp format
+						return normalizeDateStr(stored as string) !== normalizeDateStr(v as string);
+					}
+					return stored !== v;
+				})
 				.map(([k, v]) => {
 					const label = FIELD_LABELS[k] ?? k;
 					const formatted = formatSyncValue(k, v);

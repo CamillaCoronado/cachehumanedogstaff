@@ -286,6 +286,9 @@
 					surgeryDate: null,
 					surgeryRestDays: null,
 					lastSurgeryDate: null,
+					fortifloraDate: null,
+					fortifloraDays: null,
+					fortifloraTime: null,
 					isMicrochipped: false,
 					isFixed: false,
 					fixedDate: null,
@@ -298,6 +301,7 @@
 					handlingLevel: 'volunteer',
 					inFoster: false,
 					isolationStatus: 'none',
+					isolationReason: null,
 					isolationStartDate: null,
 					status: 'adopted',
 					hiddenComments: 'Auto-created during day trip import — not found in system'
@@ -642,8 +646,9 @@
 					{:else}
 						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
-							{@const days = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince))}
-							{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
+							{@const effectiveSince = dog.shelterSince ?? dog.intakeDate}
+							{@const days = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
+							{@const daysAtShelter = daysSince(effectiveSince) ?? 0}
 							{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
 							{@const stripe = dogStripeColor(dog, sheetColors)}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
@@ -765,8 +770,9 @@
 						</thead>
 						<tbody>
 							{#each dogStatsRows as dog}
-								{@const days = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince))}
-								{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
+								{@const effectiveSince = dog.shelterSince ?? dog.intakeDate}
+								{@const days = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
+								{@const daysAtShelter = daysSince(effectiveSince) ?? 0}
 								{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
 								{@const eligibility = getEligibility(dog)}
 								{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}

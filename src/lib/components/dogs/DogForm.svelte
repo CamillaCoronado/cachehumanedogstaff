@@ -10,7 +10,7 @@
 		DogSex,
 		DogStatus,
 		EnergyLevel,
-		IsolationStatus,
+		IsolationStatus, IsolationReason,
 		PottyTrainedStatus
 	} from '$lib/types';
 	import { formatDate, toDate } from '$lib/utils/dates';
@@ -32,7 +32,7 @@
 	const MAX_PHOTO_DATA_URL_LENGTH = 900_000;
 	const MAX_PHOTO_SIDE = 1200;
 
-	const foodTypes = ['Normal', 'No Chicken or Fish', 'Puppy Food'];
+	const foodTypes = ['Normal', 'Puppy', 'No Fish', 'No Chicken'];
 	const sexOptions: { value: DogSex; label: string }[] = [
 		{ value: 'unknown', label: 'Unknown' },
 		{ value: 'male', label: 'Male' },
@@ -100,6 +100,9 @@
 	];
 	const isolationStatuses: { value: IsolationStatus; label: string }[] = [
 		{ value: 'none', label: 'Not in Isolation' },
+		{ value: 'iso', label: 'In Isolation' }
+	];
+	const isolationReasons: { value: IsolationReason; label: string }[] = [
 		{ value: 'sick', label: 'Sick' },
 		{ value: 'bite_quarantine', label: 'Bite Quarantine' }
 	];
@@ -177,6 +180,12 @@
 	}
 
 	function handleSelect(field: keyof Dog, newValue: string) {
+		if (field === 'isolationStatus' && newValue === 'none') {
+			value = { ...value, isolationStatus: 'none', isolationReason: null };
+			dispatch('change', { value, valid: true });
+			return;
+		}
+
 		if (field === 'dayTripStatus') {
 			const nextStatus = newValue as DayTripStatus;
 			value = {
@@ -758,6 +767,54 @@
 				</label>
 			</div>
 			<div class="form-field">
+				<label class="form-label typewriter">Special Feeding</label>
+				<div class="flex flex-col gap-2">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							class="form-checkbox"
+							disabled={disabled}
+							checked={value.satinBalls ?? false}
+							on:change={(e) => { value = { ...value, satinBalls: e.currentTarget.checked }; }}
+						/>
+						<span class="text-sm" style="color: var(--marker-black);">Satin balls</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							class="form-checkbox"
+							disabled={disabled}
+							checked={value.hasSupplements ?? false}
+							on:change={(e) => { value = { ...value, hasSupplements: e.currentTarget.checked }; }}
+						/>
+						<span class="text-sm" style="color: var(--marker-black);">Supplements (joint/senior)</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							class="form-checkbox"
+							disabled={disabled}
+							checked={value.hasSecondMeal ?? false}
+							on:change={(e) => { value = { ...value, hasSecondMeal: e.currentTarget.checked }; }}
+						/>
+						<span class="text-sm" style="color: var(--marker-black);">Gets closing meal</span>
+					</label>
+					{#if value.hasSecondMeal}
+						<div class="flex items-center gap-2" style="padding-left: 1.4rem;">
+							<input
+								class="form-input"
+								style="max-width: 10rem;"
+								disabled={disabled}
+								placeholder="Amount (e.g. 1 c)"
+								bind:value={value.secondMealAmount}
+								on:input={(e) => { value = { ...value, secondMealAmount: e.currentTarget.value }; }}
+							/>
+							<span class="text-sm" style="color: var(--marker-black); white-space: nowrap;">if different amount</span>
+						</div>
+					{/if}
+				</div>
+			</div>
+			<div class="form-field">
 				<label class="form-label typewriter">Food Allergies</label>
 				<div class="allergy-checkboxes">
 					{#each allergyOptions as allergyType}
@@ -921,6 +978,28 @@
 						</button>
 					{/each}
 				</div>
+				{#if isInIsolation}
+					<div class="flex flex-wrap gap-2 mt-2">
+						<button
+							type="button"
+							class={`form-choice-btn ${value.isolationReason === null ? 'form-choice-red' : ''}`}
+							disabled={disabled}
+							on:click={() => { value = { ...value, isolationReason: null }; dispatch('change', { value, valid: true }); }}
+						>
+							Unknown
+						</button>
+						{#each isolationReasons as reason}
+							<button
+								type="button"
+								class={`form-choice-btn ${value.isolationReason === reason.value ? 'form-choice-red' : ''}`}
+								disabled={disabled}
+								on:click={() => { value = { ...value, isolationReason: reason.value }; dispatch('change', { value, valid: true }); }}
+							>
+								{reason.label}
+							</button>
+						{/each}
+					</div>
+				{/if}
 				<div class="form-inline-row mt-3">
 					<label class="form-hint">Start Date:</label>
 					<input
@@ -1144,7 +1223,7 @@
 			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Day Trip Status</label>
 				{#if isInIsolation}
-					<p class="form-error">Automatically ineligible due to isolation ({value.isolationStatus === 'sick' ? 'Sick' : 'Bite Quarantine'})</p>
+					<p class="form-error">Automatically ineligible due to isolation{value.isolationReason ? ` (${value.isolationReason === 'sick' ? 'Sick' : 'Bite Quarantine'})` : ''}</p>
 				{:else}
 					<label class="flex items-center gap-2 cursor-pointer mb-2">
 						<input

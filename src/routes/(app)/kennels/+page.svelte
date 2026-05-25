@@ -458,6 +458,8 @@
 		selectedDogId = selectedDogId === dog.id ? null : dog.id;
 	}
 
+	function isIntact(d: Dog) { return !d.isFixed; }
+
 	async function assignDog(dog: Dog, runId: RunId | null) {
 		if (!canEdit) return;
 		if (dog.inFoster && runId !== null) {
@@ -466,6 +468,18 @@
 		}
 		const currentRun = getDogRun(dog);
 		if (currentRun === runId) return;
+
+		if (runId !== null && isIntact(dog)) {
+			const key = runIdToKey(runId);
+			const roommates = (assignments[key] ?? []).filter((d) => d.id !== dog.id);
+			const conflict = roommates.some(
+				(r) => isIntact(r) && r.sex !== dog.sex && r.sex !== 'unknown' && dog.sex !== 'unknown'
+			);
+			if (conflict) {
+				toast.error(`Cannot place ${dog.name} here — intact male and intact female cannot share a kennel.`);
+				return;
+			}
+		}
 
 		dogs = dogs.map((item) => {
 			if (item.id === dog.id) {

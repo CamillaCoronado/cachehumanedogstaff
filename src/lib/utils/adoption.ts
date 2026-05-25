@@ -49,6 +49,7 @@ export function getAdoptionAvailability(
 		Dog,
 		| 'status'
 		| 'isolationStatus'
+		| 'isolationReason'
 		| 'isMicrochipped'
 		| 'isVaccinated'
 		| 'isFixed'
@@ -67,8 +68,7 @@ export function getAdoptionAvailability(
 	const withNote = (label: string) => (note ? `${label}: ${note}` : label);
 	const effectiveHandlingLevel = resolveDogHandlingLevel(
 		dog.handlingLevel,
-		dog.dayTripManagerOnly,
-		dog.isolationStatus
+		dog.dayTripManagerOnly
 	);
 
 	if (dog.notAdoptable) {
@@ -103,7 +103,7 @@ export function getAdoptionAvailability(
 			available: false,
 			state: 'isolation_hold',
 			missingMedicalRequirements: [],
-			holdReason: dog.isolationStatus === 'sick' ? 'sick isolation' : 'bite quarantine'
+			holdReason: dog.isolationReason === 'sick' ? 'sick isolation' : dog.isolationReason === 'bite_quarantine' ? 'bite quarantine' : 'isolation'
 		};
 	}
 

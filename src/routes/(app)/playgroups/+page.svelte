@@ -116,9 +116,14 @@
 		return false;
 	}
 
+	function intactConflict(dogs: Dog[]): boolean {
+		const hasIntactMale = dogs.some((d) => !d.isFixed && d.sex === 'male');
+		const hasIntactFemale = dogs.some((d) => !d.isFixed && d.sex === 'female');
+		return hasIntactMale && hasIntactFemale;
+	}
+
 	function getReadiness(dog: Dog): DogReadiness {
 		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no') return 'hold';
-		if (!dog.isFixed) return 'hold';
 		if (isOnMedicalRest(dog)) return 'hold';
 		const weeks = ageWeeks(dog);
 		if (weeks !== null && weeks < 26) {
@@ -142,7 +147,6 @@
 		if (readiness === 'hold') {
 			if (dog.isolationStatus !== 'none') return 'In isolation: do not schedule.';
 			if (dog.goodWithDogs === 'no') return 'Marked not dog-social: behavior team only.';
-			if (!dog.isFixed) return 'Not fixed: cannot participate in playgroups.';
 			const surgeryDaysAgo = daysSince(dog.surgeryDate);
 			if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) {
 				const daysLeft = (dog.surgeryRestDays ?? 0) - surgeryDaysAgo;
@@ -209,6 +213,7 @@
 		for (let i = 0; i < sortedReady.length; i += 2) {
 			const group = sortedReady.slice(i, i + 2);
 			if (group.length < 2) continue;
+			if (intactConflict(group)) continue;
 			const number = Math.floor(i / 2) + 1;
 			list.push({
 				id: `ready-${group.map((dog) => dog.id).join('-')}`,
@@ -232,6 +237,7 @@
 					return a.name.localeCompare(b.name);
 				})[0];
 			if (!anchor) continue;
+			if (intactConflict([cautionDog, anchor])) continue;
 			usedAnchorIds.add(anchor.id);
 			list.push({
 				id: `eval-${cautionDog.id}-${anchor.id}`,
