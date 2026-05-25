@@ -97,6 +97,10 @@ interface StoredDog {
 	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
 	isolationReason?: 'sick' | 'bite_quarantine' | null;
 	isolationUntilDate?: string | null;
+	treatmentName?: string | null;
+	treatmentNotes?: string | null;
+	treatmentStartDate?: string | null;
+	treatmentEndDate?: string | null;
 	status: 'active' | 'adopted';
 	createdAt: string;
 	updatedAt: string;
@@ -343,6 +347,10 @@ function serializeDog(dog: Dog): StoredDog {
 		isolationStatus: dog.isolationStatus,
 		isolationReason: dog.isolationReason ?? null,
 		isolationUntilDate: toDateString(dog.isolationUntilDate),
+		treatmentName: dog.treatmentName ?? null,
+		treatmentNotes: dog.treatmentNotes ?? null,
+		treatmentStartDate: toDateString(dog.treatmentStartDate),
+		treatmentEndDate: toDateString(dog.treatmentEndDate),
 		status: dog.status,
 		createdAt: toDateString(dog.createdAt) ?? new Date().toISOString(),
 		updatedAt: toDateString(dog.updatedAt) ?? new Date().toISOString()
@@ -449,6 +457,10 @@ function deserializeDog(stored: StoredDog): Dog {
 		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
 		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
 		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,
+		treatmentName: stored.treatmentName ?? null,
+		treatmentNotes: stored.treatmentNotes ?? null,
+		treatmentStartDate: stored.treatmentStartDate ? toDate(stored.treatmentStartDate) : null,
+		treatmentEndDate: stored.treatmentEndDate ? toDate(stored.treatmentEndDate) : null,
 		status: stored.status,
 		createdAt: toDate(stored.createdAt) ?? new Date(),
 		updatedAt: toDate(stored.updatedAt) ?? new Date()
@@ -648,33 +660,13 @@ async function deleteDogSubcollection(
 	await Promise.all(snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref)));
 }
 
-async function archiveExpiredSurgeries(dogs: Dog[]): Promise<void> {
-	const today = new Date();
-	const expired = dogs.filter((dog) => {
-		if (!dog.surgeryDate) return false;
-		const surgeryDay = toDate(dog.surgeryDate);
-		if (!surgeryDay) return false;
-		const daysAgo = Math.floor((today.getTime() - surgeryDay.getTime()) / 86_400_000);
-		return daysAgo >= 1;
-	});
-	if (expired.length === 0) return;
-	await Promise.all(
-		expired.map((dog) =>
-			updateDog(dog.id, {
-				lastSurgeryDate: dog.surgeryDate,
-				surgeryDate: null,
-				surgeryRestDays: null
-			})
-		)
-	);
-}
 
 export async function listDogs() {
 	const ref = dogsCollectionRef();
 	if (ref) {
 		const snapshot = await getDocs(ref);
 		const dogs = snapshot.docs.map((docSnap) =>
-			deserializeDog({ id: docSnap.id, ...(docSnap.data() as StoredDog) })
+			deserializeDog({ ...(docSnap.data() as StoredDog), id: docSnap.id })
 		);
 		return deduplicateAgainstAsm(dogs);
 	}
@@ -688,7 +680,7 @@ export async function getDog(id: string) {
 	if (ref) {
 		const snapshot = await getDoc(ref);
 		if (!snapshot.exists()) return null;
-		return deserializeDog({ id: snapshot.id, ...(snapshot.data() as StoredDog) });
+		return deserializeDog({ ...(snapshot.data() as StoredDog), id: snapshot.id });
 	}
 
 	const stored = readJson<StoredDog[]>(DOGS_KEY, []);
@@ -808,7 +800,7 @@ export async function listBehavioralNotes(dogId: string) {
 	if (ref) {
 		const snapshot = await getDocs(ref);
 		const notes = snapshot.docs.map((docSnap) =>
-			deserializeNote({ id: docSnap.id, ...(docSnap.data() as StoredNote) })
+			deserializeNote({ ...(docSnap.data() as StoredNote), id: docSnap.id })
 		);
 		return sortByDateDesc(notes, (note) => note.createdAt);
 	}
@@ -865,7 +857,7 @@ export async function listAllFeedingLogsForToday(today = new Date()): Promise<Re
 		for (const docSnap of snapshot.docs) {
 			const dogId = docSnap.ref.parent.parent?.id;
 			if (!dogId) continue;
-			const log = deserializeFeedingLog({ id: docSnap.id, ...(docSnap.data() as StoredFeedingLog) });
+			const log = deserializeFeedingLog({ ...(docSnap.data() as StoredFeedingLog), id: docSnap.id });
 			(byDog[dogId] ??= []).push(log);
 		}
 		return byDog;
@@ -891,7 +883,7 @@ export async function listFeedingLogs(dogId: string) {
 	if (ref) {
 		const snapshot = await getDocs(ref);
 		const logs = snapshot.docs.map((docSnap) =>
-			deserializeFeedingLog({ id: docSnap.id, ...(docSnap.data() as StoredFeedingLog) })
+			deserializeFeedingLog({ ...(docSnap.data() as StoredFeedingLog), id: docSnap.id })
 		);
 		return sortByDateDesc(logs, (log) => log.date);
 	}
@@ -907,7 +899,7 @@ export async function listBathLogs(dogId: string) {
 		try {
 			const snapshot = await getDocs(ref);
 			const logs = snapshot.docs.map((docSnap) =>
-				deserializeBathLog({ id: docSnap.id, ...(docSnap.data() as StoredBathLog) })
+				deserializeBathLog({ ...(docSnap.data() as StoredBathLog), id: docSnap.id })
 			);
 			return sortByDateDesc(logs, (log) => log.timestamp);
 		} catch (error) {
@@ -1007,7 +999,7 @@ export async function listStoolLogs(dogId: string) {
 	if (ref) {
 		const snapshot = await getDocs(ref);
 		const logs = snapshot.docs.map((docSnap) =>
-			deserializeStoolLog({ id: docSnap.id, ...(docSnap.data() as StoredStoolLog) })
+			deserializeStoolLog({ ...(docSnap.data() as StoredStoolLog), id: docSnap.id })
 		);
 		return sortByDateDesc(logs, (log) => log.timestamp);
 	}
@@ -1022,7 +1014,7 @@ export async function listDayTripLogs(dogId: string) {
 	if (ref) {
 		const snapshot = await getDocs(ref);
 		const logs = snapshot.docs.map((docSnap) =>
-			deserializeDayTripLog({ id: docSnap.id, ...(docSnap.data() as StoredDayTripLog) })
+			deserializeDayTripLog({ ...(docSnap.data() as StoredDayTripLog), id: docSnap.id })
 		);
 		return sortByDateDesc(logs, (log) => log.startedAt);
 	}
@@ -1036,7 +1028,7 @@ export async function listAllDayTripLogs() {
 	if (db) {
 		const snapshot = await getDocs(collectionGroup(db, 'dayTripLogs'));
 		const logs = snapshot.docs.map((docSnap) =>
-			deserializeDayTripLog({ id: docSnap.id, ...(docSnap.data() as StoredDayTripLog) })
+			deserializeDayTripLog({ ...(docSnap.data() as StoredDayTripLog), id: docSnap.id })
 		);
 		return sortByDateDesc(logs, (log) => log.startedAt);
 	}

@@ -524,7 +524,7 @@
 				listAllDayTripLogs(),
 				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
 			]);
-			sheetColors = colorsRes;
+			sheetColors = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
 			dogs = dogRows;
 
 			const evaluated = dogRows.filter((d) => {

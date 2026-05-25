@@ -104,6 +104,10 @@ export interface Dog {
 	isolationStatus: IsolationStatus;
 	isolationReason: IsolationReason | null;
 	isolationUntilDate: DateValue | null;
+	treatmentName?: string | null;
+	treatmentNotes?: string | null;
+	treatmentStartDate?: DateValue | null;
+	treatmentEndDate?: DateValue | null;
 	status: DogStatus;
 	createdAt: DateValue;
 	updatedAt: DateValue;

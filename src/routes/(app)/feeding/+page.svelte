@@ -486,6 +486,10 @@
 	}
 
 	function isSurgeryBlocked(dog: Dog) {
+		return isSurgeryToday(dog.surgeryDate, selectedDay) && mealTime === 'am';
+	}
+
+	function isSurgeryDay(dog: Dog) {
 		return isSurgeryToday(dog.surgeryDate, selectedDay);
 	}
 
@@ -552,7 +556,7 @@
 		if (markingAll) return;
 		markingAll = true;
 		try {
-			const targets = shelterDogs.filter((dog) => !fedMap[dog.id] && !isSurgeryBlocked(dog));
+			const targets = shelterDogs.filter((dog) => !fedMap[dog.id]);
 			await Promise.all(
 				targets.map((dog) =>
 					addFeedingLog(
@@ -560,8 +564,8 @@
 						{
 							date: selectedDay,
 							mealTime,
-							amountEaten: 'all',
-							notes: null
+							amountEaten: isSurgeryBlocked(dog) ? 'none' : 'all',
+							notes: isSurgeryBlocked(dog) ? 'Surgery — do not feed' : null
 						},
 						$authProfile
 					)
@@ -699,7 +703,7 @@
 							{@const fedLog = fedMap[dog.id]}
 							<article
 								class={`feeding-feed-row ${fedLog ? 'feeding-feed-row-fed' : ''} ${
-									isSurgeryBlocked(dog) ? 'feeding-feed-row-alert' : ''
+									isSurgeryBlocked(dog) ? 'feeding-feed-row-blocked' : isSurgeryDay(dog) ? 'feeding-feed-row-alert' : ''
 								}`}
 							>
 								<div class="feeding-feed-order">{index + 1}</div>
@@ -711,7 +715,9 @@
 									{/if}
 								</div>
 								<div class="feeding-feed-plan">
-									{#if editingFeedId === dog.id}
+									{#if isSurgeryBlocked(dog)}
+										<!-- no food info shown for do-not-feed dogs -->
+									{:else if editingFeedId === dog.id}
 										<div class="feed-edit-panel">
 											<div class="feed-edit-row">
 												<label class="feed-edit-label typewriter" for="feed-type-{dog.id}">Type</label>
@@ -812,6 +818,8 @@
 										{/if}
 										{#if isSurgeryBlocked(dog)}
 											<span class="surgery-pill">Do not feed</span>
+										{:else if isSurgeryDay(dog)}
+											<span class="surgery-day-pill">Surgery day</span>
 										{/if}
 									</div>
 									{#if fedLog}
@@ -1438,9 +1446,9 @@
 		box-shadow: inset 0 0 0 1px #b6d9c2;
 	}
 
-	.feeding-feed-row-alert {
-		background: #fff8df;
-		box-shadow: inset 0 0 0 1px #ddc27b;
+	.feeding-feed-row-blocked {
+		background: #fde0e0;
+		box-shadow: inset 0 0 0 1px #c97070;
 	}
 
 	.feeding-feed-order {
@@ -1737,7 +1745,12 @@
 		background: #eaf8ee;
 	}
 
-	.surgery-pill {
+	.feeding-feed-row-alert {
+		background: #fff8df;
+		box-shadow: inset 0 0 0 1px #ddc27b;
+	}
+
+	.surgery-day-pill {
 		display: inline-flex;
 		border: 1.5px solid #e4c981;
 		border-radius: 0.2rem;
@@ -1748,6 +1761,19 @@
 		text-transform: uppercase;
 		color: #785c14;
 		background: #fff0b8;
+	}
+
+	.surgery-pill {
+		display: inline-flex;
+		border: 1.5px solid #b03030;
+		border-radius: 0.2rem;
+		padding: 0.18rem 0.45rem;
+		font-size: 0.66rem;
+		font-weight: 700;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		color: #ffffff;
+		background: #cf4b4b;
 	}
 
 	.feeding-field,
