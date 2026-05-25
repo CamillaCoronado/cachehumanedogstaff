@@ -179,7 +179,7 @@ const today = new Date();
 			inFoster: false,
 			isolationStatus: 'none',
 			isolationReason: null,
-			isolationStartDate: null,
+			isolationUntilDate: null,
 			status: 'active',
 			createdAt: today,
 			updatedAt: today

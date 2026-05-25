@@ -1001,13 +1001,13 @@
 					</div>
 				{/if}
 				<div class="form-inline-row mt-3">
-					<label class="form-hint">Start Date:</label>
+					<label class="form-hint">Until:</label>
 					<input
 						type="date"
 						class="form-input form-inline-date"
 						disabled={disabled}
-						value={toDate(value.isolationStartDate)?.toISOString().slice(0, 10) ?? ''}
-						on:change={(event) => handleDateChange('isolationStartDate', event.currentTarget.value)}
+						value={toDate(value.isolationUntilDate)?.toISOString().slice(0, 10) ?? ''}
+						on:change={(event) => handleDateChange('isolationUntilDate', event.currentTarget.value)}
 					/>
 				</div>
 			</div>

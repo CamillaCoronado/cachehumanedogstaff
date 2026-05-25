@@ -269,7 +269,7 @@ function defaultStoredFields(now: string) {
 		dayTripManagerOnlyReason: null,
 		dayTripNotes: null,
 		handlingLevel: 'volunteer',
-		isolationStartDate: null,
+		isolationUntilDate: null,
 		createdAt: now,
 		updatedAt: now
 	};

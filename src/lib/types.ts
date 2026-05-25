@@ -103,7 +103,7 @@ export interface Dog {
 	asmShelterCode?: string;
 	isolationStatus: IsolationStatus;
 	isolationReason: IsolationReason | null;
-	isolationStartDate: DateValue | null;
+	isolationUntilDate: DateValue | null;
 	status: DogStatus;
 	createdAt: DateValue;
 	updatedAt: DateValue;

@@ -96,7 +96,7 @@ interface StoredDog {
 	isIncoming?: boolean;
 	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
 	isolationReason?: 'sick' | 'bite_quarantine' | null;
-	isolationStartDate?: string | null;
+	isolationUntilDate?: string | null;
 	status: 'active' | 'adopted';
 	createdAt: string;
 	updatedAt: string;
@@ -342,7 +342,7 @@ function serializeDog(dog: Dog): StoredDog {
 		asmShelterCode: dog.asmShelterCode ?? '',
 		isolationStatus: dog.isolationStatus,
 		isolationReason: dog.isolationReason ?? null,
-		isolationStartDate: toDateString(dog.isolationStartDate),
+		isolationUntilDate: toDateString(dog.isolationUntilDate),
 		status: dog.status,
 		createdAt: toDateString(dog.createdAt) ?? new Date().toISOString(),
 		updatedAt: toDateString(dog.updatedAt) ?? new Date().toISOString()
@@ -448,7 +448,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		isIncoming: stored.isIncoming ?? false,
 		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
 		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
-		isolationStartDate: stored.isolationStartDate ? toDate(stored.isolationStartDate) : null,
+		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,
 		status: stored.status,
 		createdAt: toDate(stored.createdAt) ?? new Date(),
 		updatedAt: toDate(stored.updatedAt) ?? new Date()

@@ -56,8 +56,25 @@
 
 	onMount(async () => {
 		dogs = await listDogs();
+		await autoClearExpiredIsolations();
 		loading = false;
 	});
+
+	async function autoClearExpiredIsolations() {
+		const expired = dogs.filter((d) => {
+			if (d.status !== 'active' || d.isolationStatus === 'none') return false;
+			const until = toDate(d.isolationUntilDate ?? null);
+			if (!until) return false;
+			return differenceInDays(startOfDay(today), startOfDay(until)) > 0;
+		});
+		if (expired.length === 0) return;
+		await Promise.all(
+			expired.map((d) => updateDog(d.id, { isolationStatus: 'none', isolationUntilDate: null }))
+		);
+		dogs = await listDogs();
+		const names = expired.map((d) => d.name).join(', ');
+		toast.success(`Isolation cleared: ${names}`);
+	}
 
 	$: surgeryDogs = dogs
 		.filter((d) => d.status === 'active' && d.surgeryDate !== null)
@@ -160,7 +177,17 @@
 
 	$: isolatedDogs = dogs
 		.filter((d) => d.status === 'active' && d.isolationStatus !== 'none')
-		.sort((a, b) => a.name.localeCompare(b.name));
+		.map((d) => {
+			const until = toDate(d.isolationUntilDate ?? null);
+			const daysLeft = until ? differenceInDays(startOfDay(until), startOfDay(today)) : null;
+			return { dog: d, daysLeft };
+		})
+		.sort((a, b) => {
+			if (a.daysLeft !== null && b.daysLeft !== null) return a.daysLeft - b.daysLeft;
+			if (a.daysLeft !== null) return -1;
+			if (b.daysLeft !== null) return 1;
+			return a.dog.name.localeCompare(b.dog.name);
+		});
 
 	async function putInIsolation() {
 		if (!isoDogId) return;
@@ -169,7 +196,7 @@
 			await updateDog(isoDogId, {
 				isolationStatus: 'iso',
 				isolationReason: isoReason || null,
-				isolationStartDate: new Date(isoDate + 'T12:00:00')
+				isolationUntilDate: new Date(isoDate + 'T12:00:00')
 			});
 			dogs = await listDogs();
 			isoDogId = '';
@@ -185,12 +212,27 @@
 
 	async function clearIsolation(dog: Dog) {
 		try {
-			await updateDog(dog.id, { isolationStatus: 'none', isolationStartDate: null });
+			await updateDog(dog.id, { isolationStatus: 'none', isolationUntilDate: null });
 			dogs = await listDogs();
 			toast.success(`${dog.name} cleared from isolation.`);
 		} catch {
 			toast.error('Could not clear isolation.');
 		}
+	}
+
+	async function updateIsoDate(dog: Dog, dateStr: string) {
+		if (!dateStr) return;
+		try {
+			await updateDog(dog.id, { isolationUntilDate: new Date(dateStr + 'T12:00:00') });
+			dogs = await listDogs();
+		} catch {
+			toast.error('Could not update isolation date.');
+		}
+	}
+
+	function isoDateValue(dog: Dog): string {
+		const d = toDate(dog.isolationUntilDate ?? null);
+		return d ? d.toISOString().slice(0, 10) : '';
 	}
 </script>
 
@@ -368,7 +410,7 @@
 		<p class="medical-state">No dogs in isolation.</p>
 	{:else}
 		<div class="surgery-list">
-			{#each isolatedDogs as dog}
+			{#each isolatedDogs as { dog, daysLeft }}
 				<div class="surgery-card surgery-card-today">
 					<div class="surgery-card-left">
 						<button class="surgery-name-link" on:click={() => goto(`/dogs/${dog.id}`)}>
@@ -380,9 +422,20 @@
 					</div>
 
 					<div class="surgery-card-center">
-						{#if dog.isolationStartDate}
-							<span class="surgery-date">Since: {formatDate(toDate(dog.isolationStartDate) ?? new Date())}</span>
-						{/if}
+						<div class="iso-date-row">
+							<span class="surgery-date iso-date-label">Until:</span>
+							<input
+								class="surgery-add-input iso-date-input"
+								type="date"
+								value={isoDateValue(dog)}
+								on:change={(e) => updateIsoDate(dog, e.currentTarget.value)}
+							/>
+							{#if daysLeft !== null}
+								<span class="surgery-status {daysLeft === 0 ? 'surgery-status-today' : 'surgery-status-rest'}">
+									{daysLeft === 0 ? 'Last day' : `${daysLeft}d left`}
+								</span>
+							{/if}
+						</div>
 						<div class="iso-reason-row">
 							{#each isoReasonOptions as opt}
 								<button
@@ -505,6 +558,22 @@
 	.surgery-add-btn:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+
+	.iso-date-row {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.iso-date-label {
+		flex-shrink: 0;
+	}
+
+	.iso-date-input {
+		width: auto;
+		font-size: 0.78rem;
+		padding: 0.18rem 0.4rem;
 	}
 
 	.iso-reason-row {

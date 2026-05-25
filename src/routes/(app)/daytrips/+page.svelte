@@ -302,7 +302,7 @@
 					inFoster: false,
 					isolationStatus: 'none',
 					isolationReason: null,
-					isolationStartDate: null,
+					isolationUntilDate: null,
 					status: 'adopted',
 					hiddenComments: 'Auto-created during day trip import — not found in system'
 				});
