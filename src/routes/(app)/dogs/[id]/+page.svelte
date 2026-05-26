@@ -40,6 +40,11 @@
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { confetti } from '@neoconfetti/svelte';
+
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return { destroy() { node.remove(); } };
+	}
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 	let dog: Dog | null = null;
@@ -1024,7 +1029,7 @@
 {/if}
 
 {#if showAdoptionCelebration}
-	<div class="adoption-overlay" role="presentation" on:click={() => showAdoptionCelebration = false}>
+	<div class="adoption-overlay" use:portal role="presentation" on:click={() => showAdoptionCelebration = false}>
 		<div class="adoption-celebration">
 			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
 			{#if celebrationPhotoUrl}

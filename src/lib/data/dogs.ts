@@ -101,7 +101,7 @@ interface StoredDog {
 	treatmentNotes?: string | null;
 	treatmentStartDate?: string | null;
 	treatmentEndDate?: string | null;
-	status: 'active' | 'adopted';
+	status: 'active' | 'adopted' | 'transferred' | 'euthanized';
 	createdAt: string;
 	updatedAt: string;
 }

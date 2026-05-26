@@ -57,6 +57,18 @@
 	let asmLastChangedAt: string | null = null;
 	let asmLogVisible = false;
 
+	import { getDog } from '$lib/data/dogs';
+	import type { Dog } from '$lib/types';
+	let fosterDogs: Dog[] = [];
+	let showFosterMoment = false;
+	let transferDogs: Dog[] = [];
+	let showTransferMoment = false;
+
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return { destroy() { node.remove(); } };
+	}
+
 	const STORAGE_KEY = 'asm_last_changes';
 
 	beforeNavigate(({ from, to }) => {
@@ -105,7 +117,26 @@
 						localStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: asmChanges, changedAt: asmLastChangedAt }));
 					} catch { /* ignore */ }
 					asmLogVisible = true;
-				}
+
+					const fosterChanges = result.changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)'));
+					if (fosterChanges.length > 0) {
+						Promise.all(fosterChanges.map((c) => getDog(c.id)))
+							.then((dogs) => {
+								fosterDogs = dogs.filter((d): d is Dog => d !== null);
+								if (fosterDogs.length > 0) showFosterMoment = true;
+							})
+							.catch(() => {/* best-effort */});
+					}
+					const transferChanges = result.changes.filter((c) => c.isTransferredOut);
+					if (transferChanges.length > 0) {
+						Promise.all(transferChanges.map((c) => getDog(c.id)))
+							.then((dogs) => {
+								transferDogs = dogs.filter((d): d is Dog => d !== null);
+								if (transferDogs.length > 0) showTransferMoment = true;
+							})
+							.catch(() => {/* best-effort */});
+					}
+					}
 			})
 			.catch((err: unknown) => {
 				asmError = err instanceof Error ? err.message : 'Sync failed';
@@ -275,7 +306,11 @@
 								<li class="sync-log-item">
 									<span class="sync-log-name">{change.name}</span>
 							{#if change.isArchived}
-								<span class="sync-log-tag sync-log-tag-archived">Marked adopted</span>
+								<span class="sync-log-tag sync-log-tag-archived">Adopted</span>
+							{:else if change.isTransferredOut}
+								<span class="sync-log-tag sync-log-tag-transferred">Transferred out</span>
+							{:else if change.isEuthanized}
+								<span class="sync-log-tag sync-log-tag-euthanized">Euthanized</span>
 							{:else if change.isNew}
 								<span class="sync-log-tag sync-log-tag-new">Added to shelter</span>
 							{:else}
@@ -385,6 +420,50 @@
 					</div>
 				</div>
 			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showTransferMoment && transferDogs.length > 0}
+	<div class="transfer-overlay" use:portal role="presentation" on:click={() => showTransferMoment = false}>
+		<div class="transfer-moment">
+			<p class="transfer-heading">Off to a new shelter! 🚌</p>
+			<div class="transfer-dogs-row">
+				{#each transferDogs as dog}
+					<div class="transfer-dog-item">
+						{#if dog.photoUrl}
+							<img class="transfer-photo" src={dog.photoUrl} alt={dog.name} />
+						{:else}
+							<div class="transfer-photo transfer-photo-placeholder"></div>
+						{/if}
+						<p class="transfer-name">{dog.name}</p>
+					</div>
+				{/each}
+			</div>
+			<p class="transfer-subtext">A new chance to find their forever home</p>
+			<button class="transfer-close typewriter" on:click={() => showTransferMoment = false}>Close</button>
+		</div>
+	</div>
+{/if}
+
+
+{#if showFosterMoment && fosterDogs.length > 0}
+	<div class="foster-overlay" use:portal role="presentation" on:click={() => showFosterMoment = false}>
+		<div class="foster-moment">
+			<p class="foster-heading">Heading to a foster home 🏡</p>
+			<div class="foster-dogs-row">
+				{#each fosterDogs as dog}
+					<div class="foster-dog-item">
+						{#if dog.photoUrl}
+							<img class="foster-photo" src={dog.photoUrl} alt={dog.name} />
+						{:else}
+							<div class="foster-photo foster-photo-placeholder"></div>
+						{/if}
+						<p class="foster-name">{dog.name}</p>
+					</div>
+				{/each}
+			</div>
+			<button class="foster-close typewriter" on:click={() => showFosterMoment = false}>Close</button>
 		</div>
 	</div>
 {/if}
@@ -645,16 +724,34 @@
 		flex-shrink: 0;
 	}
 
-	.sync-log-tag-archived {
+	.sync-log-tag-archived,
+	.sync-log-tag-transferred,
+	.sync-log-tag-euthanized,
+	.sync-log-tag-new {
 		font-size: 0.6rem;
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		padding: 0.1rem 0.38rem;
 		border-radius: 999px;
+	}
+
+	.sync-log-tag-archived {
 		background: rgba(180, 60, 30, 0.1);
 		color: #a0341a;
 		border: 1px solid rgba(180, 60, 30, 0.2);
+	}
+
+	.sync-log-tag-transferred {
+		background: rgba(60, 100, 160, 0.1);
+		color: #2a5c9e;
+		border: 1px solid rgba(60, 100, 160, 0.2);
+	}
+
+	.sync-log-tag-euthanized {
+		background: rgba(90, 90, 100, 0.1);
+		color: #4a4a58;
+		border: 1px solid rgba(90, 90, 100, 0.2);
 	}
 
 	.sync-log-tag-new {
@@ -1186,4 +1283,197 @@
 			padding: 0.85rem;
 		}
 	}
+
+.transfer-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(220, 245, 225, 0.9);
+	backdrop-filter: blur(4px);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+	animation: fosterFadeIn 0.4s ease;
+}
+
+.transfer-moment {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	text-align: center;
+	max-width: 28rem;
+	width: 100%;
+}
+
+.transfer-heading {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1.4rem, 5vw, 2rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #1a5c2a;
+	line-height: 1.1;
+}
+
+.transfer-dogs-row {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 1.2rem;
+}
+
+.transfer-dog-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.transfer-photo {
+	width: clamp(5rem, 20vw, 8rem);
+	height: clamp(5rem, 20vw, 8rem);
+	object-fit: cover;
+	border-radius: 50%;
+	border: 3px solid #5bbf74;
+	box-shadow: 0 4px 18px rgba(30, 140, 60, 0.2);
+}
+
+.transfer-photo-placeholder {
+	background: rgba(30, 140, 60, 0.1);
+}
+
+.transfer-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1rem, 3.5vw, 1.5rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #143d1e;
+	line-height: 1;
+}
+
+.transfer-subtext {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: 0.85rem;
+	color: #2a6e3a;
+	opacity: 0.8;
+}
+
+.transfer-close {
+	margin-top: 0.2rem;
+	border: 1px solid #5bbf74;
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(91, 191, 116, 0.15);
+	color: #1a5c2a;
+	cursor: pointer;
+}
+
+.transfer-close:hover {
+	background: rgba(91, 191, 116, 0.28);
+}
+
+.foster-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(255, 245, 220, 0.88);
+	backdrop-filter: blur(4px);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+	animation: fosterFadeIn 0.4s ease;
+}
+
+@keyframes fosterFadeIn {
+	from { opacity: 0; }
+	to   { opacity: 1; }
+}
+
+.foster-moment {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	text-align: center;
+	max-width: 28rem;
+	width: 100%;
+}
+
+.foster-heading {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1.4rem, 5vw, 2rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #7a4f10;
+	line-height: 1.1;
+}
+
+.foster-dogs-row {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 1.2rem;
+}
+
+.foster-dog-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.foster-photo {
+	width: clamp(5rem, 20vw, 8rem);
+	height: clamp(5rem, 20vw, 8rem);
+	object-fit: cover;
+	border-radius: 50%;
+	border: 3px solid #e8c07a;
+	box-shadow: 0 4px 18px rgba(180, 120, 30, 0.22);
+}
+
+.foster-photo-placeholder {
+	background: rgba(180, 120, 30, 0.12);
+}
+
+.foster-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1rem, 3.5vw, 1.5rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #5a3a00;
+	line-height: 1;
+}
+
+.foster-close {
+	margin-top: 0.2rem;
+	border: 1px solid #c8993a;
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(200, 153, 58, 0.15);
+	color: #7a4f10;
+	cursor: pointer;
+}
+
+.foster-close:hover {
+	background: rgba(200, 153, 58, 0.28);
+}
 </style>

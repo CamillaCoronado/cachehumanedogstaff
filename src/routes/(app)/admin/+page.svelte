@@ -6,8 +6,13 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDateTime } from '$lib/utils/dates';
-	import { getDog } from '$lib/data/dogs';
+	import { getDog, listDogs } from '$lib/data/dogs';
 	import { confetti } from '@neoconfetti/svelte';
+
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return { destroy() { node.remove(); } };
+	}
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -31,23 +36,36 @@
 	let foodMigrateResult = '';
 
 	let showCelebrationTest = false;
-	let testDog: Dog | null = null;
+	let testDogs: Dog[] = [];
+
+	let showFosterTest = false;
+	let fosterTestDog: Dog | null = null;
+
+	let showTransferTest = false;
+	let transferTestDog: Dog | null = null;
+
+	async function testFosterMoment() {
+		const all = await listDogs();
+		const active = all.filter((d) => d.status === 'active');
+		if (active.length === 0) { toast.error('No active dogs found.'); return; }
+		fosterTestDog = active[Math.floor(Math.random() * active.length)];
+		showFosterTest = true;
+	}
+
+	async function testTransferMoment() {
+		const all = await listDogs();
+		const active = all.filter((d) => d.status === 'active');
+		if (active.length === 0) { toast.error('No active dogs found.'); return; }
+		transferTestDog = active[Math.floor(Math.random() * active.length)];
+		showTransferTest = true;
+	}
 
 	async function testAdoptionCelebration() {
-		const allChanges: SyncChange[] = (() => {
-			try {
-				const stored = localStorage.getItem('asm_last_changes');
-				if (stored) {
-					const parsed = JSON.parse(stored) as { changes: SyncChange[] };
-					return [...parsed.changes, ...auditChanges];
-				}
-			} catch { /* ignore */ }
-			return [...auditChanges];
-		})();
-		const lastArchived = [...allChanges].reverse().find((c) => c.isArchived);
-		if (!lastArchived) { toast.error('No recent adoptions found in sync changes.'); return; }
-		testDog = await getDog(lastArchived.id);
-		if (!testDog) { toast.error('Dog record not found.'); return; }
+		const all = await listDogs();
+		const active = all.filter((d) => d.status === 'active');
+		if (active.length === 0) { toast.error('No active dogs found.'); return; }
+		const pick = active[Math.floor(Math.random() * active.length)];
+		testDogs = [pick];
 		showCelebrationTest = true;
 	}
 
@@ -95,7 +113,9 @@
 	}
 
 	function describeChange(change: SyncChange) {
-		if (change.isArchived) return 'Marked adopted';
+		if (change.isArchived) return 'Adopted';
+		if (change.isTransferredOut) return 'Transferred out';
+		if (change.isEuthanized) return 'Euthanized';
 		if (change.isNew) return 'Added to shelter';
 		return `Updated: ${change.fields.join(', ')}`;
 	}
@@ -249,6 +269,32 @@
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
+						<p class="section-kicker">UI</p>
+						<h3 class="section-title">Test foster moment</h3>
+						<p class="section-copy">Previews the foster overlay using the most recently fostered dog from the last sync run.</p>
+					</div>
+					<button class="action-btn" type="button" on:click={testFosterMoment}>
+						Test 🏡
+					</button>
+				</div>
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">UI</p>
+						<h3 class="section-title">Test transfer moment</h3>
+						<p class="section-copy">Previews the transfer-out overlay using dogs transferred out in the last sync run.</p>
+					</div>
+					<button class="action-btn" type="button" on:click={testTransferMoment}>
+						Test 🚌
+					</button>
+				</div>
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Migrate food types</h3>
 						<p class="section-copy">Maps existing food type values to Normal, Puppy, No Fish, or No Chicken. Sets supplements flag from notes keywords. Safe to run multiple times.</p>
@@ -299,6 +345,10 @@
 								</div>
 								{#if change.isArchived}
 									<span class="change-tag change-tag-archived">Adopted</span>
+								{:else if change.isTransferredOut}
+									<span class="change-tag change-tag-transferred">Transferred</span>
+								{:else if change.isEuthanized}
+									<span class="change-tag change-tag-euthanized">Euthanized</span>
 								{:else if change.isNew}
 									<span class="change-tag change-tag-new">New</span>
 								{:else}
@@ -395,15 +445,58 @@
 	</section>
 {/if}
 
-{#if showCelebrationTest && testDog}
-	<div class="adoption-overlay" role="presentation" on:click={() => showCelebrationTest = false}>
+{#if showFosterTest && fosterTestDog}
+	<div class="foster-overlay" use:portal role="presentation" on:click={() => showFosterTest = false}>
+		<div class="foster-moment">
+			<p class="foster-heading">Heading to a foster home 🏡</p>
+			<div class="foster-dog-item">
+				{#if fosterTestDog.photoUrl}
+					<img class="foster-photo" src={fosterTestDog.photoUrl} alt={fosterTestDog.name} />
+				{:else}
+					<div class="foster-photo foster-photo-placeholder"></div>
+				{/if}
+				<p class="foster-name">{fosterTestDog.name}</p>
+			</div>
+			<button class="foster-close typewriter" on:click={() => showFosterTest = false}>Close</button>
+		</div>
+	</div>
+{/if}
+
+{#if showTransferTest && transferTestDog}
+	<div class="transfer-overlay" use:portal role="presentation" on:click={() => showTransferTest = false}>
+		<div class="transfer-moment">
+			<p class="transfer-heading">Off to a new shelter! 🚌</p>
+			<div class="transfer-dog-item">
+				{#if transferTestDog.photoUrl}
+					<img class="transfer-photo" src={transferTestDog.photoUrl} alt={transferTestDog.name} />
+				{:else}
+					<div class="transfer-photo transfer-photo-placeholder"></div>
+				{/if}
+				<p class="transfer-name">{transferTestDog.name}</p>
+			</div>
+			<p class="transfer-subtext">A new chance to find their forever home</p>
+			<button class="transfer-close typewriter" on:click={() => showTransferTest = false}>Close</button>
+		</div>
+	</div>
+{/if}
+
+{#if showCelebrationTest && testDogs.length > 0}
+	<div class="adoption-overlay" use:portal role="presentation" on:click={() => showCelebrationTest = false}>
 		<div class="adoption-celebration">
 			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
-			{#if testDog.photoUrl}
-				<img class="adoption-photo" src={testDog.photoUrl} alt={testDog.name} />
-			{/if}
-			<p class="adoption-name">{testDog.name}</p>
-			<p class="adoption-message">Found their forever home! 🎉</p>
+			<div class="adoption-dogs-row">
+				{#each testDogs as dog}
+					<div class="adoption-dog-item">
+						{#if dog.photoUrl}
+							<img class="adoption-photo" src={dog.photoUrl} alt={dog.name} />
+						{:else}
+							<div class="adoption-photo adoption-photo-placeholder"></div>
+						{/if}
+						<p class="adoption-name">{dog.name}</p>
+					</div>
+				{/each}
+			</div>
+			<p class="adoption-message">{testDogs.length === 1 ? 'Found their forever home!' : `${testDogs.length} dogs found their forever homes!`} 🎉</p>
 			<button class="adoption-close typewriter" on:click={() => showCelebrationTest = false}>Close</button>
 		</div>
 	</div>
@@ -643,6 +736,16 @@
 		color: #b83220;
 	}
 
+	.change-tag-transferred {
+		background: rgba(60, 100, 160, 0.08);
+		color: #2a5c9e;
+	}
+
+	.change-tag-euthanized {
+		background: rgba(90, 90, 100, 0.1);
+		color: #4a4a58;
+	}
+
 	.role-chip-admin {
 		background: rgba(147, 57, 128, 0.12);
 		color: #7f306f;
@@ -734,6 +837,185 @@
 		}
 	}
 
+.transfer-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(220, 245, 225, 0.9);
+	backdrop-filter: blur(4px);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+	animation: fosterFadeIn 0.4s ease;
+}
+
+.transfer-moment {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	text-align: center;
+	max-width: 22rem;
+	width: 100%;
+}
+
+.transfer-heading {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1.4rem, 5vw, 2rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #1a5c2a;
+	line-height: 1.1;
+}
+
+.transfer-dog-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.transfer-photo {
+	width: clamp(5rem, 20vw, 8rem);
+	height: clamp(5rem, 20vw, 8rem);
+	object-fit: cover;
+	border-radius: 50%;
+	border: 3px solid #5bbf74;
+	box-shadow: 0 4px 18px rgba(30, 140, 60, 0.2);
+}
+
+.transfer-photo-placeholder {
+	background: rgba(30, 140, 60, 0.1);
+}
+
+.transfer-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1rem, 3.5vw, 1.5rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #143d1e;
+	line-height: 1;
+}
+
+.transfer-subtext {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: 0.85rem;
+	color: #2a6e3a;
+	opacity: 0.8;
+}
+
+.transfer-close {
+	margin-top: 0.2rem;
+	border: 1px solid #5bbf74;
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(91, 191, 116, 0.15);
+	color: #1a5c2a;
+	cursor: pointer;
+}
+
+.transfer-close:hover {
+	background: rgba(91, 191, 116, 0.28);
+}
+
+.foster-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(255, 245, 220, 0.88);
+	backdrop-filter: blur(4px);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+	animation: fosterFadeIn 0.4s ease;
+}
+
+@keyframes fosterFadeIn {
+	from { opacity: 0; }
+	to   { opacity: 1; }
+}
+
+.foster-moment {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	text-align: center;
+	max-width: 22rem;
+	width: 100%;
+}
+
+.foster-heading {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1.4rem, 5vw, 2rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #7a4f10;
+	line-height: 1.1;
+}
+
+.foster-dog-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.foster-photo {
+	width: clamp(5rem, 20vw, 8rem);
+	height: clamp(5rem, 20vw, 8rem);
+	object-fit: cover;
+	border-radius: 50%;
+	border: 3px solid #e8c07a;
+	box-shadow: 0 4px 18px rgba(180, 120, 30, 0.22);
+}
+
+.foster-photo-placeholder {
+	background: rgba(180, 120, 30, 0.12);
+}
+
+.foster-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1rem, 3.5vw, 1.5rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #5a3a00;
+	line-height: 1;
+}
+
+.foster-close {
+	margin-top: 0.2rem;
+	border: 1px solid #c8993a;
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(200, 153, 58, 0.15);
+	color: #7a4f10;
+	cursor: pointer;
+}
+
+.foster-close:hover {
+	background: rgba(200, 153, 58, 0.28);
+}
+
 .adoption-overlay {
 	position: fixed;
 	inset: 0;
@@ -764,19 +1046,37 @@
 	pointer-events: none;
 }
 
+.adoption-dogs-row {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 1.2rem;
+}
+
+.adoption-dog-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+}
+
 .adoption-photo {
-	width: 11rem;
-	height: 11rem;
+	width: clamp(5rem, 20vw, 9rem);
+	height: clamp(5rem, 20vw, 9rem);
 	object-fit: cover;
 	border-radius: 50%;
 	border: 4px solid #fff;
 	box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 }
 
+.adoption-photo-placeholder {
+	background: rgba(255,255,255,0.15);
+}
+
 .adoption-name {
 	margin: 0;
 	font-family: var(--font-ui);
-	font-size: clamp(2rem, 8vw, 3rem);
+	font-size: clamp(1.2rem, 4vw, 2rem);
 	font-weight: 400;
 	letter-spacing: 0.06em;
 	text-transform: uppercase;

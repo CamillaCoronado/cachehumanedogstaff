@@ -5,13 +5,17 @@ export type SyncChange = {
 	id: string;
 	name: string;
 	isNew: boolean;
-	isArchived: boolean;
+	isArchived: boolean;      // adopted
+	isTransferredOut: boolean;
+	isEuthanized: boolean;
 	fields: string[]; // human-readable field labels that changed
 };
 
 export type SyncResult = {
 	changes: SyncChange[];
 };
+
+export type ArchiveOutcome = 'adopted' | 'transferred' | 'euthanized';
 
 const FIELD_LABELS: Record<string, string> = {
 	name: 'Name',
@@ -393,33 +397,36 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 
 	const currentAsmIds = new Set(dogs.map((a) => a.ID));
-	// Dogs ASM explicitly reports as adopted/transferred/deceased — use shelter code
-	// to match Firestore docs that may not have asmId (e.g. manually added and later found in ASM)
-	const movedAnimals = allAnimals.filter(
-		(a) =>
-			(a.SPECIESNAME ?? '').toLowerCase() === 'dog' &&
-			((a.ACTIVEMOVEMENTTYPE > 0 && a.ACTIVEMOVEMENTTYPE !== 2) || Boolean(a.DECEASEDDATE))
-	);
-	const movedShelterCodes = new Set(movedAnimals.map((a) => a.SHELTERCODE).filter(Boolean) as string[]);
-	// Map shelterCode → adoption date (only for actual adoptions, type 1)
-	const adoptionDateByShelterCode = new Map<string, string>(
-		allAnimals
-			.filter(
-				(a) =>
-					(a.SPECIESNAME ?? '').toLowerCase() === 'dog' &&
-					a.ACTIVEMOVEMENTTYPE === 1 &&
-					a.SHELTERCODE &&
-					a.ACTIVEMOVEMENTDATE
-			)
-			.map((a) => [a.SHELTERCODE, a.ACTIVEMOVEMENTDATE as string])
-	);
-	const archived = await markStaleAsmDogsArchived(currentAsmIds, movedShelterCodes, adoptionDateByShelterCode);
 
-	const archivedChanges: SyncChange[] = archived.map(({ id, name }) => ({
+	// Build shelter code → outcome map for dogs that have left the shelter
+	const shelterCodeOutcomes = new Map<string, ArchiveOutcome>();
+	const movementDateByShelterCode = new Map<string, string>();
+	for (const a of allAnimals) {
+		if ((a.SPECIESNAME ?? '').toLowerCase() !== 'dog') continue;
+		if (!a.SHELTERCODE) continue;
+		if (Boolean(a.DECEASEDDATE)) {
+			shelterCodeOutcomes.set(a.SHELTERCODE, 'euthanized');
+		} else if (a.ACTIVEMOVEMENTTYPE === 1) {
+			shelterCodeOutcomes.set(a.SHELTERCODE, 'adopted');
+		} else if (a.ACTIVEMOVEMENTTYPE === 3) {
+			shelterCodeOutcomes.set(a.SHELTERCODE, 'transferred');
+		} else if (a.ACTIVEMOVEMENTTYPE > 0 && a.ACTIVEMOVEMENTTYPE !== 2) {
+			shelterCodeOutcomes.set(a.SHELTERCODE, 'adopted');
+		}
+		if (a.ACTIVEMOVEMENTDATE) {
+			movementDateByShelterCode.set(a.SHELTERCODE, a.ACTIVEMOVEMENTDATE);
+		}
+	}
+
+	const archived = await markStaleAsmDogsArchived(currentAsmIds, shelterCodeOutcomes, movementDateByShelterCode);
+
+	const archivedChanges: SyncChange[] = archived.map(({ id, name, outcome }) => ({
 		id,
 		name,
 		isNew: false,
-		isArchived: true,
+		isArchived: outcome === 'adopted',
+		isTransferredOut: outcome === 'transferred',
+		isEuthanized: outcome === 'euthanized',
 		fields: []
 	}));
 
@@ -430,6 +437,8 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 				name: animal.ANIMALNAME ?? `Dog ${animal.ID}`,
 				isNew,
 				isArchived: false,
+				isTransferredOut: false,
+				isEuthanized: false,
 				fields: changedFields
 			})),
 			...archivedChanges
@@ -444,45 +453,44 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
  */
 export async function markStaleAsmDogsArchived(
 	currentAsmIds: Set<number>,
-	movedShelterCodes: Set<string> = new Set(),
-	adoptionDateByShelterCode: Map<string, string> = new Map()
-): Promise<{ id: string; name: string }[]> {
+	shelterCodeOutcomes: Map<string, ArchiveOutcome> = new Map(),
+	movementDateByShelterCode: Map<string, string> = new Map()
+): Promise<{ id: string; name: string; outcome: ArchiveOutcome }[]> {
 	if (!db) throw new Error('Firestore not available');
 
 	const snapshot = await getDocs(collection(db, 'dogs'));
 	const staleDocs = snapshot.docs.filter((d) => {
 		const data = d.data();
-		if (data.status === 'adopted') return false;
-		// asmId field (number) — preferred match
+		if (data.status === 'adopted' || data.status === 'transferred' || data.status === 'euthanized') return false;
 		const asmId = data.asmId as number | undefined;
-		// Fallback: numeric doc ID means this doc was created by ASM sync
 		const idAsNum = /^\d+$/.test(d.id) ? Number(d.id) : undefined;
 		const effectiveAsmId = asmId ?? idAsNum;
 		const shelterCode = data.asmShelterCode as string | undefined;
 		if (effectiveAsmId !== undefined && !currentAsmIds.has(effectiveAsmId)) return true;
-		if (shelterCode && movedShelterCodes.has(shelterCode)) return true;
+		if (shelterCode && shelterCodeOutcomes.has(shelterCode)) return true;
 		return false;
 	});
 
 	if (staleDocs.length === 0) return [];
 
 	const BATCH_SIZE = 499;
+	const now = new Date().toISOString();
 	for (let i = 0; i < staleDocs.length; i += BATCH_SIZE) {
 		const batch = writeBatch(db);
-		const now = new Date().toISOString();
 		for (const staleDoc of staleDocs.slice(i, i + BATCH_SIZE)) {
 			const staleData = staleDoc.data();
 			const shelterCode = staleData.asmShelterCode as string | undefined;
-			const adoptionDate = shelterCode ? (adoptionDateByShelterCode.get(shelterCode) ?? null) : null;
+			const outcome: ArchiveOutcome = (shelterCode && shelterCodeOutcomes.get(shelterCode)) || 'adopted';
+			const movementDate = shelterCode ? (movementDateByShelterCode.get(shelterCode) ?? null) : null;
 			batch.set(staleDoc.ref, {
-				status: 'adopted',
+				status: outcome,
 				outdoorKennelAssignment: '',
 				inFoster: false,
 				permanentFoster: false,
 				shelterSince: null,
 				isOutOnDayTrip: false,
 				currentDayTripStartedAt: null,
-				leftShelterDate: adoptionDate ?? null,
+				leftShelterDate: movementDate,
 				updatedAt: now,
 				_lastSyncedAt: now
 			}, { merge: true });
@@ -490,5 +498,9 @@ export async function markStaleAsmDogsArchived(
 		await batch.commit();
 	}
 
-	return staleDocs.map((d) => ({ id: d.id, name: (d.data().name as string | undefined) ?? d.id }));
+	return staleDocs.map((d) => {
+		const shelterCode = d.data().asmShelterCode as string | undefined;
+		const outcome: ArchiveOutcome = (shelterCode && shelterCodeOutcomes.get(shelterCode)) || 'adopted';
+		return { id: d.id, name: (d.data().name as string | undefined) ?? d.id, outcome };
+	});
 }

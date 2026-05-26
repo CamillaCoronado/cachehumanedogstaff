@@ -12,7 +12,7 @@ export interface UserProfile {
 	updatedAt: DateValue;
 }
 
-export type DogStatus = 'active' | 'adopted';
+export type DogStatus = 'active' | 'adopted' | 'transferred' | 'euthanized';
 export type DayTripStatus = 'ineligible' | 'difficult' | 'eligible';
 export type DayTripIneligibleReason = 'behavior' | 'medical' | 'other';
 export type IsolationStatus = 'none' | 'iso';
