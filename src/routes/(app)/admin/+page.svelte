@@ -34,10 +34,20 @@
 	let testDog: Dog | null = null;
 
 	async function testAdoptionCelebration() {
-		const lastArchived = [...auditChanges].reverse().find((c) => c.isArchived);
-		if (!lastArchived) { toast.error('No recent adoptions in sync changes. Run a change check first.'); return; }
+		const allChanges: SyncChange[] = (() => {
+			try {
+				const stored = localStorage.getItem('asm_last_changes');
+				if (stored) {
+					const parsed = JSON.parse(stored) as { changes: SyncChange[] };
+					return [...parsed.changes, ...auditChanges];
+				}
+			} catch { /* ignore */ }
+			return [...auditChanges];
+		})();
+		const lastArchived = [...allChanges].reverse().find((c) => c.isArchived);
+		if (!lastArchived) { toast.error('No recent adoptions found in sync changes.'); return; }
 		testDog = await getDog(lastArchived.id);
-		if (!testDog) { toast.error('Dog not found.'); return; }
+		if (!testDog) { toast.error('Dog record not found.'); return; }
 		showCelebrationTest = true;
 	}
 
