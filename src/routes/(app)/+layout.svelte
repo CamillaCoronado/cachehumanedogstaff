@@ -10,7 +10,7 @@
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
-	import { canAccessDayTrips, canAccessPlaygroups, canEditDogs } from '$lib/utils/permissions';
+	import { canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { backfillBathLogsFromDogs } from '$lib/data/dogs';
 
@@ -156,12 +156,12 @@
 
 	$: currentPath = $page.url.pathname;
 	$: isAdmin = $authProfile?.role === 'admin';
-	$: canViewPlaygroups = canAccessPlaygroups($authProfile?.role);
+
 	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
 	$: tabs = [
 		...baseTabs,
 		...(canViewDayTrips ? [dayTripsTab] : []),
-		...(canViewPlaygroups ? [playgroupsTab] : []),
+		playgroupsTab,
 		medicalTab,
 		...(isAdmin ? [adminTab] : [])
 	];
