@@ -33,6 +33,13 @@
 		priority: RecommendationPriority;
 	}
 
+	interface TestSuggestion {
+		id: string;
+		dog: Dog;
+		suggestedGroup: PlaygroupRecommendation | null;
+		reason: string;
+	}
+
 	let dogs: Dog[] = [];
 	let sessions: PlaygroupSession[] = [];
 	let loading = true;
@@ -91,10 +98,21 @@
 		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
 		.sort((a, b) => a.name.localeCompare(b.name));
 	$: filteredDogs = activeDogs.filter((dog) => dog.name.toLowerCase().includes(search.toLowerCase()));
-	$: readyDogs = activeDogs.filter((dog) => getReadiness(dog) === 'ready' && !dog.awaitingEvaluation);
-	$: cautionDogs = activeDogs.filter((dog) => getReadiness(dog) === 'caution' && !dog.awaitingEvaluation);
+	$: dogIdsWithHistory = new Set(sessions.flatMap((s) => s.dogIds));
+	$: readyDogs = activeDogs.filter((dog) => {
+		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no' || dog.awaitingEvaluation) return false;
+		if (dog.goodWithDogs === 'yes' || isPuppy(dog)) return true;
+		return dogIdsWithHistory.has(dog.id);
+	});
+	$: cautionDogs = activeDogs.filter((dog) => {
+		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no' || dog.awaitingEvaluation) return false;
+		if (dog.goodWithDogs === 'yes' || isPuppy(dog)) return false;
+		return !dogIdsWithHistory.has(dog.id);
+	});
 	$: holdDogs = activeDogs.filter((dog) => getReadiness(dog) === 'hold');
-	$: recommendations = buildRecommendations(readyDogs, cautionDogs);
+	$: unknownWeightDogs = readyDogs.filter((d) => d.weightLbs === null || d.weightLbs === undefined);
+	$: recommendations = buildRecommendations(readyDogs);
+	$: testSuggestions = buildTestSuggestions(cautionDogs, recommendations.filter((r) => r.recommendationType === 'ready_group'));
 	$: history = [...sessions].sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
 
 
@@ -160,7 +178,7 @@
 			if (isPuppy(dog) && !dog.isVaccinated) return 'Needs 2 sets of vaccines before playgroup.';
 		}
 		if (readiness === 'caution') {
-			if (isPuppy(dog)) return 'Puppy (12+ wks, vaccinated): cleared for playgroup with specific calm dogs only.';
+			if (isPuppy(dog)) return 'Puppy (12+ wks, vaccinated): OK with energetic adults that tolerate rough play. Do a controlled intro.';
 			return 'Unknown dog compatibility: do controlled intro with a stable dog.';
 		}
 		return 'Eligible for standard playgroup rotation.';
@@ -180,6 +198,39 @@
 		return 2;
 	}
 
+	function sizeCategory(dog: Dog): 'tiny' | 'small' | 'medium' | 'large' | 'unknown' {
+		if (dog.weightLbs === null || dog.weightLbs === undefined) return 'unknown';
+		if (dog.weightLbs < 15) return 'tiny';
+		if (dog.weightLbs < 30) return 'small';
+		if (dog.weightLbs <= 55) return 'medium';
+		return 'large';
+	}
+
+	function sizeRank(dog: Dog): number {
+		return dog.weightLbs ?? 30;
+	}
+
+	function sizeCompatible(dogs: Dog[]): boolean {
+		const known = dogs.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined);
+		if (known.length === 0) return true;
+		const hasTiny = known.some((d) => sizeCategory(d) === 'tiny');
+		const hasNonTiny = known.some((d) => sizeCategory(d) !== 'tiny');
+		if (hasTiny && hasNonTiny) return false;
+		const weights = known.map((d) => d.weightLbs as number);
+		const min = Math.min(...weights);
+		const max = Math.max(...weights);
+		return max <= min * 2;
+	}
+
+	function sizeLabelShort(dog: Dog): string {
+		const s = sizeCategory(dog);
+		if (s === 'unknown') return '?';
+		if (s === 'tiny') return 'T';
+		if (s === 'small') return 'S';
+		if (s === 'medium') return 'M';
+		return 'L';
+	}
+
 	function eligiblePuppies(allDogs: Dog[]): Dog[] {
 		return allDogs.filter((dog) => {
 			if (dog.isolationStatus !== 'none') return false;
@@ -189,68 +240,61 @@
 		});
 	}
 
-	function buildRecommendations(ready: Dog[], caution: Dog[]): PlaygroupRecommendation[] {
+	function buildRecommendations(ready: Dog[]): PlaygroupRecommendation[] {
 		const list: PlaygroupRecommendation[] = [];
 
-		const puppies = eligiblePuppies(activeDogs);
-		if (puppies.length >= 2) {
-			list.push({
-				id: `puppy-${puppies.map((d) => d.id).join('-')}`,
-				title: 'Puppy Group',
-				dogs: puppies,
-				dogIds: puppies.map((d) => d.id),
-				reason: `${puppies.length} puppies (12–26 wks, vaccinated) available. Puppies should only play with other puppies, not adults.`,
-				recommendationType: 'manual',
-				priority: 'high'
-			});
-		}
-		const sortedReady = [...ready].sort((a, b) => {
+		const sortedReady = [...ready.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined)].sort((a, b) => {
+			const sizeDiff = sizeRank(a) - sizeRank(b);
+			if (sizeDiff !== 0) return sizeDiff;
 			const diff = energyRank(a.energyLevel) - energyRank(b.energyLevel);
 			if (diff !== 0) return diff;
 			return a.name.localeCompare(b.name);
 		});
 
-		for (let i = 0; i < sortedReady.length; i += 2) {
-			const group = sortedReady.slice(i, i + 2);
+		let groupNumber = 1;
+		for (let i = 0; i < sortedReady.length; i += 6) {
+			const group = sortedReady.slice(i, i + 6);
 			if (group.length < 2) continue;
-			if (intactConflict(group)) continue;
-			const number = Math.floor(i / 2) + 1;
+			if (intactConflict(group) || !sizeCompatible(group)) continue;
 			list.push({
 				id: `ready-${group.map((dog) => dog.id).join('-')}`,
-				title: `Ready Group ${number}`,
+				title: `Ready Group ${groupNumber++}`,
 				dogs: group,
 				dogIds: group.map((dog) => dog.id),
-				reason: 'Both dogs are marked good with dogs and have compatible energy levels.',
+				reason: `${group.length} dogs grouped by size and energy.`,
 				recommendationType: 'ready_group',
 				priority: 'high'
 			});
 		}
 
-		const usedAnchorIds = new Set<string>();
-		for (const cautionDog of caution) {
-			const anchor = sortedReady
-				.filter((candidate) => !usedAnchorIds.has(candidate.id))
-				.sort((a, b) => {
-					const diffA = Math.abs(energyRank(a.energyLevel) - energyRank(cautionDog.energyLevel));
-					const diffB = Math.abs(energyRank(b.energyLevel) - energyRank(cautionDog.energyLevel));
-					if (diffA !== diffB) return diffA - diffB;
-					return a.name.localeCompare(b.name);
-				})[0];
-			if (!anchor) continue;
-			if (intactConflict([cautionDog, anchor])) continue;
-			usedAnchorIds.add(anchor.id);
-			list.push({
-				id: `eval-${cautionDog.id}-${anchor.id}`,
-				title: `Evaluation Pair: ${cautionDog.name} + ${anchor.name}`,
-				dogs: [cautionDog, anchor],
-				dogIds: [cautionDog.id, anchor.id],
-				reason: `${cautionDog.name} has unknown compatibility, so pair with a stable ready dog for supervised intro.`,
-				recommendationType: 'evaluation_group',
-				priority: 'medium'
-			});
-		}
+		return list;
+	}
 
-		return list.slice(0, 12);
+	function buildTestSuggestions(caution: Dog[], readyGroups: PlaygroupRecommendation[]): TestSuggestion[] {
+		return caution.map((dog) => {
+			const dogEnergy = energyRank(dog.energyLevel);
+			const pup = isPuppy(dog);
+			const compatible = readyGroups.filter((g) => {
+				if (intactConflict([dog, ...g.dogs])) return false;
+				if (!sizeCompatible([dog, ...g.dogs])) return false;
+				if (pup) {
+					// puppies need every dog in the group to be high/very_high energy
+					return g.dogs.every((d) => energyRank(d.energyLevel) >= 3);
+				}
+				return true;
+			});
+			const match = compatible.sort((a, b) => {
+				const avgA = a.dogs.reduce((s, d) => s + energyRank(d.energyLevel), 0) / a.dogs.length;
+				const avgB = b.dogs.reduce((s, d) => s + energyRank(d.energyLevel), 0) / b.dogs.length;
+				return Math.abs(avgA - dogEnergy) - Math.abs(avgB - dogEnergy);
+			})[0] ?? null;
+			return {
+				id: `test-${dog.id}`,
+				dog,
+				suggestedGroup: match,
+				reason: guidanceForDog(dog)
+			};
+		});
 	}
 
 	function priorityLabel(priority: RecommendationPriority) {
@@ -838,23 +882,29 @@
 			<section class="panel">
 				<div class="panel-head">
 					<h3>Recommended Playgroups</h3>
-					<p class="panel-note">Auto-suggested from readiness + energy compatibility.</p>
+					<p class="panel-note">Auto-suggested from readiness + energy compatibility. Up to 6 dogs per group.</p>
 				</div>
 				{#if recommendations.length === 0}
-					<p class="empty-line">No recommendations yet. Add more ready dogs for pairing.</p>
+					<p class="empty-line">No recommendations yet. Mark more dogs as good with dogs to generate groups.</p>
 				{:else}
 					<div class="recommendation-grid">
 						{#each recommendations as recommendation}
 							<article class="recommendation-card">
 								<div class="recommendation-head">
 									<h4>{recommendation.title}</h4>
-									<span class="priority-chip">{priorityLabel(recommendation.priority)}</span>
+									<span class="priority-chip">{recommendation.dogs.length} dogs</span>
 								</div>
 								<div class="dog-chip-row">
 									{#each recommendation.dogs as dog}
-										<a href={`/dogs/${dog.id}`} class="dog-chip">{dog.name}</a>
+										<a href={`/dogs/${dog.id}`} class="dog-chip">
+											{dog.name}
+											<span class="size-badge size-badge-{sizeCategory(dog)}">{sizeLabelShort(dog)}</span>
+										</a>
 									{/each}
 								</div>
+								{#if recommendation.dogs.some((d) => sizeCategory(d) === 'unknown')}
+									<p class="size-unknown-note">⚠ Some dogs have no weight recorded — size compatibility unverified.</p>
+								{/if}
 								<p class="recommendation-reason">{recommendation.reason}</p>
 								<button
 									class="recommendation-log-btn typewriter"
@@ -866,6 +916,43 @@
 								</button>
 							</article>
 						{/each}
+					</div>
+				{/if}
+
+				{#if unknownWeightDogs.length > 0}
+					<div class="unknown-weight-section">
+						<p class="unknown-weight-title">Weight unknown</p>
+						<div class="unknown-weight-list">
+							{#each unknownWeightDogs as dog}
+								<a href={`/dogs/${dog.id}`} class="unknown-weight-chip">{dog.name}</a>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if testSuggestions.length > 0}
+					<div class="test-section">
+						<div class="test-section-head">
+							<h4 class="test-section-title">Dogs to Test</h4>
+							<p class="test-section-note">Unknown compatibility — introduce to an established ready group to evaluate.</p>
+						</div>
+						<div class="test-grid">
+							{#each testSuggestions as suggestion}
+								<div class="test-card">
+									<div class="test-card-top">
+										<a href={`/dogs/${suggestion.dog.id}`} class="dog-link">{suggestion.dog.name}</a>
+										<span class="readiness-pill readiness-caution">Unknown</span>
+									</div>
+									<p class="test-reason">{suggestion.reason}</p>
+									{#if suggestion.suggestedGroup}
+										<p class="test-suggested">
+											Try with: <strong>{suggestion.suggestedGroup.title}</strong>
+											({suggestion.suggestedGroup.dogs.map((d) => d.name).join(', ')})
+										</p>
+									{/if}
+								</div>
+							{/each}
+						</div>
 					</div>
 				{/if}
 			</section>
@@ -1327,6 +1414,56 @@
 		text-decoration: none;
 		color: #284c6f;
 		background: #f2f8ff;
+	}
+
+	.size-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.1em;
+		height: 1.1em;
+		border-radius: 50%;
+		font-size: 0.55em;
+		font-weight: 900;
+		margin-left: 0.22em;
+		vertical-align: middle;
+		line-height: 1;
+	}
+
+	.size-badge-tiny {
+		background: #fce8e8;
+		color: #8a3e3c;
+		border: 1px solid #e6b8b8;
+	}
+
+	.size-badge-small {
+		background: #fdf3e3;
+		color: #7a4f10;
+		border: 1px solid #f0c87a;
+	}
+
+	.size-badge-medium {
+		background: #e8f4fc;
+		color: #016aa5;
+		border: 1px solid #b0d4ee;
+	}
+
+	.size-badge-large {
+		background: #ede8fc;
+		color: #5a3a8a;
+		border: 1px solid #c5b4e8;
+	}
+
+	.size-badge-unknown {
+		background: #f0f2f5;
+		color: #7a8fa6;
+		border: 1px solid #c8d3df;
+	}
+
+	.size-unknown-note {
+		margin: 0.3rem 0 0;
+		font-size: 0.66rem;
+		color: #816829;
 	}
 
 	.recommendation-reason {
@@ -1969,5 +2106,107 @@
 	.slack-save-btn:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+
+	.unknown-weight-section {
+		margin-top: 1rem;
+		border-top: 1px solid #d5e0ea;
+		padding-top: 0.6rem;
+	}
+
+	.unknown-weight-title {
+		margin: 0 0 0.4rem;
+		font-size: 0.58rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #7a8fa6;
+	}
+
+	.unknown-weight-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.28rem;
+	}
+
+	.unknown-weight-chip {
+		border: 1px solid #c8d3df;
+		border-radius: 999px;
+		padding: 0.12rem 0.42rem;
+		font-size: 0.66rem;
+		font-weight: 700;
+		text-decoration: none;
+		color: #7a8fa6;
+		background: #f0f2f5;
+	}
+
+	.unknown-weight-chip:hover {
+		background: #e4e8ed;
+	}
+
+	.test-section {
+		margin-top: 1.2rem;
+		border-top: 1px solid #d5e0ea;
+		padding-top: 0.8rem;
+	}
+
+	.test-section-head {
+		margin-bottom: 0.52rem;
+	}
+
+	.test-section-title {
+		margin: 0 0 0.18rem;
+		font-size: 0.9rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #816829;
+	}
+
+	.test-section-note {
+		margin: 0;
+		font-size: 0.68rem;
+		color: #4f6681;
+	}
+
+	.test-grid {
+		display: grid;
+		gap: 0.42rem;
+	}
+
+	.test-card {
+		border: 1px solid #e3cf97;
+		background: #fffdf0;
+		border-radius: 0.3rem;
+		padding: 0.52rem;
+	}
+
+	.test-card-top {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.24rem;
+	}
+
+	.test-reason {
+		margin: 0 0 0.2rem;
+		font-size: 0.74rem;
+		color: #3a5069;
+	}
+
+	.test-suggested {
+		margin: 0;
+		font-size: 0.72rem;
+		color: #5a6e84;
+	}
+
+	.test-suggested strong {
+		color: #22384f;
+	}
+
+	@media (min-width: 620px) {
+		.test-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 </style>
