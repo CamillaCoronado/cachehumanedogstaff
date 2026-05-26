@@ -4,8 +4,10 @@
 	import { migrateFoodTypes } from '$lib/data/migrate-food-types';
 	import { listUserProfiles, updateUserProfile } from '$lib/firebase/firestore';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
-	import type { UserProfile, UserRole } from '$lib/types';
+	import type { Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDateTime } from '$lib/utils/dates';
+	import { getDog } from '$lib/data/dogs';
+	import { confetti } from '@neoconfetti/svelte';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -27,6 +29,17 @@
 
 	let migratingFood = false;
 	let foodMigrateResult = '';
+
+	let showCelebrationTest = false;
+	let testDog: Dog | null = null;
+
+	async function testAdoptionCelebration() {
+		const lastArchived = [...auditChanges].reverse().find((c) => c.isArchived);
+		if (!lastArchived) { toast.error('No recent adoptions in sync changes. Run a change check first.'); return; }
+		testDog = await getDog(lastArchived.id);
+		if (!testDog) { toast.error('Dog not found.'); return; }
+		showCelebrationTest = true;
+	}
 
 	$: isAdmin = $authProfile?.role === 'admin';
 	$: currentUserId = $authUser?.uid ?? '';
@@ -213,6 +226,19 @@
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
+						<p class="section-kicker">UI</p>
+						<h3 class="section-title">Test adoption celebration</h3>
+						<p class="section-copy">Previews the confetti overlay using the most recently adopted dog from the last sync run.</p>
+					</div>
+					<button class="action-btn" type="button" on:click={testAdoptionCelebration}>
+						Test 🎉
+					</button>
+				</div>
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Migrate food types</h3>
 						<p class="section-copy">Maps existing food type values to Normal, Puppy, No Fish, or No Chicken. Sets supplements flag from notes keywords. Safe to run multiple times.</p>
@@ -357,6 +383,20 @@
 			</section>
 		</div>
 	</section>
+{/if}
+
+{#if showCelebrationTest && testDog}
+	<div class="adoption-overlay" role="presentation" on:click={() => showCelebrationTest = false}>
+		<div class="adoption-celebration">
+			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
+			{#if testDog.photoUrl}
+				<img class="adoption-photo" src={testDog.photoUrl} alt={testDog.name} />
+			{/if}
+			<p class="adoption-name">{testDog.name}</p>
+			<p class="adoption-message">Found their forever home! 🎉</p>
+			<button class="adoption-close typewriter" on:click={() => showCelebrationTest = false}>Close</button>
+		</div>
+	</div>
 {/if}
 
 <style>
@@ -683,4 +723,78 @@
 			width: 100%;
 		}
 	}
+
+.adoption-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.72);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+}
+
+.adoption-celebration {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.9rem;
+	text-align: center;
+	max-width: 22rem;
+	width: 100%;
+}
+
+.confetti-anchor {
+	position: absolute;
+	top: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	pointer-events: none;
+}
+
+.adoption-photo {
+	width: 11rem;
+	height: 11rem;
+	object-fit: cover;
+	border-radius: 50%;
+	border: 4px solid #fff;
+	box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+.adoption-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(2rem, 8vw, 3rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #fff;
+	line-height: 1;
+}
+
+.adoption-message {
+	margin: 0;
+	font-size: 1.05rem;
+	color: rgba(255,255,255,0.85);
+}
+
+.adoption-close {
+	margin-top: 0.4rem;
+	border: 1px solid rgba(255,255,255,0.4);
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(255,255,255,0.12);
+	color: #fff;
+	cursor: pointer;
+}
+
+.adoption-close:hover {
+	background: rgba(255,255,255,0.22);
+}
 </style>
