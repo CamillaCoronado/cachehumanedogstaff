@@ -39,6 +39,7 @@
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
+	import { confetti } from '@neoconfetti/svelte';
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 	let dog: Dog | null = null;
@@ -71,6 +72,9 @@
 	let savingStool = false;
 	let confirmAction: 'archive' | 'delete' | null = null;
 	let confirmBusy = false;
+	let showAdoptionCelebration = false;
+	let celebrationDogName = '';
+	let celebrationPhotoUrl: string | null = null;
 	let activeStatusInfo: 'adoption' | 'daytrip' | 'handling' | null = null;
 
 	const today = new Date();
@@ -373,9 +377,11 @@
 
 	async function handleArchive() {
 		if (!dog) return;
+		celebrationDogName = dog.name;
+		celebrationPhotoUrl = dog.photoUrl ?? null;
 		await archiveDog(dog.id);
-		toast.success('Dog archived.');
 		await loadAll();
+		showAdoptionCelebration = true;
 	}
 
 	async function handleDelete() {
@@ -1015,6 +1021,20 @@
 			</div>
 		{/if}
 	</section>
+{/if}
+
+{#if showAdoptionCelebration}
+	<div class="adoption-overlay" role="presentation" on:click={() => showAdoptionCelebration = false}>
+		<div class="adoption-celebration">
+			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
+			{#if celebrationPhotoUrl}
+				<img class="adoption-photo" src={celebrationPhotoUrl} alt={celebrationDogName} />
+			{/if}
+			<p class="adoption-name">{celebrationDogName}</p>
+			<p class="adoption-message">Found their forever home! 🎉</p>
+			<button class="adoption-close typewriter" on:click={() => showAdoptionCelebration = false}>Close</button>
+		</div>
+	</div>
 {/if}
 
 <Modal
@@ -1841,4 +1861,78 @@
 			line-height: 1.3;
 		}
 	}
+
+.adoption-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.72);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+}
+
+.adoption-celebration {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.9rem;
+	text-align: center;
+	max-width: 22rem;
+	width: 100%;
+}
+
+.confetti-anchor {
+	position: absolute;
+	top: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	pointer-events: none;
+}
+
+.adoption-photo {
+	width: 11rem;
+	height: 11rem;
+	object-fit: cover;
+	border-radius: 50%;
+	border: 4px solid #fff;
+	box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+.adoption-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(2rem, 8vw, 3rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #fff;
+	line-height: 1;
+}
+
+.adoption-message {
+	margin: 0;
+	font-size: 1.05rem;
+	color: rgba(255,255,255,0.85);
+}
+
+.adoption-close {
+	margin-top: 0.4rem;
+	border: 1px solid rgba(255,255,255,0.4);
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(255,255,255,0.12);
+	color: #fff;
+	cursor: pointer;
+}
+
+.adoption-close:hover {
+	background: rgba(255,255,255,0.22);
+}
 </style>
