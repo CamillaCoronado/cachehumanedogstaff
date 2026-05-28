@@ -20,6 +20,14 @@ service cloud.firestore {
       return getUserRole() == 'manager';
     }
 
+    function isStaff() {
+      return getUserRole() == 'staff';
+    }
+
+    function canEditPlaygroups() {
+      return isAdmin() || isManager() || isStaff();
+    }
+
     function canEditDogs() {
       return isAdmin() || isManager();
     }
@@ -95,8 +103,8 @@ service cloud.firestore {
     }
 
     match /playgroupSessions/{sessionId} {
-      allow read, create: if isAuthenticated();
-      allow update, delete: if canEditDogs();
+      allow read: if isAuthenticated();
+      allow create, update, delete: if canEditPlaygroups();
     }
 
     match /pendingPlaygroups/{docId} {
