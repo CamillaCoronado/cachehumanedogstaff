@@ -140,6 +140,14 @@
 		return weeks !== null && weeks < 26; // under 6 months
 	}
 
+	// 2+ vaccine rounds AND last shot at least 14 days ago
+	function isPuppyVaccinated(dog: Dog): boolean {
+		if (dog.vaccineCount < 2) return false;
+		const vaccDate = toDate(dog.vaccinatedDate);
+		if (!vaccDate) return false;
+		return Math.floor((Date.now() - vaccDate.getTime()) / 86_400_000) >= 14;
+	}
+
 	function isOnMedicalRest(dog: Dog): boolean {
 		const surgeryDaysAgo = daysSince(dog.surgeryDate);
 		if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) return true;
@@ -158,9 +166,7 @@
 		if (isOnMedicalRest(dog)) return 'hold';
 		const weeks = ageWeeks(dog);
 		if (weeks !== null && weeks < 26) {
-			// Under 12 weeks or not yet vaccinated → hold
-			if (weeks < 12 || !dog.isVaccinated) return 'hold';
-			// 12+ weeks with vaccines → caution only, never ready
+			if (weeks < 12 || !isPuppyVaccinated(dog)) return 'hold';
 			return 'caution';
 		}
 		if (dog.goodWithDogs === 'yes') return 'ready';
@@ -188,7 +194,16 @@
 			}
 			const weeks = ageWeeks(dog);
 			if (weeks !== null && weeks < 12) return `Too young for playgroup (${weeks} wks — minimum 12 weeks).`;
-			if (isPuppy(dog) && !dog.isVaccinated) return 'Needs 2 sets of vaccines before playgroup.';
+			if (isPuppy(dog) && !isPuppyVaccinated(dog)) {
+				if (dog.vaccineCount < 2) return `Needs 2 vaccine rounds before playgroup (${dog.vaccineCount} on record).`;
+				const vaccDate = toDate(dog.vaccinatedDate);
+				if (vaccDate) {
+					const daysAgo = Math.floor((Date.now() - vaccDate.getTime()) / 86_400_000);
+					const daysLeft = 14 - daysAgo;
+					return `Last vaccine ${daysAgo} day${daysAgo === 1 ? '' : 's'} ago — wait ${daysLeft} more day${daysLeft === 1 ? '' : 's'} for immunity.`;
+				}
+				return 'Vaccination date unknown — confirm 2 rounds before playgroup.';
+			}
 		}
 		if (readiness === 'caution') {
 			if (isPuppy(dog)) return 'Puppy (12+ wks, vaccinated): OK with energetic adults that tolerate rough play. Do a controlled intro.';
@@ -1705,9 +1720,10 @@
 		border-radius: 0.42rem;
 		width: 100%;
 		max-width: 30rem;
-		max-height: 90vh;
+		max-height: min(90vh, 90dvh);
 		overflow-y: auto;
 		padding: 0.82rem;
+		padding-bottom: max(0.82rem, env(safe-area-inset-bottom));
 	}
 
 	.manual-modal-head {
