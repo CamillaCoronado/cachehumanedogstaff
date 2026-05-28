@@ -16,9 +16,10 @@
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import { daysSince, formatDateTime, toDate } from '$lib/utils/dates';
-	import { canAccessPlaygroups, resolveRole } from '$lib/utils/permissions';
+	import { canAccessPlaygroups, canEditPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
+	import { syncVersion } from '$lib/stores/sync';
 
 	type DogReadiness = 'ready' | 'caution' | 'hold';
 	type RecommendationPriority = 'high' | 'medium';
@@ -38,6 +39,16 @@
 		dog: Dog;
 		suggestedGroup: PlaygroupRecommendation | null;
 		reason: string;
+	}
+
+	interface SwapInSuggestion {
+		dog: Dog;
+		compatibleGroups: PlaygroupRecommendation[];
+	}
+
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return { destroy() { node.remove(); } };
 	}
 
 	let dogs: Dog[] = [];
@@ -82,10 +93,12 @@
 	let editGroupName = '';
 	let editOutcome: PlaygroupOutcome = 'successful';
 	let editNotes = '';
+	let editDogIds: string[] = [];
 	let savingEdit = false;
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canViewPlaygroups = canAccessPlaygroups(role);
+	$: canEdit = canEditPlaygroups(role);
 	$: if (canViewPlaygroups && !playgroupsLoaded) {
 		playgroupsLoaded = true;
 		void refreshData();
@@ -111,8 +124,8 @@
 	});
 	$: holdDogs = activeDogs.filter((dog) => getReadiness(dog) === 'hold');
 	$: unknownWeightDogs = readyDogs.filter((d) => d.weightLbs === null || d.weightLbs === undefined);
-	$: recommendations = buildRecommendations(readyDogs);
-	$: testSuggestions = buildTestSuggestions(cautionDogs, recommendations.filter((r) => r.recommendationType === 'ready_group'));
+	$: ({ groups: readyGroups, swapIns } = buildRecommendations(readyDogs));
+	$: testSuggestions = buildTestSuggestions(cautionDogs, readyGroups);
 	$: history = [...sessions].sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
 
 
@@ -240,34 +253,51 @@
 		});
 	}
 
-	function buildRecommendations(ready: Dog[]): PlaygroupRecommendation[] {
-		const list: PlaygroupRecommendation[] = [];
+	function buildRecommendations(ready: Dog[]): { groups: PlaygroupRecommendation[]; swapIns: SwapInSuggestion[] } {
+		const groups: PlaygroupRecommendation[] = [];
+		const groupedIds = new Set<string>();
 
-		const sortedReady = [...ready.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined)].sort((a, b) => {
-			const sizeDiff = sizeRank(a) - sizeRank(b);
-			if (sizeDiff !== 0) return sizeDiff;
-			const diff = energyRank(a.energyLevel) - energyRank(b.energyLevel);
-			if (diff !== 0) return diff;
-			return a.name.localeCompare(b.name);
-		});
+		const knownWeight = [...ready.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined)]
+			.sort((a, b) => sizeRank(a) - sizeRank(b) || energyRank(a.energyLevel) - energyRank(b.energyLevel) || a.name.localeCompare(b.name));
 
 		let groupNumber = 1;
-		for (let i = 0; i < sortedReady.length; i += 6) {
-			const group = sortedReady.slice(i, i + 6);
-			if (group.length < 2) continue;
-			if (intactConflict(group) || !sizeCompatible(group)) continue;
-			list.push({
-				id: `ready-${group.map((dog) => dog.id).join('-')}`,
+		let i = 0;
+		while (i < knownWeight.length) {
+			const anchor = knownWeight[i];
+			const group: Dog[] = [];
+			let j = i;
+			// Anchor is always lightest (sorted); once size window breaks, all heavier fail too
+			while (j < knownWeight.length && group.length < 4) {
+				if (!sizeCompatible([anchor, knownWeight[j]])) break;
+				group.push(knownWeight[j]);
+				j++;
+			}
+			i = j;
+			if (group.length < 2 || intactConflict(group)) continue;
+			const rec: PlaygroupRecommendation = {
+				id: `ready-${group.map((d) => d.id).join('-')}`,
 				title: `Ready Group ${groupNumber++}`,
 				dogs: group,
-				dogIds: group.map((dog) => dog.id),
+				dogIds: group.map((d) => d.id),
 				reason: `${group.length} dogs grouped by size and energy.`,
 				recommendationType: 'ready_group',
 				priority: 'high'
-			});
+			};
+			groups.push(rec);
+			group.forEach((d) => groupedIds.add(d.id));
 		}
 
-		return list;
+		// Dogs with known weight that didn't land in any group
+		const swapIns: SwapInSuggestion[] = knownWeight
+			.filter((d) => !groupedIds.has(d.id))
+			.map((dog) => ({
+				dog,
+				compatibleGroups: groups.filter(
+					(g) => sizeCompatible([...g.dogs, dog]) && !intactConflict([...g.dogs, dog])
+				)
+			}));
+
+		return { groups, swapIns };
 	}
 
 	function buildTestSuggestions(caution: Dog[], readyGroups: PlaygroupRecommendation[]): TestSuggestion[] {
@@ -318,6 +348,8 @@
 		}
 		manualDogIds = manualDogIds.filter((id) => id !== dogId);
 	}
+
+	$: if ($syncVersion > 0) void refreshData();
 
 	async function refreshData() {
 		loading = true;
@@ -495,10 +527,6 @@
 	}
 
 	async function saveManualSession() {
-		if (!manualGroupName.trim()) {
-			toast.error('Group name is required.');
-			return;
-		}
 		const selectedDogs = activeDogs.filter((dog) => manualDogIds.includes(dog.id));
 		const extraNames = manualExtraNames.split(',').map((n) => n.trim()).filter(Boolean);
 		if (selectedDogs.length + extraNames.length < 2) {
@@ -554,6 +582,7 @@
 		editGroupName = session.groupName;
 		editOutcome = session.outcome;
 		editNotes = session.notes ?? '';
+		editDogIds = [...session.dogIds];
 	}
 
 	function cancelEdit() {
@@ -564,11 +593,14 @@
 		if (!editingSessionId) return;
 		savingEdit = true;
 		try {
+			const editSelectedDogs = activeDogs.filter((d) => editDogIds.includes(d.id));
 			await updatePlaygroupSession(editingSessionId, {
 				date: parseInputDate(editDate),
 				groupName: editGroupName.trim(),
 				outcome: editOutcome,
-				notes: editNotes.trim() || null
+				notes: editNotes.trim() || null,
+				dogIds: editSelectedDogs.map((d) => d.id),
+				dogNames: editSelectedDogs.map((d) => d.name)
 			});
 			sessions = await listPlaygroupSessions();
 			editingSessionId = null;
@@ -617,19 +649,26 @@
 						placeholder="search dog name"
 						bind:value={search}
 					/>
-					<button
-						class="slack-toggle-btn typewriter"
-						type="button"
-						on:click={() => { showSlackImport = !showSlackImport; if (!showSlackImport) clearImport(); }}
-					>
-						{showSlackImport ? 'Cancel' : 'Paste log'}
-					</button>
 				</div>
 				<div class="stats-row typewriter">
 					<span class="stat-chip stat-ready">Ready: {readyDogs.length}</span>
 					<span class="stat-chip stat-caution">Caution: {cautionDogs.length}</span>
 					<span class="stat-chip stat-hold">Hold: {holdDogs.length}</span>
 					<span class="stat-chip">History: {history.length}</span>
+					{#if canEdit}
+					<div class="header-actions">
+						<button class="slack-toggle-btn typewriter" type="button" on:click={() => showManualModal = true}>
+							Log playgroup
+						</button>
+						<button
+							class="slack-toggle-btn typewriter"
+							type="button"
+							on:click={() => { showSlackImport = !showSlackImport; if (!showSlackImport) clearImport(); }}
+						>
+							{showSlackImport ? 'Cancel' : 'Paste log'}
+						</button>
+					</div>
+					{/if}
 				</div>
 			</div>
 		</header>
@@ -684,7 +723,7 @@
 					{/if}
 					<div class="slack-confirm-fields">
 						<label class="form-field">
-							<span class="typewriter">Group name</span>
+							<span class="typewriter">Group name (optional)</span>
 							<input bind:value={importGroupName} placeholder="e.g. Morning Yard Group A" />
 						</label>
 						<label class="form-field">
@@ -769,7 +808,7 @@
 						{/if}
 						<div class="slack-confirm-fields">
 							<label class="form-field">
-								<span class="typewriter">Group name</span>
+								<span class="typewriter">Group name (optional)</span>
 								<input bind:value={importGroupName} placeholder="e.g. Morning Yard Group A" />
 							</label>
 							<label class="form-field">
@@ -882,13 +921,13 @@
 			<section class="panel">
 				<div class="panel-head">
 					<h3>Recommended Playgroups</h3>
-					<p class="panel-note">Auto-suggested from readiness + energy compatibility. Up to 6 dogs per group.</p>
+					<p class="panel-note">Auto-suggested from readiness + size compatibility. Up to 4 dogs per group.</p>
 				</div>
-				{#if recommendations.length === 0}
+				{#if readyGroups.length === 0}
 					<p class="empty-line">No recommendations yet. Mark more dogs as good with dogs to generate groups.</p>
 				{:else}
 					<div class="recommendation-grid">
-						{#each recommendations as recommendation}
+						{#each readyGroups as recommendation}
 							<article class="recommendation-card">
 								<div class="recommendation-head">
 									<h4>{recommendation.title}</h4>
@@ -906,6 +945,7 @@
 									<p class="size-unknown-note">⚠ Some dogs have no weight recorded — size compatibility unverified.</p>
 								{/if}
 								<p class="recommendation-reason">{recommendation.reason}</p>
+								{#if canEdit}
 								<button
 									class="recommendation-log-btn typewriter"
 									type="button"
@@ -914,6 +954,7 @@
 								>
 									{loggingRecommendationId === recommendation.id ? 'Saving...' : 'Log to history'}
 								</button>
+								{/if}
 							</article>
 						{/each}
 					</div>
@@ -925,6 +966,32 @@
 						<div class="unknown-weight-list">
 							{#each unknownWeightDogs as dog}
 								<a href={`/dogs/${dog.id}`} class="unknown-weight-chip">{dog.name}</a>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if swapIns.length > 0}
+					<div class="test-section">
+						<div class="test-section-head">
+							<h4 class="test-section-title">Dogs to Rotate In</h4>
+							<p class="test-section-note">Ready dogs that didn't fit neatly into a group — swap one in to replace or add to an existing group.</p>
+						</div>
+						<div class="test-grid">
+							{#each swapIns as s}
+								<div class="test-card">
+									<div class="test-card-top">
+										<a href={`/dogs/${s.dog.id}`} class="dog-link">{s.dog.name}</a>
+										<span class="size-badge size-badge-{sizeCategory(s.dog)}">{sizeLabelShort(s.dog)}</span>
+									</div>
+									{#if s.compatibleGroups.length > 0}
+										<p class="test-suggested">
+											Fits in: {s.compatibleGroups.map((g) => g.title).join(', ')}
+										</p>
+									{:else}
+										<p class="test-reason">No current group is size-compatible — may need their own intro session.</p>
+									{/if}
+								</div>
 							{/each}
 						</div>
 					</div>
@@ -960,80 +1027,8 @@
 			<section class="panel panel-history">
 				<div class="panel-head">
 					<h3>Playgroup History</h3>
-					<div class="panel-head-right">
-						<p class="panel-note">All previously logged playgroups.</p>
-						<button class="log-manual-btn typewriter" type="button" on:click={() => showManualModal = true}>Log playgroup</button>
-					</div>
+					<p class="panel-note">All previously logged playgroups.</p>
 				</div>
-
-				{#if showManualModal}
-					<div class="manual-modal-overlay" role="presentation" on:click|self={() => showManualModal = false}>
-						<div class="manual-modal" role="dialog" aria-modal="true" aria-label="Log playgroup">
-							<div class="manual-modal-head">
-								<p class="manual-modal-title typewriter">Log playgroup</p>
-								<button class="manual-modal-close" type="button" aria-label="Close" on:click={() => showManualModal = false}>×</button>
-							</div>
-							<form class="manual-form" on:submit|preventDefault={saveManualSession}>
-								<div class="manual-grid">
-									<label class="form-field" for="manual-group-name">
-										<span class="typewriter">Group name</span>
-										<input id="manual-group-name" bind:value={manualGroupName} placeholder="Morning Yard Group A" />
-									</label>
-									<label class="form-field" for="manual-date">
-										<span class="typewriter">Date</span>
-										<input id="manual-date" type="date" bind:value={manualDate} />
-									</label>
-									<label class="form-field" for="manual-duration">
-										<span class="typewriter">Duration (minutes)</span>
-										<input id="manual-duration" type="number" min="1" bind:value={manualDuration} placeholder="30" />
-									</label>
-									<label class="form-field" for="manual-outcome">
-										<span class="typewriter">Outcome</span>
-										<select id="manual-outcome" bind:value={manualOutcome}>
-											<option value="successful">Successful</option>
-											<option value="mixed">Mixed</option>
-											<option value="incident">Incident</option>
-											<option value="cancelled">Cancelled</option>
-										</select>
-									</label>
-									<label class="form-field form-field-wide" for="manual-notes">
-										<span class="typewriter">Notes</span>
-										<textarea id="manual-notes" rows="2" bind:value={manualNotes} placeholder="Behavior notes, handling notes, staff observations"></textarea>
-									</label>
-								</div>
-
-								<div class="manual-dogs">
-									<p class="manual-dogs-label">Select dogs for this session</p>
-									<div class="manual-dog-list">
-										{#each activeDogs as dog}
-											<label class="manual-dog-option">
-												<input
-													type="checkbox"
-													checked={manualDogIds.includes(dog.id)}
-													on:change={(event) => toggleManualDog(dog.id, event.currentTarget.checked)}
-												/>
-												<span>{dog.name}</span>
-											</label>
-										{/each}
-									</div>
-								</div>
-
-								<label class="form-field">
-									<span>Add dogs not at shelter</span>
-									<input
-										type="text"
-										bind:value={manualExtraNames}
-										placeholder="e.g. Buddy, Rosie (comma-separated)"
-									/>
-								</label>
-
-								<button class="manual-save-btn typewriter" type="submit" disabled={savingManual}>
-									{savingManual ? 'Saving...' : 'Add to history'}
-								</button>
-							</form>
-						</div>
-					</div>
-				{/if}
 
 				{#if history.length === 0}
 					<p class="empty-line">No previous playgroups logged yet.</p>
@@ -1053,6 +1048,25 @@
 											</select>
 										</div>
 										<input type="text" bind:value={editGroupName} placeholder="Group name (optional)" />
+										<div class="edit-dog-list">
+											{#each activeDogs as dog}
+												<label class="edit-dog-item">
+													<input
+														type="checkbox"
+														value={dog.id}
+														checked={editDogIds.includes(dog.id)}
+														on:change={(e) => {
+															if (e.currentTarget.checked) {
+																editDogIds = [...editDogIds, dog.id];
+															} else {
+																editDogIds = editDogIds.filter((id) => id !== dog.id);
+															}
+														}}
+													/>
+													{dog.name}
+												</label>
+											{/each}
+										</div>
 										<textarea bind:value={editNotes} placeholder="Notes" rows={3}></textarea>
 										<div class="history-edit-actions">
 											<button class="btn-save-edit" on:click={saveEdit} disabled={savingEdit}>
@@ -1066,8 +1080,10 @@
 										<p class="history-name">{session.groupName || '—'}</p>
 										<div class="history-head-right">
 											<span class={`outcome-pill ${outcomeClass(session.outcome)}`}>{session.outcome}</span>
+											{#if canEdit}
 											<button class="btn-edit-session" on:click={() => startEdit(session)}>Edit</button>
 											<button class="btn-delete-session" on:click={() => deleteSession(session.id)}>Delete</button>
+											{/if}
 										</div>
 									</div>
 									<p class="history-meta typewriter">
@@ -1088,6 +1104,75 @@
 				{/if}
 			</section>
 			{/if}
+		{/if}
+
+		{#if showManualModal}
+			<div class="manual-modal-overlay" use:portal role="presentation" on:click|self={() => showManualModal = false}>
+				<div class="manual-modal" role="dialog" aria-modal="true" aria-label="Log playgroup">
+					<div class="manual-modal-head">
+						<p class="manual-modal-title typewriter">Log playgroup</p>
+						<button class="manual-modal-close" type="button" aria-label="Close" on:click={() => showManualModal = false}>×</button>
+					</div>
+					<form class="manual-form" on:submit|preventDefault={saveManualSession}>
+						<div class="manual-grid">
+							<label class="form-field" for="manual-group-name">
+								<span class="typewriter">Group name (optional)</span>
+								<input id="manual-group-name" bind:value={manualGroupName} placeholder="Morning Yard Group A" />
+							</label>
+							<label class="form-field" for="manual-date">
+								<span class="typewriter">Date</span>
+								<input id="manual-date" type="date" bind:value={manualDate} />
+							</label>
+							<label class="form-field" for="manual-duration">
+								<span class="typewriter">Duration (minutes)</span>
+								<input id="manual-duration" type="number" min="1" bind:value={manualDuration} placeholder="30" />
+							</label>
+							<label class="form-field" for="manual-outcome">
+								<span class="typewriter">Outcome</span>
+								<select id="manual-outcome" bind:value={manualOutcome}>
+									<option value="successful">Successful</option>
+									<option value="mixed">Mixed</option>
+									<option value="incident">Incident</option>
+									<option value="cancelled">Cancelled</option>
+								</select>
+							</label>
+							<label class="form-field form-field-wide" for="manual-notes">
+								<span class="typewriter">Notes</span>
+								<textarea id="manual-notes" rows="2" bind:value={manualNotes} placeholder="Behavior notes, handling notes, staff observations"></textarea>
+							</label>
+						</div>
+
+						<div class="manual-dogs">
+							<p class="manual-dogs-label">Select dogs for this session</p>
+							<div class="manual-dog-list">
+								{#each activeDogs as dog}
+									<label class="manual-dog-option">
+										<input
+											type="checkbox"
+											checked={manualDogIds.includes(dog.id)}
+											on:change={(event) => toggleManualDog(dog.id, event.currentTarget.checked)}
+										/>
+										<span>{dog.name}</span>
+									</label>
+								{/each}
+							</div>
+						</div>
+
+						<label class="form-field">
+							<span>Add dogs not at shelter</span>
+							<input
+								type="text"
+								bind:value={manualExtraNames}
+								placeholder="e.g. Buddy, Rosie (comma-separated)"
+							/>
+						</label>
+
+						<button class="manual-save-btn typewriter" type="submit" disabled={savingManual}>
+							{savingManual ? 'Saving...' : 'Add to history'}
+						</button>
+					</form>
+				</div>
+			</div>
 		{/if}
 	</section>
 {/if}
@@ -1755,6 +1840,28 @@
 		gap: 0.4rem;
 	}
 
+	.edit-dog-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+		gap: 0.15rem 0.5rem;
+		max-height: 140px;
+		overflow-y: auto;
+		border: 1px solid #d5e0ea;
+		border-radius: 4px;
+		padding: 0.4rem 0.5rem;
+		background: #f7fbff;
+	}
+
+	.edit-dog-item {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.72rem;
+		color: #2c3e50;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
 	.btn-save-edit {
 		background: #016aa5;
 		color: #fff;
@@ -1845,6 +1952,12 @@
 		align-items: center;
 		gap: 0.5rem;
 		flex-wrap: wrap;
+	}
+
+	.header-actions {
+		display: flex;
+		gap: 0.4rem;
+		margin-left: auto;
 	}
 
 	.slack-toggle-btn {

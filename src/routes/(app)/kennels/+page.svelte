@@ -6,6 +6,7 @@
 	import { resolveRole, canEditDogs } from '$lib/utils/permissions';
 	import { listDogs, updateDog } from '$lib/data/dogs';
 	import type { Dog, UserRole } from '$lib/types';
+	import { syncVersion } from '$lib/stores/sync';
 
 	type RunId = number | 'puppy' | 'rock';
 
@@ -362,6 +363,8 @@
 		}
 		return map;
 	}
+
+	$: if ($syncVersion > 0) void refreshDogs();
 
 	async function refreshDogs() {
 		loading = true;

@@ -13,6 +13,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+	import { syncVersion } from '$lib/stores/sync';
 
 	type TripEligibility = ReturnType<typeof checkDayTripEligibility>;
 	type CardActionTone = 'ready' | 'blocked' | 'info';
@@ -186,6 +187,8 @@ const today = new Date();
 		};
 		formValid = true;
 	}
+
+	$: if ($syncVersion > 0) void refreshDogs();
 
 	async function refreshDogs() {
 		loading = true;

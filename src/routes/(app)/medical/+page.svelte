@@ -6,6 +6,7 @@
 	import { formatDate, toDate } from '$lib/utils/dates';
 	import { differenceInDays, startOfDay } from 'date-fns';
 	import toast from 'svelte-french-toast';
+	import { syncVersion } from '$lib/stores/sync';
 
 	const today = new Date();
 
@@ -314,6 +315,13 @@
 		dogs = await listDogs();
 		toast.success(`Treatment cleared: ${expired.map((d) => d.name).join(', ')}`);
 	}
+
+	async function refreshDogs() {
+		dogs = await listDogs();
+		loading = false;
+	}
+
+	$: if ($syncVersion > 0) void refreshDogs();
 
 	onMount(async () => {
 		dogs = await listDogs();

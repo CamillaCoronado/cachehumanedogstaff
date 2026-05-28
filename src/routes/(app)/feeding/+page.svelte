@@ -7,6 +7,7 @@
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { isOwnFood, foodTypeTone, foodTypeInstruction, foodTypeLabel, estimateFoodAmountPerMeal } from '$lib/utils/feeding';
+	import { syncVersion } from '$lib/stores/sync';
 
 	type RunId = number | 'puppy' | 'rock';
 	const MAX_DOGS_PER_RUN = 2;
@@ -466,6 +467,8 @@
 		}
 		return count;
 	}
+
+	$: if ($syncVersion > 0) void refreshDogs();
 
 	async function refreshDogs() {
 		loading = true;

@@ -10,6 +10,7 @@
 	import type { CleaningShift } from '$lib/data/cleaning';
 	import { onMount } from 'svelte';
 	import { writable } from 'svelte/store';
+	import { syncVersion } from '$lib/stores/sync';
 	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
 
 	type TodayActionId = 'feeding' | 'cleaning' | 'movement' | 'slack';
@@ -572,6 +573,8 @@
 			setActionBusy(actionId, false);
 		}
 	}
+
+	$: if ($syncVersion > 0) void loadBoard();
 
 	async function loadBoard() {
 		loading = true;

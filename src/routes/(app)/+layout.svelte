@@ -13,6 +13,7 @@
 	import { canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { backfillBathLogsFromDogs } from '$lib/data/dogs';
+	import { syncVersion } from '$lib/stores/sync';
 
 	type TabItem = {
 		href: string;
@@ -59,6 +60,9 @@
 
 	import { getDog } from '$lib/data/dogs';
 	import type { Dog } from '$lib/types';
+	import { confetti } from '@neoconfetti/svelte';
+	let adoptedDogs: Dog[] = [];
+	let showAdoptionCelebration = false;
 	let fosterDogs: Dog[] = [];
 	let showFosterMoment = false;
 	let transferDogs: Dog[] = [];
@@ -111,12 +115,23 @@
 					hour12: true
 				}).format(new Date());
 				if (result.changes.length > 0) {
+					syncVersion.update((v) => v + 1);
 					asmChanges = result.changes;
 					asmLastChangedAt = asmSyncedAt;
 					try {
 						localStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: asmChanges, changedAt: asmLastChangedAt }));
 					} catch { /* ignore */ }
 					asmLogVisible = true;
+
+					const adoptionChanges = result.changes.filter((c) => c.isArchived);
+					if (adoptionChanges.length > 0) {
+						Promise.all(adoptionChanges.map((c) => getDog(c.id)))
+							.then((dogs) => {
+								adoptedDogs = dogs.filter((d): d is Dog => d !== null);
+								if (adoptedDogs.length > 0) showAdoptionCelebration = true;
+							})
+							.catch(() => {/* best-effort */});
+					}
 
 					const fosterChanges = result.changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)'));
 					if (fosterChanges.length > 0) {
@@ -420,6 +435,28 @@
 					</div>
 				</div>
 			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showAdoptionCelebration && adoptedDogs.length > 0}
+	<div class="adoption-overlay" use:portal role="presentation" on:click={() => showAdoptionCelebration = false}>
+		<div class="adoption-celebration">
+			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
+			<div class="adoption-dogs-row">
+				{#each adoptedDogs as dog}
+					<div class="adoption-dog-item">
+						{#if dog.photoUrl}
+							<img class="adoption-photo" src={dog.photoUrl} alt={dog.name} />
+						{:else}
+							<div class="adoption-photo adoption-photo-placeholder"></div>
+						{/if}
+						<p class="adoption-name">{dog.name}</p>
+					</div>
+				{/each}
+			</div>
+			<p class="adoption-message">{adoptedDogs.length === 1 ? 'Found their forever home!' : `${adoptedDogs.length} dogs found their forever homes!`} 🎉</p>
+			<button class="adoption-close typewriter" on:click={() => showAdoptionCelebration = false}>Close</button>
 		</div>
 	</div>
 {/if}
@@ -1475,5 +1512,97 @@
 
 .foster-close:hover {
 	background: rgba(200, 153, 58, 0.28);
+}
+
+.adoption-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.72);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+}
+
+.adoption-celebration {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.9rem;
+	text-align: center;
+	max-width: 28rem;
+	width: 100%;
+}
+
+.confetti-anchor {
+	position: absolute;
+	top: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	pointer-events: none;
+}
+
+.adoption-dogs-row {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 1.2rem;
+}
+
+.adoption-dog-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.adoption-photo {
+	width: clamp(5rem, 20vw, 9rem);
+	height: clamp(5rem, 20vw, 9rem);
+	object-fit: cover;
+	border-radius: 50%;
+	border: 4px solid #fff;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.adoption-photo-placeholder {
+	background: rgba(255, 255, 255, 0.15);
+}
+
+.adoption-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1.2rem, 4vw, 2rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #fff;
+	line-height: 1;
+}
+
+.adoption-message {
+	margin: 0;
+	font-size: 1.05rem;
+	color: rgba(255, 255, 255, 0.85);
+}
+
+.adoption-close {
+	margin-top: 0.4rem;
+	border: 1px solid rgba(255, 255, 255, 0.4);
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+	cursor: pointer;
+}
+
+.adoption-close:hover {
+	background: rgba(255, 255, 255, 0.22);
 }
 </style>

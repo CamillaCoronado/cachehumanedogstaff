@@ -144,7 +144,7 @@ export async function deletePlaygroupSession(id: string): Promise<void> {
 
 export async function updatePlaygroupSession(
 	id: string,
-	updates: Partial<Pick<PlaygroupSession, 'date' | 'groupName' | 'outcome' | 'notes' | 'durationMinutes'>>
+	updates: Partial<Pick<PlaygroupSession, 'date' | 'groupName' | 'outcome' | 'notes' | 'durationMinutes' | 'dogIds' | 'dogNames'>>
 ) {
 	const serialized: Partial<StoredPlaygroupSession> = {};
 	if (updates.date !== undefined) serialized.date = toDateString(updates.date) ?? new Date().toISOString();
@@ -152,6 +152,8 @@ export async function updatePlaygroupSession(
 	if (updates.outcome !== undefined) serialized.outcome = updates.outcome;
 	if (updates.notes !== undefined) serialized.notes = updates.notes;
 	if (updates.durationMinutes !== undefined) serialized.durationMinutes = updates.durationMinutes;
+	if (updates.dogIds !== undefined) serialized.dogIds = updates.dogIds;
+	if (updates.dogNames !== undefined) serialized.dogNames = updates.dogNames;
 
 	if (db) {
 		await updateDoc(doc(db, 'playgroupSessions', id), serialized);
