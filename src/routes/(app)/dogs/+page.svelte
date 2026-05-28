@@ -1948,13 +1948,14 @@ const today = new Date();
 
 	@media (min-width: 760px) {
 		.dogs-control-strip {
-			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-			align-items: end;
-			gap: 0.72rem;
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.5rem 0.6rem;
 		}
 
 		.dogs-summary-row {
-			grid-column: 1 / -1;
+			flex: 0 0 100%;
 			align-items: center;
 		}
 
@@ -1966,20 +1967,49 @@ const today = new Date();
 			min-height: 2rem;
 		}
 
+		.dogs-search-wrap {
+			flex: 0 0 11rem;
+			gap: 0;
+		}
+
+		.dogs-search-wrap .control-label {
+			display: none;
+		}
+
+		.dogs-search-input {
+			font-size: 0.82rem;
+		}
+
 		.dogs-filters-drawer {
+			flex: 1 1 0;
+			min-width: 0;
 			border: 0;
 			background: transparent;
 		}
 
-		.dogs-filters-body {
-			gap: 0.44rem;
+		.dogs-filters-summary {
+			display: none;
+		}
+
+		/* always show filter body on desktop regardless of open state */
+		.dogs-filters-body,
+		.dogs-filters-drawer[open] .dogs-filters-body {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.3rem;
 			padding: 0;
+		}
+
+		/* flatten filter groups so all chips flow in one row */
+		.dogs-sort-group,
+		.archived-filter-group {
+			display: contents;
 		}
 
 		.card-kennel-section {
 			border-radius: 0.82rem;
 		}
-
 	}
 
 	
