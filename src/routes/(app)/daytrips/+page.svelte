@@ -1233,20 +1233,28 @@
 								<p class="vol-section-title">Orientation Pipeline</p>
 								<p class="dt-panel-sub">New sign-ups working through the process</p>
 							</div>
-							{#if upcomingOrientations.length > 0}
-								{@const next = upcomingOrientations[0]}
-								{@const nextCount = volunteers.filter((v) => v.orientationDate === next.orientationDate).length}
-								<div class="vol-next-chip">
-									<span class="vol-next-label">Next orientation</span>
-									<span class="vol-next-date">{formatOrientationDate(next.orientationDate)}</span>
-									<span class="vol-next-count">{nextCount} attendee{nextCount === 1 ? '' : 's'}</span>
-								</div>
-							{/if}
 						</div>
 
 						{#if pipelineVols.length === 0}
 							<p class="dt-panel-empty">No one in the pipeline right now.</p>
 						{:else}
+							<!-- Next orientation hero -->
+							{#if upcomingOrientations.length > 0}
+								{@const nextDate = upcomingOrientations[0].orientationDate}
+								{@const nextAttendees = upcomingOrientations.filter((v) => v.orientationDate === nextDate)}
+								<div class="vol-next-hero">
+									<div class="vol-next-hero-left">
+										<span class="vol-next-hero-label">Next Orientation</span>
+										<span class="vol-next-hero-date">{formatOrientationDate(nextDate)}</span>
+									</div>
+									<div class="vol-next-hero-names">
+										{#each nextAttendees as v}
+											<span class="vol-next-hero-name">{v.name}</span>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
 							<!-- Funnel -->
 							<div class="vol-funnel">
 								<div class="vol-funnel-main">
@@ -1270,18 +1278,22 @@
 								{/if}
 							</div>
 
-							<!-- Upcoming orientations -->
+							<!-- Upcoming orientations grouped by date -->
 							{#if upcomingOrientations.length > 0}
+								{@const dateGroups = [...new Set(upcomingOrientations.map((v) => v.orientationDate))]}
 								<div class="vol-upcoming">
-									<p class="vol-section-label">Upcoming Orientations</p>
-									<div class="vol-upcoming-list">
-										{#each upcomingOrientations as vol}
-											<div class="vol-upcoming-row">
-												<span class="vol-upcoming-name">{vol.name}</span>
-												<span class="vol-upcoming-date">{formatOrientationDate(vol.orientationDate)}</span>
+									<p class="vol-section-label">Scheduled Orientations</p>
+									{#each dateGroups as date}
+										{@const group = upcomingOrientations.filter((v) => v.orientationDate === date)}
+										<div class="vol-upcoming-date-group">
+											<span class="vol-upcoming-date-label">{formatOrientationDate(date)}</span>
+											<div class="vol-upcoming-names">
+												{#each group as v}
+													<span class="vol-upcoming-name-chip">{v.name}</span>
+												{/each}
 											</div>
-										{/each}
-									</div>
+										</div>
+									{/each}
 								</div>
 							{/if}
 
@@ -1311,6 +1323,9 @@
 													}}>
 														<span class="vol-name">{vol.name || '—'}</span>
 														<span class="vol-email">{vol.email}</span>
+														{#if vol.orientationDate && (statusGroup === 'scheduled' || statusGroup === 'no_showed')}
+															<span class="vol-date-chip">{formatOrientationDate(vol.orientationDate)}</span>
+														{/if}
 														<span class="vol-chevron">{volExpandedId === vol.id ? '▲' : '▼'}</span>
 													</button>
 
@@ -1337,9 +1352,7 @@
 																	bind:value={volOrientationDraft[vol.id]}
 																	on:change={() => saveOrientationDate(vol.id, volOrientationDraft[vol.id] ?? '')}
 																/>
-																{#if vol.orientationDate}
-																	<span class="vol-date-chip">{formatOrientationDate(vol.orientationDate)}</span>
-																{:else}
+																{#if !vol.orientationDate}
 																	<span class="vol-date-unset">No date set</span>
 																{/if}
 															</div>
@@ -2405,35 +2418,55 @@
 		white-space: nowrap;
 	}
 
-	.vol-next-chip {
+	/* Next orientation hero */
+	.vol-next-hero {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 0.85rem 1rem;
+		background: #e8f0fe;
+		border: 1px solid #aecbfa;
+		border-radius: 8px;
+		flex-wrap: wrap;
+	}
+
+	.vol-next-hero-left {
 		display: flex;
 		flex-direction: column;
-		align-items: flex-end;
 		gap: 0.1rem;
-		padding: 0.4rem 0.65rem;
-		border-radius: 6px;
-		background: #fef7e0;
-		border: 1px solid #fdd663;
+		flex-shrink: 0;
 	}
 
-	.vol-next-label {
+	.vol-next-hero-label {
 		font-size: 0.58rem;
-		font-weight: 600;
-		letter-spacing: 0.07em;
+		font-weight: 700;
+		letter-spacing: 0.09em;
 		text-transform: uppercase;
-		color: #b06000;
+		color: #1a73e8;
 	}
 
-	.vol-next-date {
-		font-size: 0.88rem;
+	.vol-next-hero-date {
+		font-size: 1.1rem;
 		font-weight: 700;
-		color: #7a5100;
+		color: #0d47a1;
 		white-space: nowrap;
 	}
 
-	.vol-next-count {
-		font-size: 0.65rem;
-		color: #b06000;
+	.vol-next-hero-names {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		flex: 1;
+	}
+
+	.vol-next-hero-name {
+		padding: 0.2rem 0.55rem;
+		background: #fff;
+		border: 1px solid #aecbfa;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: #1a73e8;
 	}
 
 	/* Pipeline funnel */
@@ -2510,21 +2543,41 @@
 		border-bottom: 1px solid #dadce0;
 	}
 
-	.vol-upcoming-list { display: flex; flex-direction: column; }
-
-	.vol-upcoming-row {
+	.vol-upcoming-date-group {
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 0.45rem 0.75rem;
+		align-items: flex-start;
+		gap: 0.65rem;
+		padding: 0.5rem 0.75rem;
 		border-bottom: 1px solid #f1f3f4;
-		font-size: 0.82rem;
 	}
 
-	.vol-upcoming-row:last-child { border-bottom: none; }
+	.vol-upcoming-date-group:last-child { border-bottom: none; }
 
-	.vol-upcoming-name { font-weight: 600; color: #202124; }
-	.vol-upcoming-date { color: #1a73e8; font-weight: 500; font-size: 0.78rem; }
+	.vol-upcoming-date-label {
+		font-size: 0.75rem;
+		font-weight: 700;
+		color: #1a73e8;
+		white-space: nowrap;
+		min-width: 8rem;
+		padding-top: 0.1rem;
+	}
+
+	.vol-upcoming-names {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+
+	.vol-upcoming-name-chip {
+		font-size: 0.75rem;
+		color: #202124;
+		font-weight: 500;
+	}
+
+	.vol-upcoming-name-chip:not(:last-child)::after {
+		content: ',';
+		color: #9aa0a6;
+	}
 
 	/* Grouped list */
 	.vol-group { display: flex; flex-direction: column; gap: 0; }

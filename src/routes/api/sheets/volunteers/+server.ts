@@ -173,8 +173,10 @@ export async function GET() {
 		return entry ? colorDist(rowColor, entry.color) < 0.4 : false;
 	}
 
-	// Column indices from header row
-	const headers = (rows[0] ?? []).map((c) => c.text.toLowerCase());
+	// Column indices from header row — normalize curly apostrophes so searches work
+	const headers = (rows[0] ?? []).map((c) =>
+		c.text.toLowerCase().replace(/[‘’‚‛]/g, "'")
+	);
 	const idx = (kw: string) => headers.findIndex((h) => h.includes(kw));
 
 	const iTimestamp = 0;
@@ -190,6 +192,12 @@ export async function GET() {
 	const yesVals = new Set(['yes', '✓', 'x', 'true']);
 	const parseBool = (s: string) => yesVals.has(s.toLowerCase().trim());
 
+	// True if col0 looks like a full Google Form timestamp ("M/D/YYYY HH:MM:SS")
+	// vs a short orientation date Liz enters manually ("2/27", "4/3", etc.)
+	function isFullTimestamp(s: string): boolean {
+		return s.includes(':') && /\d{4}/.test(s);
+	}
+
 	const volunteers: VolunteerSheetRow[] = [];
 
 	for (let i = 2; i < rows.length; i++) {
@@ -201,14 +209,30 @@ export async function GET() {
 		if (!name && !email) continue;
 
 		const rowColor = row[0]?.color ?? null;
-		const status = resolveStatus(rowColor);
-		// Yellow scheduled: col0 = orientation date. Purple scheduled: col0 = descriptive text (no date).
-		const orientationDate = isYellowScheduled(rowColor) ? parseSheetDate(get(0)) : null;
+		const col0 = get(iTimestamp);
+		const col0HasDate = col0.trim() !== '' && !isFullTimestamp(col0);
+
+		// Base status from color; dark red maps to answered_no by distance (they replied
+		// to Liz's email saying they can't make orientation), but if col0 was overwritten
+		// with a short date it means they were scheduled and no-showed instead
+		let status = resolveStatus(rowColor);
+		if (status === 'answered_no' && col0HasDate) status = 'no_showed';
+
+		// Orientation date: yellow scheduled rows AND no-show rows both store
+		// the orientation date in col0 (overwriting the original timestamp)
+		const orientationDate =
+			isYellowScheduled(rowColor) || status === 'no_showed'
+				? parseSheetDate(col0)
+				: null;
+
+		// submittedAt is only valid when col0 is still a real form timestamp
+		const submittedAt =
+			status === 'scheduled' || col0HasDate ? null : (col0 || null);
 
 		volunteers.push({
 			name,
 			email,
-			submittedAt: status === 'scheduled' ? null : (get(iTimestamp) || null),
+			submittedAt,
 			hasDriversLicense: parseBool(get(iLicense)),
 			is18Plus: parseBool(get(i18)),
 			dogExperience: get(iExp),
