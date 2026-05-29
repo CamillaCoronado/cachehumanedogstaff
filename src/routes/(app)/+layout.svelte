@@ -127,6 +127,14 @@
 	$: if ($authReady && $authUser && storedOverlayChanges && !storedOverlayAttempted) {
 		storedOverlayAttempted = true;
 		const changes = storedOverlayChanges;
+		// Ack immediately so a browser close before the user clicks "Close" doesn't re-show on next load
+		try {
+			const raw = localStorage.getItem(STORAGE_KEY);
+			if (raw) {
+				const parsed = JSON.parse(raw);
+				localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, overlayAcked: true }));
+			}
+		} catch { /* ignore */ }
 		const buildOverlay = async (filtered: SyncChange[], type: OverlayItem['type']): Promise<OverlayItem | null> => {
 			if (filtered.length === 0) return null;
 			try {
