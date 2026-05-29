@@ -206,7 +206,6 @@
 	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
 	$: tabs = [
 		...baseTabs,
-		...(canViewDayTrips ? [dayTripsTab] : []),
 		playgroupsTab,
 		medicalTab,
 		...(isAdmin ? [adminTab] : [])

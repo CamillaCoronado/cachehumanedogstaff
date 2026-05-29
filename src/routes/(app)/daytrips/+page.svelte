@@ -5,7 +5,7 @@
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, resolveRole } from '$lib/utils/permissions';
 	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog, fixImportedTripHours, logManualTrip } from '$lib/data/dogs';
-	import { listVolunteers, syncVolunteers, updateVolunteerNotes, deleteVolunteer } from '$lib/data/volunteers';
+	import { listVolunteers, syncVolunteers, updateVolunteerNotes, updateOrientationDate, updateVolunteerStatus, deleteVolunteer } from '$lib/data/volunteers';
 	import type { BehaviorRating, DayTripLog, Dog, UserRole, Volunteer, VolunteerOrientationStatus } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 
@@ -27,6 +27,8 @@
 	let volSyncError = '';
 	let volExpandedId: string | null = null;
 	let volNotesDraft: Record<string, string> = {};
+	let volOrientationDraft: Record<string, string> = {};
+	let volSearch = '';
 
 	async function syncVolunteersFromSheet() {
 		volSyncing = true;
@@ -56,19 +58,40 @@
 		volunteers = volunteers.filter((v) => v.id !== id);
 	}
 
+	async function changeVolunteerStatus(id: string, status: VolunteerOrientationStatus) {
+		await updateVolunteerStatus(id, status);
+		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationStatus: status } : v);
+	}
+
+	async function saveOrientationDate(id: string, date: string) {
+		await updateOrientationDate(id, date);
+		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationDate: date || null } : v);
+		toast.success('Orientation date saved.');
+	}
+
+	function formatOrientationDate(d: string | null | undefined): string {
+		if (!d) return '—';
+		const [y, m, day] = d.split('-').map(Number);
+		return new Date(y, m - 1, day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+	}
+
+	$: upcomingOrientations = volunteers
+		.filter((v) => v.orientationStatus === 'scheduled' && v.orientationDate)
+		.sort((a, b) => (a.orientationDate ?? '').localeCompare(b.orientationDate ?? ''));
+
 	function statusLabel(s: VolunteerOrientationStatus): string {
 		const map: Record<VolunteerOrientationStatus, string> = {
 			pending: 'Pending', emailed: 'Emailed', scheduled: 'Scheduled',
-			completed: 'Completed', no_showed: 'No-showed', disqualified: 'Disqualified'
+			signed_waiver: 'Signed Waiver', answered_no: 'Answered No', no_showed: 'No-showed'
 		};
 		return map[s] ?? s;
 	}
 
 	function statusClass(s: VolunteerOrientationStatus): string {
-		if (s === 'completed') return 'vol-status-green';
+		if (s === 'signed_waiver') return 'vol-status-green';
 		if (s === 'scheduled') return 'vol-status-blue';
 		if (s === 'emailed') return 'vol-status-yellow';
-		if (s === 'no_showed' || s === 'disqualified') return 'vol-status-red';
+		if (s === 'no_showed' || s === 'answered_no') return 'vol-status-red';
 		return 'vol-status-gray';
 	}
 
@@ -165,7 +188,7 @@
 	const tripRatingOptions: BehaviorRating[] = ['good', 'neutral', 'reactive', 'na'];
 
 	const volStatusOrder: Record<VolunteerOrientationStatus, number> = {
-		pending: 0, emailed: 1, scheduled: 2, completed: 3, no_showed: 4, disqualified: 5
+		pending: 0, emailed: 1, scheduled: 2, signed_waiver: 3, no_showed: 4, answered_no: 5
 	};
 
 	$: sortedVolunteers = volunteers.slice().sort(
@@ -781,6 +804,9 @@
 		<p class="dt-restricted-sub">Day trips are available to manager and admin accounts only.</p>
 	</div>
 {:else}
+	<div class="dt-construction-banner">
+		🚧 Day Trips is under construction — it'll be back soon with improvements!
+	</div>
 	<div class="dt-shell">
 
 		<!-- Top bar -->
@@ -1147,11 +1173,11 @@
 
 		<!-- ───── VOLUNTEERS ───── -->
 		{:else if activeTab === 'volunteers'}
-			<div class="dt-panel">
-				<div class="dt-panel-head">
+			<div class="vol-panel">
+				<!-- Head -->
+				<div class="vol-top-bar">
 					<div>
-						<p class="dt-panel-title">Volunteers</p>
-						<p class="dt-panel-sub">{volunteers.length} volunteer{volunteers.length === 1 ? '' : 's'} · synced from spreadsheet</p>
+						<p class="dt-panel-title">Day Trip Volunteers</p>
 					</div>
 					<div class="vol-head-actions">
 						<button class="dt-import-btn" on:click={syncVolunteersFromSheet} disabled={volSyncing}>
@@ -1162,67 +1188,215 @@
 				</div>
 
 				{#if volunteers.length === 0}
-					<p class="dt-panel-empty">No volunteers yet — click "Sync from Sheet" to load.</p>
+					<div class="dt-panel">
+						<p class="dt-panel-empty">No volunteers yet — click "Sync from Sheet" to load.</p>
+					</div>
 				{:else}
-					<div class="vol-list">
-						{#each sortedVolunteers as vol}
-							<div class="vol-row" class:vol-row-open={volExpandedId === vol.id}>
-								<button class="vol-row-header" on:click={() => {
-									volExpandedId = volExpandedId === vol.id ? null : vol.id;
-									if (!volNotesDraft[vol.id]) volNotesDraft[vol.id] = vol.internalNotes ?? '';
-								}}>
-									<span class="vol-name">{vol.name || '—'}</span>
-									<span class="vol-email">{vol.email}</span>
-									<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
-									<span class="vol-chevron">{volExpandedId === vol.id ? '▲' : '▼'}</span>
-								</button>
+					{@const establishedVols = volunteers.filter((v) => v.isEstablished).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))}
+					{@const pipelineVols = volunteers.filter((v) => !v.isEstablished)}
 
-								{#if volExpandedId === vol.id}
-									<div class="vol-detail">
-										<div class="vol-detail-grid">
-											<div class="vol-detail-field">
-												<span class="vol-detail-label">Submitted</span>
-												<span class="vol-detail-val">{vol.submittedAt || '—'}</span>
-											</div>
-											<div class="vol-detail-field">
-												<span class="vol-detail-label">Driver's license</span>
-												<span class="vol-detail-val">{vol.hasDriversLicense ? 'Yes' : 'No'}</span>
-											</div>
-											<div class="vol-detail-field">
-												<span class="vol-detail-label">18+</span>
-												<span class="vol-detail-val">{vol.is18Plus ? 'Yes' : 'No'}</span>
-											</div>
-											<div class="vol-detail-field">
-												<span class="vol-detail-label">Waiver signed</span>
-												<span class="vol-detail-val">{vol.waiverSigned ? 'Yes' : 'No'}</span>
-											</div>
-											{#if vol.dogExperience}
-												<div class="vol-detail-field vol-detail-full">
-													<span class="vol-detail-label">Dog experience</span>
-													<span class="vol-detail-val">{vol.dogExperience}</span>
-												</div>
-											{/if}
-											{#if vol.adventurePlans}
-												<div class="vol-detail-field vol-detail-full">
-													<span class="vol-detail-label">Adventure plans</span>
-													<span class="vol-detail-val">{vol.adventurePlans}</span>
-												</div>
-											{/if}
-											<div class="vol-detail-field vol-detail-full">
-												<label class="vol-detail-label" for="vol-notes-{vol.id}">Internal notes</label>
-												<textarea id="vol-notes-{vol.id}" class="vol-notes-input" rows="2"
-													bind:value={volNotesDraft[vol.id]}
-													placeholder="Staff notes…"></textarea>
-												<div class="vol-notes-actions">
-													<button class="dt-import-btn dt-import-btn-go" on:click={() => saveVolunteerNotes(vol.id)}>Save notes</button>
-													<button class="dt-import-btn vol-delete-btn" on:click={() => removeVolunteer(vol.id)}>Remove</button>
-												</div>
-											</div>
+					<!-- ── Established DTVs ── -->
+					<div class="dt-panel vol-established-panel">
+						<div class="vol-section-head">
+							<div>
+								<p class="vol-section-title">Established DTVs</p>
+								<p class="dt-panel-sub">Completed orientation · {establishedVols.length} active volunteer{establishedVols.length === 1 ? '' : 's'}</p>
+							</div>
+							<input class="vol-search" type="search" placeholder="Search…" bind:value={volSearch} />
+						</div>
+
+						{#if establishedVols.length === 0}
+							<p class="dt-panel-empty">None yet — sync from sheet to load.</p>
+						{:else}
+							{@const filtered = volSearch.trim()
+								? establishedVols.filter((v) => (v.name + v.email).toLowerCase().includes(volSearch.toLowerCase()))
+								: establishedVols}
+							{#if filtered.length === 0}
+								<p class="dt-panel-empty">No match for "{volSearch}".</p>
+							{:else}
+								<div class="vol-est-list">
+									{#each filtered as vol}
+										<div class="vol-est-row">
+											<span class="vol-est-name">{vol.name || '—'}</span>
+											<span class="vol-est-email">{vol.email}</span>
 										</div>
+									{/each}
+								</div>
+							{/if}
+						{/if}
+					</div>
+
+					<!-- ── Orientation Pipeline ── -->
+					<div class="dt-panel vol-pipeline-panel">
+						<div class="vol-section-head">
+							<div>
+								<p class="vol-section-title">Orientation Pipeline</p>
+								<p class="dt-panel-sub">New sign-ups working through the process</p>
+							</div>
+							{#if upcomingOrientations.length > 0}
+								{@const next = upcomingOrientations[0]}
+								{@const nextCount = volunteers.filter((v) => v.orientationDate === next.orientationDate).length}
+								<div class="vol-next-chip">
+									<span class="vol-next-label">Next orientation</span>
+									<span class="vol-next-date">{formatOrientationDate(next.orientationDate)}</span>
+									<span class="vol-next-count">{nextCount} attendee{nextCount === 1 ? '' : 's'}</span>
+								</div>
+							{/if}
+						</div>
+
+						{#if pipelineVols.length === 0}
+							<p class="dt-panel-empty">No one in the pipeline right now.</p>
+						{:else}
+							<!-- Funnel -->
+							<div class="vol-funnel">
+								<div class="vol-funnel-main">
+									{#each [['pending','Pending','gray'],['emailed','Emailed','yellow'],['scheduled','Scheduled','blue'],['signed_waiver','Signed Waiver','green']] as [s, label, color]}
+										{@const count = pipelineVols.filter((v) => v.orientationStatus === s).length}
+										<div class="vol-funnel-step vol-funnel-{color}" class:vol-funnel-zero={count === 0}>
+											<span class="vol-funnel-count">{count}</span>
+											<span class="vol-funnel-label">{label}</span>
+										</div>
+									{/each}
+								</div>
+								{#if pipelineVols.some((v) => v.orientationStatus === 'no_showed' || v.orientationStatus === 'answered_no')}
+									<div class="vol-funnel-dropouts">
+										{#each [['no_showed','No-showed'],['answered_no','Answered No']] as [s, label]}
+											{@const count = pipelineVols.filter((v) => v.orientationStatus === s).length}
+											{#if count > 0}
+												<span class="vol-status vol-status-red">{label}: {count}</span>
+											{/if}
+										{/each}
 									</div>
 								{/if}
 							</div>
-						{/each}
+
+							<!-- Upcoming orientations -->
+							{#if upcomingOrientations.length > 0}
+								<div class="vol-upcoming">
+									<p class="vol-section-label">Upcoming Orientations</p>
+									<div class="vol-upcoming-list">
+										{#each upcomingOrientations as vol}
+											<div class="vol-upcoming-row">
+												<span class="vol-upcoming-name">{vol.name}</span>
+												<span class="vol-upcoming-date">{formatOrientationDate(vol.orientationDate)}</span>
+											</div>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
+							<!-- Grouped pipeline list -->
+							{#each [['pending','Pending'],['emailed','Emailed'],['scheduled','Scheduled'],['signed_waiver','Signed Waiver'],['no_showed','No-showed'],['answered_no','Answered No']] as [statusGroup, groupLabel]}
+								{@const groupVols = pipelineVols
+									.filter((v) => v.orientationStatus === statusGroup)
+									.sort((a, b) =>
+										statusGroup === 'scheduled'
+											? (a.orientationDate ?? 'zzz').localeCompare(b.orientationDate ?? 'zzz')
+											: (a.name ?? '').localeCompare(b.name ?? '')
+									)}
+								{#if groupVols.length > 0}
+									<div class="vol-group">
+										<div class="vol-group-head">
+											<span class="vol-group-label {statusClass(statusGroup)}">{groupLabel}</span>
+											<span class="vol-group-count">{groupVols.length}</span>
+										</div>
+										<div class="vol-group-rows">
+											{#each groupVols as vol}
+												<div class="vol-row" class:vol-row-open={volExpandedId === vol.id}>
+													<!-- Name row — clicking expands details -->
+													<button class="vol-row-header" on:click={() => {
+														volExpandedId = volExpandedId === vol.id ? null : vol.id;
+														if (volNotesDraft[vol.id] === undefined) volNotesDraft[vol.id] = vol.internalNotes ?? '';
+														if (volOrientationDraft[vol.id] === undefined) volOrientationDraft[vol.id] = vol.orientationDate ?? '';
+													}}>
+														<span class="vol-name">{vol.name || '—'}</span>
+														<span class="vol-email">{vol.email}</span>
+														<span class="vol-chevron">{volExpandedId === vol.id ? '▲' : '▼'}</span>
+													</button>
+
+													<!-- Status steps + date — always visible -->
+													<div class="vol-controls">
+														<div class="vol-step-row">
+															{#each [['pending','Pending'],['emailed','Emailed'],['scheduled','Scheduled'],['signed_waiver','Signed']] as [s, label]}
+																<button
+																	class="vol-step-btn"
+																	class:vol-step-active={vol.orientationStatus === s}
+																	on:click={() => {
+																		changeVolunteerStatus(vol.id, s);
+																		if (s === 'scheduled' && volOrientationDraft[vol.id] === undefined) volOrientationDraft[vol.id] = vol.orientationDate ?? '';
+																	}}
+																>{label}</button>
+															{/each}
+															{#if vol.orientationStatus === 'no_showed' || vol.orientationStatus === 'answered_no'}
+																<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
+															{/if}
+														</div>
+														{#if vol.orientationStatus === 'scheduled'}
+															<div class="vol-date-inline">
+																<input class="vol-date-input" type="date"
+																	bind:value={volOrientationDraft[vol.id]}
+																	on:change={() => saveOrientationDate(vol.id, volOrientationDraft[vol.id] ?? '')}
+																/>
+																{#if vol.orientationDate}
+																	<span class="vol-date-chip">{formatOrientationDate(vol.orientationDate)}</span>
+																{:else}
+																	<span class="vol-date-unset">No date set</span>
+																{/if}
+															</div>
+														{/if}
+													</div>
+
+													{#if volExpandedId === vol.id}
+														<div class="vol-detail">
+															<div class="vol-detail-grid">
+																<div class="vol-detail-field">
+																	<span class="vol-detail-label">Submitted</span>
+																	<span class="vol-detail-val">{vol.submittedAt || '—'}</span>
+																</div>
+																<div class="vol-detail-field">
+																	<span class="vol-detail-label">Driver's license</span>
+																	<span class="vol-detail-val">{vol.hasDriversLicense ? 'Yes' : 'No'}</span>
+																</div>
+																<div class="vol-detail-field">
+																	<span class="vol-detail-label">18+</span>
+																	<span class="vol-detail-val">{vol.is18Plus ? 'Yes' : 'No'}</span>
+																</div>
+																{#if vol.dogExperience}
+																	<div class="vol-detail-field vol-detail-full">
+																		<span class="vol-detail-label">Dog experience</span>
+																		<span class="vol-detail-val">{vol.dogExperience}</span>
+																	</div>
+																{/if}
+																{#if vol.adventurePlans}
+																	<div class="vol-detail-field vol-detail-full">
+																		<span class="vol-detail-label">Adventure plans</span>
+																		<span class="vol-detail-val">{vol.adventurePlans}</span>
+																	</div>
+																{/if}
+																<div class="vol-detail-field vol-detail-full">
+																	<label class="vol-detail-label" for="vol-notes-{vol.id}">Internal notes</label>
+																	<textarea id="vol-notes-{vol.id}" class="vol-notes-input" rows="2"
+																		bind:value={volNotesDraft[vol.id]}
+																		placeholder="Staff notes…"></textarea>
+																	<div class="vol-notes-actions">
+																		<button class="dt-import-btn dt-import-btn-go" on:click={() => saveVolunteerNotes(vol.id)}>Save notes</button>
+																		{#if vol.orientationStatus !== 'no_showed' && vol.orientationStatus !== 'answered_no'}
+																			<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'no_showed')}>No-showed</button>
+																			<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'answered_no')}>Answered No</button>
+																		{/if}
+																		<button class="dt-import-btn vol-delete-btn" on:click={() => removeVolunteer(vol.id)}>Remove</button>
+																	</div>
+																</div>
+															</div>
+														</div>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									</div>
+								{/if}
+							{/each}
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1435,6 +1609,16 @@
 <style>
 	/* ── Shell ── */
 	.dt-page { width: 100%; }
+
+	.dt-construction-banner {
+		background: #fff8e1;
+		border: 1px solid #f9a825;
+		border-radius: 6px;
+		padding: 0.6rem 1rem;
+		font-size: 0.82rem;
+		color: #7a5100;
+		margin-bottom: 0.75rem;
+	}
 
 	.dt-restricted {
 		padding: 3rem 1.5rem;
@@ -2086,7 +2270,317 @@
 	/* ── Volunteers ── */
 	.vol-head-actions { display: flex; align-items: center; gap: 0.5rem; }
 
-	.vol-list { display: flex; flex-direction: column; gap: 0.4rem; }
+	.vol-panel { display: grid; gap: 0.75rem; }
+
+	.vol-top-bar {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.vol-established-panel { display: grid; gap: 0.6rem; border-left: 3px solid #3aaf2a; }
+	.vol-pipeline-panel    { display: grid; gap: 0.75rem; }
+
+	.vol-search {
+		height: 2rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0 0.6rem;
+		font-size: 0.82rem;
+		color: #202124;
+		background: #fff;
+		width: 11rem;
+		flex-shrink: 0;
+	}
+
+	.vol-est-list {
+		border: 1px solid #dadce0;
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.vol-est-row {
+		display: flex;
+		align-items: center;
+		border-bottom: 1px solid #f1f3f4;
+	}
+
+	.vol-est-row:last-child { border-bottom: none; }
+
+	.vol-est-name {
+		flex: 0 0 42%;
+		padding: 0.35rem 0.65rem;
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: #202124;
+		border-right: 1px solid #f1f3f4;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.vol-est-email {
+		flex: 1;
+		padding: 0.35rem 0.65rem;
+		font-size: 0.78rem;
+		color: #5f6368;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* Status step controls */
+	.vol-controls {
+		padding: 0.4rem 0.75rem;
+		background: #fafafa;
+		border-top: 1px solid #f1f3f4;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.vol-step-row {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-wrap: wrap;
+	}
+
+	.vol-step-btn {
+		padding: 0.18rem 0.55rem;
+		border-radius: 4px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.72rem;
+		font-weight: 500;
+		color: #5f6368;
+		cursor: pointer;
+	}
+
+	.vol-step-btn:hover { background: #f8f9fa; color: #202124; }
+
+	.vol-step-active {
+		border-color: #016aa5;
+		background: #e8f0fe;
+		color: #016aa5;
+		font-weight: 600;
+	}
+
+	.vol-date-inline {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.vol-date-unset {
+		font-size: 0.72rem;
+		color: #9aa0a6;
+		font-style: italic;
+	}
+
+	.vol-dropout-btn { color: #b06000; border-color: #fde68a; }
+	.vol-dropout-btn:hover:not(:disabled) { background: #fffde7; }
+
+	.vol-section-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.vol-section-title {
+		font-size: 0.88rem;
+		font-weight: 700;
+		color: #202124;
+		margin: 0 0 0.1rem;
+	}
+
+	.vol-section-count {
+		font-size: 1rem;
+		font-weight: 700;
+		color: #9aa0a6;
+		white-space: nowrap;
+	}
+
+	.vol-next-chip {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.1rem;
+		padding: 0.4rem 0.65rem;
+		border-radius: 6px;
+		background: #fef7e0;
+		border: 1px solid #fdd663;
+	}
+
+	.vol-next-label {
+		font-size: 0.58rem;
+		font-weight: 600;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		color: #b06000;
+	}
+
+	.vol-next-date {
+		font-size: 0.88rem;
+		font-weight: 700;
+		color: #7a5100;
+		white-space: nowrap;
+	}
+
+	.vol-next-count {
+		font-size: 0.65rem;
+		color: #b06000;
+	}
+
+	/* Pipeline funnel */
+	.vol-funnel { display: flex; flex-direction: column; gap: 0.5rem; }
+
+	.vol-funnel-main {
+		display: flex;
+		gap: 0;
+		border: 1px solid #dadce0;
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.vol-funnel-step {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		padding: 0.55rem 0.4rem;
+		border-right: 1px solid #dadce0;
+		gap: 0.15rem;
+		position: relative;
+	}
+
+	.vol-funnel-step:last-child { border-right: none; }
+	.vol-funnel-zero { opacity: 0.4; }
+
+	.vol-funnel-count {
+		font-size: 1.25rem;
+		font-weight: 700;
+		line-height: 1;
+		color: #202124;
+	}
+
+	.vol-funnel-label {
+		font-size: 0.62rem;
+		font-weight: 600;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.vol-funnel-gray  { background: #f8f9fa; }
+	.vol-funnel-gray  .vol-funnel-label { color: #5f6368; }
+	.vol-funnel-yellow { background: #fffde7; }
+	.vol-funnel-yellow .vol-funnel-label { color: #b06000; }
+	.vol-funnel-blue  { background: #e8f0fe; }
+	.vol-funnel-blue  .vol-funnel-label { color: #1a73e8; }
+	.vol-funnel-green { background: #e6f4ea; }
+	.vol-funnel-green .vol-funnel-label { color: #1e7e34; }
+
+	.vol-funnel-dropouts {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+	}
+
+	/* Upcoming orientations */
+	.vol-upcoming {
+		border: 1px solid #dadce0;
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.vol-section-label {
+		font-size: 0.62rem;
+		font-weight: 600;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		color: #5f6368;
+		margin: 0;
+		padding: 0.4rem 0.75rem;
+		background: #f8f9fa;
+		border-bottom: 1px solid #dadce0;
+	}
+
+	.vol-upcoming-list { display: flex; flex-direction: column; }
+
+	.vol-upcoming-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.45rem 0.75rem;
+		border-bottom: 1px solid #f1f3f4;
+		font-size: 0.82rem;
+	}
+
+	.vol-upcoming-row:last-child { border-bottom: none; }
+
+	.vol-upcoming-name { font-weight: 600; color: #202124; }
+	.vol-upcoming-date { color: #1a73e8; font-weight: 500; font-size: 0.78rem; }
+
+	/* Grouped list */
+	.vol-group { display: flex; flex-direction: column; gap: 0; }
+
+	.vol-group-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.3rem 0.1rem;
+		margin-bottom: 0.3rem;
+	}
+
+	.vol-group-label {
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
+	}
+
+	.vol-group-count {
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: #9aa0a6;
+	}
+
+	.vol-group-rows { display: flex; flex-direction: column; gap: 0.3rem; }
+
+	/* Date chip on row */
+	.vol-date-chip {
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: #1a73e8;
+		background: #e8f0fe;
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		white-space: nowrap;
+	}
+
+	/* Orientation date row in expanded detail */
+	.vol-date-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.vol-date-input {
+		height: 2rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0 0.5rem;
+		font-size: 0.82rem;
+		color: #202124;
+		background: #fff;
+	}
 
 	.vol-row {
 		border: 1px solid #dadce0;

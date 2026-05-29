@@ -122,7 +122,7 @@ export interface BehavioralNote {
 }
 
 export type BehaviorRating = 'good' | 'neutral' | 'reactive' | 'na';
-export type VolunteerOrientationStatus = 'pending' | 'emailed' | 'scheduled' | 'completed' | 'no_showed' | 'disqualified';
+export type VolunteerOrientationStatus = 'pending' | 'emailed' | 'scheduled' | 'signed_waiver' | 'answered_no' | 'no_showed';
 
 export interface DayTripLog {
 	id: string;
@@ -158,7 +158,8 @@ export interface Volunteer {
 	photosOk: boolean;
 	leashCommitment: boolean;
 	orientationStatus: VolunteerOrientationStatus;
-	waiverSigned: boolean;
+	isEstablished: boolean;
+	orientationDate?: string | null;
 	internalNotes: string;
 	lastSyncedAt: DateValue;
 	createdAt: DateValue;
