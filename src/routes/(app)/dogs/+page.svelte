@@ -8,7 +8,7 @@
 	import { listDogs, updateDog, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
-	import { daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getBathStatus, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';

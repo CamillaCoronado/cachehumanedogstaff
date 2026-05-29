@@ -29,6 +29,9 @@
 	let volNotesDraft: Record<string, string> = {};
 	let volOrientationDraft: Record<string, string> = {};
 	let volSearch = '';
+	let volStatusFilter = 'all';
+	// IDs where user clicked "Scheduled" but hasn't picked a date yet
+	let volAwaitingDate = new Set<string>();
 
 	async function syncVolunteersFromSheet() {
 		volSyncing = true;
@@ -36,14 +39,93 @@
 		try {
 			const res = await fetch('/api/sheets/volunteers');
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const rows = await res.json();
+			const payload = await res.json();
+			const rows = Array.isArray(payload) ? payload : (payload.rows ?? []);
+			const diagnostics = Array.isArray(payload) ? null : payload.diagnostics;
+			if (diagnostics) logDtvSheetDiagnostics(diagnostics);
 			await syncVolunteers(rows);
 			volunteers = await listVolunteers();
+			logDtvAppComparison(rows, volunteers);
 			toast.success(`${volunteers.length} volunteers synced.`);
 		} catch (e) {
 			volSyncError = e instanceof Error ? e.message : String(e);
 		} finally {
 			volSyncing = false;
+		}
+	}
+
+	function logDtvSheetDiagnostics(diagnostics: {
+		skippedRows?: Array<{ sheet: string; rowNumber: number; reason: string; name?: string; email?: string }>;
+		establishedRawDataRows?: number;
+		establishedRowsRead?: number;
+		establishedRowsReturned?: number;
+		establishedRowsExpected?: number;
+		volunteerRowsReturned?: number;
+	}) {
+		const skippedRows = diagnostics.skippedRows ?? [];
+		const skippedDtvRows = diagnostics.skippedRows?.filter((row) => row.sheet === 'Established DTVs') ?? [];
+		const skippedResponseRows = skippedRows.filter((row) => row.sheet !== 'Established DTVs');
+		console.info('[DTV sheet sync] DTV tab counts', {
+			rawDataRowsAfterHeader: diagnostics.establishedRawDataRows,
+			nonBlankRows: diagnostics.establishedRowsRead,
+			dtvRowsLoadedFromTab: diagnostics.establishedRowsReturned,
+			expectedDtvRowsInApp: diagnostics.establishedRowsExpected,
+			allVolunteerRowsReturned: diagnostics.volunteerRowsReturned,
+			skippedDtvRows: skippedDtvRows.length,
+			skippedResponseRows: skippedResponseRows.length,
+			totalSkippedRows: skippedRows.length
+		});
+		for (const row of skippedDtvRows) {
+			console.warn('[DTV sheet sync] skipped DTV tab row', row);
+		}
+	}
+
+	function volunteerIdentity(name: string | null | undefined, email: string | null | undefined): string {
+		return `${(name ?? '').toLowerCase().replace(/\s+/g, ' ').trim()}|${(email ?? '').toLowerCase().trim()}`;
+	}
+
+	function logDtvAppComparison(
+		sheetRows: Array<{ name?: string; email?: string; isEstablished?: boolean }>,
+		appVolunteers: Volunteer[]
+	) {
+		const sheetDtvRows = sheetRows.filter((row) => row.isEstablished);
+		const sheetDtvIdentities = new Set(
+			sheetDtvRows.map((row) => volunteerIdentity(row.name, row.email))
+		);
+		const appDtvRows = appVolunteers.filter((volunteer) => volunteer.isEstablished);
+		const appDtvIdentityMap = new Map<string, Volunteer[]>();
+		for (const volunteer of appDtvRows) {
+			const identity = volunteerIdentity(volunteer.name, volunteer.email);
+			appDtvIdentityMap.set(identity, [...(appDtvIdentityMap.get(identity) ?? []), volunteer]);
+		}
+		const duplicateAppDtvRows = [...appDtvIdentityMap.entries()].filter(([, rows]) => rows.length > 1);
+		const appOnlyDtvRows = appDtvRows.filter(
+			(volunteer) => !sheetDtvIdentities.has(volunteerIdentity(volunteer.name, volunteer.email))
+		);
+		console.info('[DTV sheet sync] App DTV comparison', {
+			sheetDtvRowsReturned: sheetDtvRows.length,
+			sheetDtvUniqueIdentities: sheetDtvIdentities.size,
+			appDtvRows: appDtvRows.length,
+			appDtvUniqueIdentities: appDtvIdentityMap.size,
+			duplicateAppDtvIdentities: duplicateAppDtvRows.length,
+			appOnlyDtvRows: appOnlyDtvRows.length
+		});
+		for (const [identity, rows] of duplicateAppDtvRows) {
+			console.warn('[DTV sheet sync] duplicate DTV identity in app', {
+				identity,
+				records: rows.map((volunteer) => ({
+					id: volunteer.id,
+					name: volunteer.name,
+					email: volunteer.email
+				}))
+			});
+		}
+		for (const volunteer of appOnlyDtvRows) {
+			console.warn('[DTV sheet sync] DTV in app but not current sheet import', {
+				id: volunteer.id,
+				name: volunteer.name,
+				email: volunteer.email
+			});
 		}
 	}
 
@@ -63,6 +145,25 @@
 		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationStatus: status } : v);
 	}
 
+	function setVolStep(id: string, s: string, orientationDate: string | null | undefined) {
+		if (s === 'scheduled') {
+			// Don't commit status yet — show the date picker and wait for a date
+			volOrientationDraft[id] = volOrientationDraft[id] ?? orientationDate ?? '';
+			volAwaitingDate = new Set([...volAwaitingDate, id]);
+			return;
+		}
+		// Cancelling a pending schedule pick
+		volAwaitingDate = new Set([...volAwaitingDate].filter((x) => x !== id));
+		changeVolunteerStatus(id, s as VolunteerOrientationStatus);
+	}
+
+	async function confirmScheduled(id: string, date: string) {
+		if (!date) return;
+		await updateOrientationDate(id, date);
+		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationDate: date, orientationStatus: 'scheduled' } : v);
+		volAwaitingDate = new Set([...volAwaitingDate].filter((x) => x !== id));
+	}
+
 	async function saveOrientationDate(id: string, date: string) {
 		await updateOrientationDate(id, date);
 		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationDate: date || null } : v);
@@ -75,8 +176,33 @@
 		return new Date(y, m - 1, day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 	}
 
+	function addOrientationToCalendar(date: string, names: string[]) {
+		const d = date.replace(/-/g, '');
+		const [y, mo, day] = date.split('-').map(Number);
+		const next = new Date(y, mo - 1, day + 1);
+		const dEnd = `${next.getFullYear()}${String(next.getMonth() + 1).padStart(2, '0')}${String(next.getDate()).padStart(2, '0')}`;
+		const details = names.length ? `Volunteers: ${names.join(', ')}` : '';
+		const params = new URLSearchParams({
+			action: 'TEMPLATE',
+			text: 'Dog Day Trip Orientation',
+			dates: `${d}/${dEnd}`,
+			details
+		});
+		window.open(`https://calendar.google.com/calendar/render?${params}`, '_blank');
+	}
+
+const today = new Date().toISOString().split('T')[0];
+
+	$: overdueScheduled = volunteers.filter(
+		(v) => v.orientationStatus === 'scheduled' && v.orientationDate && v.orientationDate < today
+	);
+	$: needsOutreach = volunteers.filter(
+		(v) => !v.isEstablished && v.orientationStatus === 'pending'
+	);
+	$: volAttentionList = [...overdueScheduled, ...needsOutreach];
+
 	$: upcomingOrientations = volunteers
-		.filter((v) => v.orientationStatus === 'scheduled' && v.orientationDate)
+		.filter((v) => v.orientationStatus === 'scheduled' && v.orientationDate && v.orientationDate >= today)
 		.sort((a, b) => (a.orientationDate ?? '').localeCompare(b.orientationDate ?? ''));
 
 	function statusLabel(s: VolunteerOrientationStatus): string {
@@ -191,9 +317,49 @@
 		pending: 0, emailed: 1, scheduled: 2, signed_waiver: 3, no_showed: 4, answered_no: 5
 	};
 
-	$: sortedVolunteers = volunteers.slice().sort(
-		(a, b) => volStatusOrder[a.orientationStatus] - volStatusOrder[b.orientationStatus]
-	);
+	$: volFlaggedCount = volunteers.filter((v) => !v.isEstablished && (v.orientationStatus === 'no_showed' || v.orientationStatus === 'answered_no')).length;
+	$: volFilterPills = [
+		['all',          'All',       volunteers.length],
+		['attention',    'Attention', volAttentionList.length],
+		['pending',      'Pending',   volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'pending').length],
+		['emailed',      'Emailed',   volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'emailed').length],
+		['scheduled',    'Scheduled', volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'scheduled').length],
+		['signed_waiver','Signed',    volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'signed_waiver').length],
+		['established',  'DTVs',      volunteers.filter((v) => v.isEstablished).length],
+		['flagged',      'Flagged',   volFlaggedCount],
+	] as [string, string, number][];
+
+	$: filteredVolunteers = volunteers
+		.filter((v) => {
+			// Always keep the currently-expanded card visible so status changes don't
+			// yank it from view mid-edit (e.g. changing Pending → Scheduled before setting date)
+			if (v.id === volExpandedId) return true;
+			if (volSearch.trim()) {
+				const q = volSearch.toLowerCase();
+				if (!(v.name + ' ' + v.email).toLowerCase().includes(q)) return false;
+			}
+			switch (volStatusFilter) {
+				case 'all': return true;
+				case 'attention': return volAttentionList.some((a) => a.id === v.id);
+				case 'established': return v.isEstablished;
+				case 'flagged': return !v.isEstablished && (v.orientationStatus === 'no_showed' || v.orientationStatus === 'answered_no');
+				default: return !v.isEstablished && v.orientationStatus === volStatusFilter;
+			}
+		})
+		.sort((a, b) => {
+			const aAttn = volAttentionList.some((x) => x.id === a.id);
+			const bAttn = volAttentionList.some((x) => x.id === b.id);
+			if (aAttn && !bAttn) return -1;
+			if (!aAttn && bAttn) return 1;
+			if (a.isEstablished && !b.isEstablished) return 1;
+			if (!a.isEstablished && b.isEstablished) return -1;
+			const ao = volStatusOrder[a.orientationStatus] ?? 99;
+			const bo = volStatusOrder[b.orientationStatus] ?? 99;
+			if (ao !== bo) return ao - bo;
+			if (a.orientationStatus === 'scheduled' && b.orientationStatus === 'scheduled')
+				return (a.orientationDate ?? 'zzz').localeCompare(b.orientationDate ?? 'zzz');
+			return (a.name ?? '').localeCompare(b.name ?? '');
+		});
 
 	function setTripRating(key: string, r: BehaviorRating) {
 		if (key === 'tripDogs') tripDogs = tripDogs === r ? '' : r;
@@ -1173,14 +1339,15 @@
 
 		<!-- ───── VOLUNTEERS ───── -->
 		{:else if activeTab === 'volunteers'}
-			<div class="vol-panel">
-				<!-- Head -->
-				<div class="vol-top-bar">
-					<div>
-						<p class="dt-panel-title">Day Trip Volunteers</p>
+			<div class="vol-shell">
+				<!-- Header -->
+				<div class="vol-header">
+					<div class="vol-header-left">
+						<span class="vol-header-title">Volunteers</span>
+						{#if volunteers.length > 0}<span class="vol-header-count">{volunteers.length}</span>{/if}
 					</div>
-					<div class="vol-head-actions">
-						<button class="dt-import-btn" on:click={syncVolunteersFromSheet} disabled={volSyncing}>
+					<div class="vol-header-right">
+						<button class="dt-import-btn vol-sync-btn" on:click={syncVolunteersFromSheet} disabled={volSyncing}>
 							{volSyncing ? 'Syncing…' : 'Sync from Sheet'}
 						</button>
 						{#if volSyncError}<span class="dt-import-error">{volSyncError}</span>{/if}
@@ -1188,229 +1355,196 @@
 				</div>
 
 				{#if volunteers.length === 0}
-					<div class="dt-panel">
-						<p class="dt-panel-empty">No volunteers yet — click "Sync from Sheet" to load.</p>
-					</div>
+					<p class="vol-empty-state">No volunteers yet — click "Sync from Sheet" to load.</p>
 				{:else}
-					{@const establishedVols = volunteers.filter((v) => v.isEstablished).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))}
-					{@const pipelineVols = volunteers.filter((v) => !v.isEstablished)}
-
-					<!-- ── Established DTVs ── -->
-					<div class="dt-panel vol-established-panel">
-						<div class="vol-section-head">
-							<div>
-								<p class="vol-section-title">Established DTVs</p>
-								<p class="dt-panel-sub">Completed orientation · {establishedVols.length} active volunteer{establishedVols.length === 1 ? '' : 's'}</p>
+					<!-- Upcoming orientations -->
+					{#if upcomingOrientations.length > 0}
+						{@const nextDate = upcomingOrientations[0].orientationDate}
+						{@const nextGroup = upcomingOrientations.filter((v) => v.orientationDate === nextDate)}
+						{@const laterDates = [...new Set(upcomingOrientations.filter((v) => v.orientationDate !== nextDate).map((v) => v.orientationDate))]}
+						<div class="vol-next-hero">
+							<div class="vol-next-hero-left">
+								<span class="vol-next-hero-label">Next orientation</span>
+								<span class="vol-next-hero-date">{formatOrientationDate(nextDate)}</span>
 							</div>
-							<input class="vol-search" type="search" placeholder="Search…" bind:value={volSearch} />
+							<div class="vol-next-hero-names">
+								{#each nextGroup as v}
+									<span class="vol-next-hero-name">{v.name.split(' ')[0]}</span>
+								{/each}
+							</div>
+							<button class="vol-add-cal-btn" on:click={() => addOrientationToCalendar(nextDate ?? '', nextGroup.map((v) => v.name.split(' ')[0]))}>
+								+ Calendar
+							</button>
 						</div>
-
-						{#if establishedVols.length === 0}
-							<p class="dt-panel-empty">None yet — sync from sheet to load.</p>
-						{:else}
-							{@const filtered = volSearch.trim()
-								? establishedVols.filter((v) => (v.name + v.email).toLowerCase().includes(volSearch.toLowerCase()))
-								: establishedVols}
-							{#if filtered.length === 0}
-								<p class="dt-panel-empty">No match for "{volSearch}".</p>
-							{:else}
-								<div class="vol-est-list">
-									{#each filtered as vol}
-										<div class="vol-est-row">
-											<span class="vol-est-name">{vol.name || '—'}</span>
-											<span class="vol-est-email">{vol.email}</span>
+						{#if laterDates.length > 0}
+							<div class="vol-upcoming">
+								<p class="vol-section-label">Also upcoming</p>
+								{#each laterDates as date}
+									{@const group = upcomingOrientations.filter((v) => v.orientationDate === date)}
+									<div class="vol-upcoming-date-group">
+										<span class="vol-upcoming-date-label">{formatOrientationDate(date)}</span>
+										<div class="vol-upcoming-names">
+											{#each group as v}<span class="vol-upcoming-name-chip">{v.name.split(' ')[0]}</span>{/each}
 										</div>
-									{/each}
-								</div>
-							{/if}
+									</div>
+								{/each}
+							</div>
 						{/if}
-					</div>
+					{/if}
 
-					<!-- ── Orientation Pipeline ── -->
-					<div class="dt-panel vol-pipeline-panel">
-						<div class="vol-section-head">
-							<div>
-								<p class="vol-section-title">Orientation Pipeline</p>
-								<p class="dt-panel-sub">New sign-ups working through the process</p>
-							</div>
-						</div>
-
-						{#if pipelineVols.length === 0}
-							<p class="dt-panel-empty">No one in the pipeline right now.</p>
-						{:else}
-							<!-- Next orientation hero -->
-							{#if upcomingOrientations.length > 0}
-								{@const nextDate = upcomingOrientations[0].orientationDate}
-								{@const nextAttendees = upcomingOrientations.filter((v) => v.orientationDate === nextDate)}
-								<div class="vol-next-hero">
-									<div class="vol-next-hero-left">
-										<span class="vol-next-hero-label">Next Orientation</span>
-										<span class="vol-next-hero-date">{formatOrientationDate(nextDate)}</span>
-									</div>
-									<div class="vol-next-hero-names">
-										{#each nextAttendees as v}
-											<span class="vol-next-hero-name">{v.name}</span>
-										{/each}
-									</div>
-								</div>
-							{/if}
-
-							<!-- Funnel -->
-							<div class="vol-funnel">
-								<div class="vol-funnel-main">
-									{#each [['pending','Pending','gray'],['emailed','Emailed','yellow'],['scheduled','Scheduled','blue'],['signed_waiver','Signed Waiver','green']] as [s, label, color]}
-										{@const count = pipelineVols.filter((v) => v.orientationStatus === s).length}
-										<div class="vol-funnel-step vol-funnel-{color}" class:vol-funnel-zero={count === 0}>
-											<span class="vol-funnel-count">{count}</span>
-											<span class="vol-funnel-label">{label}</span>
-										</div>
-									{/each}
-								</div>
-								{#if pipelineVols.some((v) => v.orientationStatus === 'no_showed' || v.orientationStatus === 'answered_no')}
-									<div class="vol-funnel-dropouts">
-										{#each [['no_showed','No-showed'],['answered_no','Answered No']] as [s, label]}
-											{@const count = pipelineVols.filter((v) => v.orientationStatus === s).length}
-											{#if count > 0}
-												<span class="vol-status vol-status-red">{label}: {count}</span>
-											{/if}
-										{/each}
-									</div>
-								{/if}
-							</div>
-
-							<!-- Upcoming orientations grouped by date -->
-							{#if upcomingOrientations.length > 0}
-								{@const dateGroups = [...new Set(upcomingOrientations.map((v) => v.orientationDate))]}
-								<div class="vol-upcoming">
-									<p class="vol-section-label">Scheduled Orientations</p>
-									{#each dateGroups as date}
-										{@const group = upcomingOrientations.filter((v) => v.orientationDate === date)}
-										<div class="vol-upcoming-date-group">
-											<span class="vol-upcoming-date-label">{formatOrientationDate(date)}</span>
-											<div class="vol-upcoming-names">
-												{#each group as v}
-													<span class="vol-upcoming-name-chip">{v.name}</span>
-												{/each}
-											</div>
-										</div>
-									{/each}
-								</div>
-							{/if}
-
-							<!-- Grouped pipeline list -->
-							{#each [['pending','Pending'],['emailed','Emailed'],['scheduled','Scheduled'],['signed_waiver','Signed Waiver'],['no_showed','No-showed'],['answered_no','Answered No']] as [statusGroup, groupLabel]}
-								{@const groupVols = pipelineVols
-									.filter((v) => v.orientationStatus === statusGroup)
-									.sort((a, b) =>
-										statusGroup === 'scheduled'
-											? (a.orientationDate ?? 'zzz').localeCompare(b.orientationDate ?? 'zzz')
-											: (a.name ?? '').localeCompare(b.name ?? '')
-									)}
-								{#if groupVols.length > 0}
-									<div class="vol-group">
-										<div class="vol-group-head">
-											<span class="vol-group-label {statusClass(statusGroup)}">{groupLabel}</span>
-											<span class="vol-group-count">{groupVols.length}</span>
-										</div>
-										<div class="vol-group-rows">
-											{#each groupVols as vol}
-												<div class="vol-row" class:vol-row-open={volExpandedId === vol.id}>
-													<!-- Name row — clicking expands details -->
-													<button class="vol-row-header" on:click={() => {
-														volExpandedId = volExpandedId === vol.id ? null : vol.id;
-														if (volNotesDraft[vol.id] === undefined) volNotesDraft[vol.id] = vol.internalNotes ?? '';
-														if (volOrientationDraft[vol.id] === undefined) volOrientationDraft[vol.id] = vol.orientationDate ?? '';
-													}}>
-														<span class="vol-name">{vol.name || '—'}</span>
-														<span class="vol-email">{vol.email}</span>
-														{#if vol.orientationDate && (statusGroup === 'scheduled' || statusGroup === 'no_showed')}
-															<span class="vol-date-chip">{formatOrientationDate(vol.orientationDate)}</span>
-														{/if}
-														<span class="vol-chevron">{volExpandedId === vol.id ? '▲' : '▼'}</span>
-													</button>
-
-													<!-- Status steps + date — always visible -->
-													<div class="vol-controls">
-														<div class="vol-step-row">
-															{#each [['pending','Pending'],['emailed','Emailed'],['scheduled','Scheduled'],['signed_waiver','Signed']] as [s, label]}
-																<button
-																	class="vol-step-btn"
-																	class:vol-step-active={vol.orientationStatus === s}
-																	on:click={() => {
-																		changeVolunteerStatus(vol.id, s);
-																		if (s === 'scheduled' && volOrientationDraft[vol.id] === undefined) volOrientationDraft[vol.id] = vol.orientationDate ?? '';
-																	}}
-																>{label}</button>
-															{/each}
-															{#if vol.orientationStatus === 'no_showed' || vol.orientationStatus === 'answered_no'}
-																<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
-															{/if}
-														</div>
-														{#if vol.orientationStatus === 'scheduled'}
-															<div class="vol-date-inline">
-																<input class="vol-date-input" type="date"
-																	bind:value={volOrientationDraft[vol.id]}
-																	on:change={() => saveOrientationDate(vol.id, volOrientationDraft[vol.id] ?? '')}
-																/>
-																{#if !vol.orientationDate}
-																	<span class="vol-date-unset">No date set</span>
-																{/if}
-															</div>
-														{/if}
-													</div>
-
-													{#if volExpandedId === vol.id}
-														<div class="vol-detail">
-															<div class="vol-detail-grid">
-																<div class="vol-detail-field">
-																	<span class="vol-detail-label">Submitted</span>
-																	<span class="vol-detail-val">{vol.submittedAt || '—'}</span>
-																</div>
-																<div class="vol-detail-field">
-																	<span class="vol-detail-label">Driver's license</span>
-																	<span class="vol-detail-val">{vol.hasDriversLicense ? 'Yes' : 'No'}</span>
-																</div>
-																<div class="vol-detail-field">
-																	<span class="vol-detail-label">18+</span>
-																	<span class="vol-detail-val">{vol.is18Plus ? 'Yes' : 'No'}</span>
-																</div>
-																{#if vol.dogExperience}
-																	<div class="vol-detail-field vol-detail-full">
-																		<span class="vol-detail-label">Dog experience</span>
-																		<span class="vol-detail-val">{vol.dogExperience}</span>
-																	</div>
-																{/if}
-																{#if vol.adventurePlans}
-																	<div class="vol-detail-field vol-detail-full">
-																		<span class="vol-detail-label">Adventure plans</span>
-																		<span class="vol-detail-val">{vol.adventurePlans}</span>
-																	</div>
-																{/if}
-																<div class="vol-detail-field vol-detail-full">
-																	<label class="vol-detail-label" for="vol-notes-{vol.id}">Internal notes</label>
-																	<textarea id="vol-notes-{vol.id}" class="vol-notes-input" rows="2"
-																		bind:value={volNotesDraft[vol.id]}
-																		placeholder="Staff notes…"></textarea>
-																	<div class="vol-notes-actions">
-																		<button class="dt-import-btn dt-import-btn-go" on:click={() => saveVolunteerNotes(vol.id)}>Save notes</button>
-																		{#if vol.orientationStatus !== 'no_showed' && vol.orientationStatus !== 'answered_no'}
-																			<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'no_showed')}>No-showed</button>
-																			<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'answered_no')}>Answered No</button>
-																		{/if}
-																		<button class="dt-import-btn vol-delete-btn" on:click={() => removeVolunteer(vol.id)}>Remove</button>
-																	</div>
-																</div>
-															</div>
-														</div>
-													{/if}
-												</div>
-											{/each}
-										</div>
-									</div>
+					<!-- Search + filter pills -->
+					<div class="vol-controls-bar">
+						<input class="vol-search-input" type="search" placeholder="Search name or email…" bind:value={volSearch} />
+						<div class="vol-filter-pills">
+							{#each volFilterPills as [key, label, count]}
+								{#if (key !== 'flagged' && key !== 'attention') || count > 0}
+									<button
+										class="vol-filter-pill"
+										class:vol-filter-active={volStatusFilter === key}
+										class:vol-filter-flagged={key === 'flagged'}
+										class:vol-filter-attention={key === 'attention'}
+										on:click={() => volStatusFilter = key}
+									>{label}{count > 0 ? ` · ${count}` : ''}</button>
 								{/if}
 							{/each}
-						{/if}
+						</div>
 					</div>
+
+					<!-- Volunteer list -->
+					{#if filteredVolunteers.length === 0}
+						<p class="vol-empty-state">No volunteers match this filter.</p>
+					{:else}
+						<div class="vol-list">
+							{#each filteredVolunteers as vol}
+								<div class="vol-card vol-card-{vol.isEstablished ? 'established' : vol.orientationStatus}" class:vol-card-open={volExpandedId === vol.id} class:vol-card-alert={volAttentionList.some((x) => x.id === vol.id)}>
+									<!-- Clickable row -->
+									<button class="vol-card-row" on:click={() => {
+										const closing = volExpandedId === vol.id;
+										volExpandedId = closing ? null : vol.id;
+										if (closing) {
+											// Discard pending scheduled pick if card is closed without choosing a date
+											volAwaitingDate = new Set([...volAwaitingDate].filter((x) => x !== vol.id));
+										}
+										if (volNotesDraft[vol.id] === undefined) volNotesDraft[vol.id] = vol.internalNotes ?? '';
+										if (volOrientationDraft[vol.id] === undefined) volOrientationDraft[vol.id] = vol.orientationDate ?? '';
+									}}>
+										<div class="vol-card-main">
+											<span class="vol-card-name">{vol.name || '—'}</span>
+											{#if vol.email}
+												<span class="vol-card-email">{vol.email}</span>
+											{:else}
+												<span class="vol-card-warning">Missing email</span>
+											{/if}
+										</div>
+										<div class="vol-card-right">
+											{#if volAttentionList.some((x) => x.id === vol.id)}
+												{@const reason = overdueScheduled.some((x) => x.id === vol.id) ? 'Orientation passed — follow up' : 'Never contacted'}
+												<span class="vol-alert-dot" title={reason}>!</span>
+												<span class="vol-alert-reason">{reason}</span>
+											{/if}
+											{#if vol.orientationDate && (vol.orientationStatus === 'scheduled' || vol.orientationStatus === 'no_showed')}
+												<span class="vol-date-chip">{formatOrientationDate(vol.orientationDate)}</span>
+											{/if}
+											{#if vol.isEstablished}
+												<span class="vol-status vol-status-dtv">DTV</span>
+											{:else}
+												<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
+											{/if}
+											<span class="vol-card-chevron">{volExpandedId === vol.id ? '▲' : '▼'}</span>
+										</div>
+									</button>
+
+									<!-- Expanded detail -->
+									{#if volExpandedId === vol.id}
+										<div class="vol-card-detail">
+											{#if !vol.isEstablished}
+												<!-- Status stepper -->
+												<div class="vol-stepper">
+													{#each [['pending','Pending'],['emailed','Emailed'],['scheduled','Scheduled'],['signed_waiver','Signed']] as [s, label]}
+														<button
+															class="vol-step-btn"
+															class:vol-step-active={vol.orientationStatus === s || (s === 'scheduled' && volAwaitingDate.has(vol.id))}
+															on:click={() => setVolStep(vol.id, s, vol.orientationDate)}
+														>{label}</button>
+													{/each}
+													{#if vol.orientationStatus === 'no_showed' || vol.orientationStatus === 'answered_no'}
+														<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
+													{/if}
+												</div>
+												{#if vol.orientationStatus === 'scheduled' || volAwaitingDate.has(vol.id)}
+													<div class="vol-date-inline">
+														<label class="vol-detail-label" for="vol-date-{vol.id}">
+															{volAwaitingDate.has(vol.id) ? 'Pick a date to confirm scheduling' : 'Orientation date'}
+														</label>
+														<input id="vol-date-{vol.id}" class="vol-date-input" type="date"
+															bind:value={volOrientationDraft[vol.id]}
+															on:change={() => {
+																if (volAwaitingDate.has(vol.id)) {
+																	confirmScheduled(vol.id, volOrientationDraft[vol.id] ?? '');
+																} else {
+																	saveOrientationDate(vol.id, volOrientationDraft[vol.id] ?? '');
+																}
+															}}
+														/>
+													</div>
+												{/if}
+											{/if}
+
+											<!-- Info fields -->
+											<div class="vol-info-grid">
+												{#if vol.submittedAt}
+													<div class="vol-detail-field">
+														<span class="vol-detail-label">Submitted</span>
+														<span class="vol-detail-val">{vol.submittedAt}</span>
+													</div>
+												{/if}
+												{#if !vol.isEstablished}
+													<div class="vol-detail-field">
+														<span class="vol-detail-label">Driver's license</span>
+														<span class="vol-detail-val">{vol.hasDriversLicense ? 'Yes' : 'No'}</span>
+													</div>
+													<div class="vol-detail-field">
+														<span class="vol-detail-label">18+</span>
+														<span class="vol-detail-val">{vol.is18Plus ? 'Yes' : 'No'}</span>
+													</div>
+												{/if}
+											</div>
+											{#if vol.dogExperience}
+												<div class="vol-detail-field">
+													<span class="vol-detail-label">Dog experience</span>
+													<span class="vol-detail-val">{vol.dogExperience}</span>
+												</div>
+											{/if}
+											{#if vol.adventurePlans}
+												<div class="vol-detail-field">
+													<span class="vol-detail-label">Adventure plans</span>
+													<span class="vol-detail-val">{vol.adventurePlans}</span>
+												</div>
+											{/if}
+
+											<!-- Notes -->
+											<div class="vol-detail-field">
+												<label class="vol-detail-label" for="vol-notes-{vol.id}">Internal notes</label>
+												<textarea id="vol-notes-{vol.id}" class="vol-notes-input" rows="2"
+													bind:value={volNotesDraft[vol.id]}
+													placeholder="Staff notes…"></textarea>
+											</div>
+
+											<!-- Actions -->
+											<div class="vol-card-actions">
+												<button class="dt-import-btn dt-import-btn-go" on:click={() => saveVolunteerNotes(vol.id)}>Save notes</button>
+												{#if !vol.isEstablished && vol.orientationStatus !== 'no_showed' && vol.orientationStatus !== 'answered_no'}
+													<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'no_showed')}>No-showed</button>
+													<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'answered_no')}>Answered No</button>
+												{/if}
+												<button class="dt-import-btn vol-delete-btn" on:click={() => removeVolunteer(vol.id)}>Remove</button>
+											</div>
+										</div>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					{/if}
 				{/if}
 			</div>
 
@@ -1621,7 +1755,7 @@
 
 <style>
 	/* ── Shell ── */
-	.dt-page { width: 100%; }
+	.dt-page { width: 100%; max-width: 100%; overflow-x: hidden; }
 
 	.dt-construction-banner {
 		background: #fff8e1;
@@ -1722,7 +1856,11 @@
 		border-bottom: 1px solid #dadce0;
 		margin-bottom: 0.9rem;
 		gap: 0;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
 	}
+	.dt-tabbar::-webkit-scrollbar { display: none; }
 
 	.dt-tab {
 		position: relative;
@@ -2281,141 +2419,55 @@
 	.trip-copy-actions { display: flex; gap: 0.5rem; }
 
 	/* ── Volunteers ── */
-	.vol-head-actions { display: flex; align-items: center; gap: 0.5rem; }
-
-	.vol-panel { display: grid; gap: 0.75rem; }
-
-	.vol-top-bar {
+	.vol-shell {
 		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 0.5rem;
-		flex-wrap: wrap;
+		flex-direction: column;
+		gap: 0.65rem;
 	}
 
-	.vol-established-panel { display: grid; gap: 0.6rem; border-left: 3px solid #3aaf2a; }
-	.vol-pipeline-panel    { display: grid; gap: 0.75rem; }
-
-	.vol-search {
-		height: 2rem;
-		border: 1px solid #dadce0;
-		border-radius: 4px;
-		padding: 0 0.6rem;
-		font-size: 0.82rem;
-		color: #202124;
-		background: #fff;
-		width: 11rem;
-		flex-shrink: 0;
-	}
-
-	.vol-est-list {
-		border: 1px solid #dadce0;
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
-	.vol-est-row {
+	/* Header row */
+	.vol-header {
 		display: flex;
 		align-items: center;
-		border-bottom: 1px solid #f1f3f4;
-	}
-
-	.vol-est-row:last-child { border-bottom: none; }
-
-	.vol-est-name {
-		flex: 0 0 42%;
-		padding: 0.35rem 0.65rem;
-		font-size: 0.8rem;
-		font-weight: 600;
-		color: #202124;
-		border-right: 1px solid #f1f3f4;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.vol-est-email {
-		flex: 1;
-		padding: 0.35rem 0.65rem;
-		font-size: 0.78rem;
-		color: #5f6368;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	/* Status step controls */
-	.vol-controls {
-		padding: 0.4rem 0.75rem;
-		background: #fafafa;
-		border-top: 1px solid #f1f3f4;
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		flex-wrap: wrap;
-	}
-
-	.vol-step-row {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		flex-wrap: wrap;
-	}
-
-	.vol-step-btn {
-		padding: 0.18rem 0.55rem;
-		border-radius: 4px;
-		border: 1px solid #dadce0;
-		background: #fff;
-		font-size: 0.72rem;
-		font-weight: 500;
-		color: #5f6368;
-		cursor: pointer;
-	}
-
-	.vol-step-btn:hover { background: #f8f9fa; color: #202124; }
-
-	.vol-step-active {
-		border-color: #016aa5;
-		background: #e8f0fe;
-		color: #016aa5;
-		font-weight: 600;
-	}
-
-	.vol-date-inline {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.vol-date-unset {
-		font-size: 0.72rem;
-		color: #9aa0a6;
-		font-style: italic;
-	}
-
-	.vol-dropout-btn { color: #b06000; border-color: #fde68a; }
-	.vol-dropout-btn:hover:not(:disabled) { background: #fffde7; }
-
-	.vol-section-head {
-		display: flex;
-		align-items: flex-start;
 		justify-content: space-between;
 		gap: 0.5rem;
 	}
 
-	.vol-section-title {
-		font-size: 0.88rem;
-		font-weight: 700;
-		color: #202124;
-		margin: 0 0 0.1rem;
+	.vol-header-left {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
 	}
 
-	.vol-section-count {
+	.vol-header-title {
 		font-size: 1rem;
 		font-weight: 700;
+		color: #202124;
+	}
+
+	.vol-header-count {
+		font-size: 0.82rem;
+		font-weight: 600;
 		color: #9aa0a6;
-		white-space: nowrap;
+	}
+
+	.vol-header-right {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.vol-sync-btn {
+		height: 2rem;
+		border-color: #b8d7ee;
+		background: #f8fbff;
+		color: #016aa5;
+		font-weight: 700;
+	}
+
+	.vol-sync-btn:hover:not(:disabled) {
+		background: #e8f4fd;
+		border-color: #8bbfe4;
 	}
 
 	/* Next orientation hero */
@@ -2423,7 +2475,7 @@
 		display: flex;
 		align-items: center;
 		gap: 1rem;
-		padding: 0.85rem 1rem;
+		padding: 0.75rem 1rem;
 		background: #e8f0fe;
 		border: 1px solid #aecbfa;
 		border-radius: 8px;
@@ -2469,62 +2521,22 @@
 		color: #1a73e8;
 	}
 
-	/* Pipeline funnel */
-	.vol-funnel { display: flex; flex-direction: column; gap: 0.5rem; }
-
-	.vol-funnel-main {
-		display: flex;
-		gap: 0;
-		border: 1px solid #dadce0;
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
-	.vol-funnel-step {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		padding: 0.55rem 0.4rem;
-		border-right: 1px solid #dadce0;
-		gap: 0.15rem;
-		position: relative;
-	}
-
-	.vol-funnel-step:last-child { border-right: none; }
-	.vol-funnel-zero { opacity: 0.4; }
-
-	.vol-funnel-count {
-		font-size: 1.25rem;
-		font-weight: 700;
-		line-height: 1;
-		color: #202124;
-	}
-
-	.vol-funnel-label {
-		font-size: 0.62rem;
+	.vol-add-cal-btn {
+		padding: 0.22rem 0.65rem;
+		border-radius: 4px;
+		border: 1px solid #aecbfa;
+		background: #fff;
+		font-size: 0.72rem;
 		font-weight: 600;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
+		color: #1a73e8;
+		cursor: pointer;
 		white-space: nowrap;
+		flex-shrink: 0;
+		margin-left: auto;
 	}
+	.vol-add-cal-btn:hover { background: #e8f0fe; }
 
-	.vol-funnel-gray  { background: #f8f9fa; }
-	.vol-funnel-gray  .vol-funnel-label { color: #5f6368; }
-	.vol-funnel-yellow { background: #fffde7; }
-	.vol-funnel-yellow .vol-funnel-label { color: #b06000; }
-	.vol-funnel-blue  { background: #e8f0fe; }
-	.vol-funnel-blue  .vol-funnel-label { color: #1a73e8; }
-	.vol-funnel-green { background: #e6f4ea; }
-	.vol-funnel-green .vol-funnel-label { color: #1e7e34; }
-
-	.vol-funnel-dropouts {
-		display: flex;
-		gap: 0.4rem;
-		flex-wrap: wrap;
-	}
-
-	/* Upcoming orientations */
+	/* Also-upcoming list */
 	.vol-upcoming {
 		border: 1px solid #dadce0;
 		border-radius: 6px;
@@ -2547,7 +2559,7 @@
 		display: flex;
 		align-items: flex-start;
 		gap: 0.65rem;
-		padding: 0.5rem 0.75rem;
+		padding: 0.45rem 0.75rem;
 		border-bottom: 1px solid #f1f3f4;
 	}
 
@@ -2579,116 +2591,225 @@
 		color: #9aa0a6;
 	}
 
-	/* Grouped list */
-	.vol-group { display: flex; flex-direction: column; gap: 0; }
-
-	.vol-group-head {
-		display: flex;
+	/* Attention indicator */
+	.vol-alert-dot {
+		display: inline-flex;
 		align-items: center;
-		justify-content: space-between;
-		padding: 0.3rem 0.1rem;
-		margin-bottom: 0.3rem;
+		justify-content: center;
+		width: 1.1rem;
+		height: 1.1rem;
+		background: #f9ab00;
+		color: #fff;
+		border-radius: 50%;
+		font-size: 0.65rem;
+		font-weight: 800;
+		flex-shrink: 0;
+		line-height: 1;
 	}
 
-	.vol-group-label {
-		font-size: 0.62rem;
-		font-weight: 700;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-		padding: 0.1rem 0.4rem;
-		border-radius: 999px;
-	}
+	.vol-card-alert { outline: 2px solid #f9ab00; outline-offset: -1px; }
 
-	.vol-group-count {
-		font-size: 0.7rem;
+	.vol-alert-reason {
+		font-size: 0.68rem;
 		font-weight: 600;
-		color: #9aa0a6;
-	}
-
-	.vol-group-rows { display: flex; flex-direction: column; gap: 0.3rem; }
-
-	/* Date chip on row */
-	.vol-date-chip {
-		font-size: 0.7rem;
-		font-weight: 500;
-		color: #1a73e8;
-		background: #e8f0fe;
-		padding: 0.1rem 0.4rem;
-		border-radius: 4px;
+		color: #7a5800;
 		white-space: nowrap;
 	}
 
-	/* Orientation date row in expanded detail */
-	.vol-date-row {
+	.vol-filter-attention { border-color: #f9ab00; color: #7a5800; background: #fff8e1; }
+	.vol-filter-attention:hover { background: #fff3cc; }
+	.vol-filter-attention.vol-filter-active { background: #f9ab00; border-color: #f9ab00; color: #fff; }
+
+	/* Search + filter bar */
+	.vol-controls-bar {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.6rem;
+		flex-wrap: wrap;
 	}
 
-	.vol-date-input {
+	.vol-search-input {
 		height: 2rem;
 		border: 1px solid #dadce0;
 		border-radius: 4px;
-		padding: 0 0.5rem;
+		padding: 0 0.6rem;
 		font-size: 0.82rem;
 		color: #202124;
 		background: #fff;
+		width: 11rem;
+		flex-shrink: 0;
 	}
 
-	.vol-row {
+	.vol-filter-pills {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		flex-wrap: wrap;
+	}
+
+	.vol-filter-pill {
+		padding: 0.2rem 0.6rem;
+		border-radius: 999px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.72rem;
+		font-weight: 500;
+		color: #5f6368;
+		cursor: pointer;
+		white-space: nowrap;
+		line-height: 1.4;
+	}
+
+	.vol-filter-pill:hover { background: #f1f3f4; color: #202124; }
+
+	.vol-filter-active {
+		background: #016aa5;
+		border-color: #016aa5;
+		color: #fff;
+	}
+
+	.vol-filter-active:hover { background: #015a8e; }
+
+	.vol-filter-flagged { border-color: #fde68a; color: #b06000; }
+	.vol-filter-flagged:hover { background: #fffde7; }
+	.vol-filter-flagged.vol-filter-active { background: #b06000; border-color: #b06000; color: #fff; }
+
+	/* Volunteer list */
+	.vol-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.vol-card {
 		border: 1px solid #dadce0;
 		border-radius: 6px;
 		overflow: hidden;
+		background: #fff;
 	}
 
-	.vol-row-header {
+	.vol-card-open {
+		box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+	}
+
+	/* Status-based card colors — left border accent + background tint matching sheet colors */
+	.vol-card-pending      { border-left: 3px solid #dadce0; background: #fff; }
+	.vol-card-emailed      { border-left: 3px solid #6fa8dc; background: #cfe2f3; }
+	.vol-card-scheduled    { border-left: 3px solid #f9ab00; background: #fff2cc; }
+	.vol-card-signed_waiver{ border-left: 3px solid #6aa84f; background: #d9ead3; }
+	.vol-card-answered_no  { border-left: 3px solid #cc0000; background: #f4cccc; }
+	.vol-card-no_showed    { border-left: 3px solid #cc0000; background: #f4cccc; }
+	.vol-card-established  { border-left: 3px solid #3aaf2a; background: #d9ead3; }
+
+	.vol-card-row {
 		width: 100%;
 		display: flex;
 		align-items: center;
 		gap: 0.6rem;
 		padding: 0.55rem 0.75rem;
-		background: #fff;
+		background: transparent;
 		border: none;
 		cursor: pointer;
 		text-align: left;
-		font-size: 0.82rem;
 	}
 
-	.vol-row-header:hover { background: #f8f9fa; }
+	.vol-card-row:hover { background: #f8f9fa; }
 
-	.vol-name { font-weight: 600; color: #202124; flex: 1; min-width: 0; }
-	.vol-email { color: #5f6368; font-size: 0.74rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.vol-chevron { font-size: 0.6rem; color: #9aa0a6; margin-left: auto; }
+	.vol-card-main {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+	}
 
-	.vol-status {
-		display: inline-flex;
-		padding: 0.12rem 0.45rem;
-		border-radius: 999px;
-		font-size: 0.62rem;
+	.vol-card-name {
+		font-size: 0.85rem;
 		font-weight: 600;
+		color: #202124;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.vol-status-green  { background: #e6f4ea; color: #1e7e34; }
-	.vol-status-blue   { background: #e8f0fe; color: #1a73e8; }
-	.vol-status-yellow { background: #fef7e0; color: #b06000; }
-	.vol-status-red    { background: #fce8e6; color: #c5221f; }
-	.vol-status-gray   { background: #f1f3f4; color: #5f6368; }
+	.vol-card-email {
+		font-size: 0.74rem;
+		color: #5f6368;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
 
-	.vol-detail {
+	.vol-card-warning {
+		width: fit-content;
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		background: #fff8e1;
+		border: 1px solid #f9ab00;
+		color: #7a5800;
+		font-size: 0.68rem;
+		font-weight: 700;
+		line-height: 1.35;
+	}
+
+	.vol-card-right {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-shrink: 0;
+	}
+
+	.vol-card-chevron {
+		font-size: 0.55rem;
+		color: #9aa0a6;
+	}
+
+	/* Expanded detail panel */
+	.vol-card-detail {
 		padding: 0.75rem;
 		border-top: 1px solid #f1f3f4;
 		background: #fafafa;
+		display: flex;
+		flex-direction: column;
+		gap: 0.65rem;
 	}
 
-	.vol-detail-grid {
+	/* Status stepper */
+	.vol-stepper {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		flex-wrap: wrap;
+	}
+
+	.vol-step-btn {
+		padding: 0.2rem 0.6rem;
+		border-radius: 4px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.72rem;
+		font-weight: 500;
+		color: #5f6368;
+		cursor: pointer;
+	}
+
+	.vol-step-btn:hover { background: #f8f9fa; color: #202124; }
+
+	.vol-step-active {
+		border-color: #016aa5;
+		background: #e8f0fe;
+		color: #016aa5;
+		font-weight: 600;
+	}
+
+	/* Info grid */
+	.vol-info-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.6rem;
+		gap: 0.5rem;
 	}
 
-	.vol-detail-full { grid-column: 1 / -1; }
-
+	/* Detail fields */
 	.vol-detail-field { display: flex; flex-direction: column; gap: 0.2rem; }
 
 	.vol-detail-label {
@@ -2705,6 +2826,7 @@
 		line-height: 1.4;
 	}
 
+	/* Notes */
 	.vol-notes-input {
 		border: 1px solid #dadce0;
 		border-radius: 4px;
@@ -2718,10 +2840,195 @@
 	}
 
 	.vol-notes-actions { display: flex; gap: 0.5rem; margin-top: 0.3rem; }
+
+	/* Card actions row */
+	.vol-card-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+		padding-top: 0.25rem;
+		border-top: 1px solid #f1f3f4;
+	}
+
+	/* Date fields */
+	.vol-date-chip {
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: #1a73e8;
+		background: #e8f0fe;
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		white-space: nowrap;
+	}
+
+	.vol-date-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.vol-date-input {
+		height: 2rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0 0.5rem;
+		font-size: 0.82rem;
+		color: #202124;
+		background: #fff;
+	}
+
+	.vol-date-inline {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.vol-date-unset {
+		font-size: 0.72rem;
+		color: #9aa0a6;
+		font-style: italic;
+	}
+
+	/* Status pills */
+	.vol-status {
+		display: inline-flex;
+		padding: 0.12rem 0.45rem;
+		border-radius: 999px;
+		font-size: 0.62rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.vol-status-green  { background: #e6f4ea; color: #1e7e34; }
+	.vol-status-blue   { background: #e8f0fe; color: #1a73e8; }
+	.vol-status-yellow { background: #fef7e0; color: #b06000; }
+	.vol-status-red    { background: #fce8e6; color: #c5221f; }
+	.vol-status-gray   { background: #f1f3f4; color: #5f6368; }
+	.vol-status-dtv    { background: #e6f4ea; color: #1e7e34; }
+
+	/* Empty state */
+	.vol-empty-state {
+		font-size: 0.82rem;
+		color: #9aa0a6;
+		text-align: center;
+		padding: 1.5rem 0;
+		margin: 0;
+	}
+
+	/* Dropout / delete buttons */
+	.vol-dropout-btn { color: #b06000; border-color: #fde68a; }
+	.vol-dropout-btn:hover:not(:disabled) { background: #fffde7; }
 	.vol-delete-btn { color: #c5221f; border-color: #f5c6cb; }
 	.vol-delete-btn:hover:not(:disabled) { background: #fce8e6; }
 
 	/* ── Responsive ── */
+	@media (max-width: 640px) {
+		.vol-shell {
+			gap: 0.75rem;
+		}
+
+		.vol-header {
+			align-items: center;
+			flex-direction: row;
+			flex-wrap: wrap;
+			gap: 0.45rem 0.65rem;
+		}
+
+		.vol-header-left {
+			flex: 1 1 auto;
+			min-width: 0;
+		}
+
+		.vol-header-right {
+			align-items: center;
+			flex: 0 0 auto;
+			margin-left: auto;
+		}
+
+		.vol-header-right .dt-import-error {
+			flex-basis: 100%;
+			order: 2;
+			text-align: right;
+		}
+
+		.vol-sync-btn {
+			height: 1.85rem;
+			padding: 0 0.7rem;
+			font-size: 0.72rem;
+			white-space: nowrap;
+		}
+
+		/* Contain any overflow so a wide child can't push the page wider */
+		.vol-shell { overflow-x: hidden; }
+		.vol-list   { overflow-x: hidden; }
+
+.vol-upcoming-date-group {
+			flex-direction: column;
+			gap: 0.35rem;
+		}
+
+		.vol-upcoming-date-label {
+			min-width: 0;
+		}
+
+		.vol-controls-bar {
+			align-items: stretch;
+			flex-direction: column;
+			gap: 0.5rem;
+		}
+
+		.vol-search-input {
+			width: 100%;
+		}
+
+		.vol-filter-pills {
+			flex-wrap: wrap;
+		}
+
+		/* Card rows: name + email on top, then right-side items below */
+		.vol-card-row {
+			align-items: flex-start;
+			flex-wrap: wrap;
+			gap: 0.35rem 0.5rem;
+			padding: 0.65rem 0.75rem;
+		}
+
+		.vol-card-main { flex: 1 1 0; min-width: 0; }
+
+		.vol-card-right {
+			flex: 0 0 100%;
+			flex-wrap: wrap;
+			gap: 0.3rem;
+			justify-content: flex-start;
+		}
+
+		/* Hide verbose reason on mobile — the ! dot + tooltip is enough */
+		.vol-alert-reason { display: none; }
+
+		.vol-card-chevron { margin-left: auto; }
+
+		.vol-card-detail { padding: 0.65rem 0.75rem; }
+
+		.vol-stepper,
+		.vol-card-actions,
+		.vol-date-row,
+		.vol-date-inline,
+		.vol-notes-actions {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.vol-step-btn,
+		.vol-card-actions .dt-import-btn,
+		.vol-date-input,
+		.vol-notes-actions .dt-import-btn {
+			width: 100%;
+		}
+
+		.vol-info-grid { grid-template-columns: 1fr; }
+	}
+
 	@media (min-width: 768px) {
 		.dt-panel { padding: 1.2rem; }
 	}

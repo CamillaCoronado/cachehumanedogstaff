@@ -19,6 +19,8 @@ export interface VolunteerSheetRow {
 	orientationStatus: 'pending' | 'emailed' | 'scheduled' | 'signed_waiver' | 'answered_no' | 'no_showed';
 	isEstablished: boolean;
 	orientationDate: string | null;
+	sourceSheet?: string;
+	sourceRow?: number;
 }
 
 // ─── Sheets API helpers ───────────────────────────────────────────────────────
@@ -36,6 +38,14 @@ function colorDist(a: CellColor, b: CellColor): number {
 
 function isWhite(c: CellColor): boolean {
 	return c.red > 0.95 && c.green > 0.95 && c.blue > 0.95;
+}
+
+function normalizeIdentityPart(value: string): string {
+	return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function volunteerIdentityKey(name: string, email: string): string {
+	return `${normalizeIdentityPart(name)}|${normalizeIdentityPart(email)}`;
 }
 
 // Parse a date string like "6/15/2025", "June 15", "6/15" → "YYYY-MM-DD" or null
@@ -84,25 +94,99 @@ async function fetchSheetRows(sheetName: string): Promise<CellData[][]> {
 
 // ─── CSV helper for Established DTVs ─────────────────────────────────────────
 
-interface EstablishedRow { name: string; email: string; }
+interface EstablishedRow { name: string; email: string; rowNumber: number; }
 
-async function fetchEstablishedVolunteers(): Promise<EstablishedRow[]> {
+export interface SkippedSheetRow {
+	sheet: string;
+	rowNumber: number;
+	reason: string;
+	name?: string;
+	email?: string;
+}
+
+export interface VolunteerSheetDiagnostics {
+	skippedRows: SkippedSheetRow[];
+	establishedRawDataRows: number;
+	establishedRowsRead: number;
+	establishedRowsReturned: number;
+	establishedRowsExpected: number;
+	volunteerRowsReturned: number;
+}
+
+export interface VolunteerSheetResponse {
+	rows: VolunteerSheetRow[];
+	diagnostics: VolunteerSheetDiagnostics;
+}
+
+// Proper RFC-4180 CSV field parser — handles quoted fields containing commas/newlines
+function parseCSVLine(line: string): string[] {
+	const fields: string[] = [];
+	let cur = '';
+	let inQuotes = false;
+	for (let i = 0; i < line.length; i++) {
+		const ch = line[i];
+		if (ch === '"') {
+			if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; } // escaped quote
+			else inQuotes = !inQuotes;
+		} else if (ch === ',' && !inQuotes) {
+			fields.push(cur); cur = '';
+		} else {
+			cur += ch;
+		}
+	}
+	fields.push(cur);
+	return fields;
+}
+
+async function fetchEstablishedVolunteers(): Promise<{ rows: EstablishedRow[]; skippedRows: SkippedSheetRow[]; rawDataRows: number; nonBlankRows: number }> {
 	const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=538722785`;
 	const res = await fetch(url, { redirect: 'follow' });
-	if (!res.ok) return [];
+	if (!res.ok) return { rows: [], skippedRows: [], rawDataRows: 0, nonBlankRows: 0 };
 	const csv = await res.text();
 	const lines = csv.split(/\r?\n/).slice(1); // skip header
+	const seen = new Set<string>();
 	const rows: EstablishedRow[] = [];
-	for (const line of lines) {
-		if (!line.trim()) continue;
+	const skippedRows: SkippedSheetRow[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const rowNumber = i + 2;
+		if (!line.trim()) {
+			skippedRows.push({ sheet: 'Established DTVs', rowNumber, reason: 'blank row' });
+			continue;
+		}
 		// columns: First name, Last Name, Email, Strikes
-		const parts = line.split(',');
-		const firstName = parts[0]?.replace(/^"|"$/g, '').trim() ?? '';
-		const lastName  = parts[1]?.replace(/^"|"$/g, '').trim() ?? '';
-		const email     = parts[2]?.replace(/^"|"$/g, '').trim().toLowerCase() ?? '';
-		if (email) rows.push({ name: `${firstName} ${lastName}`.trim(), email });
+		const parts = parseCSVLine(line);
+		const firstName = parts[0]?.trim() ?? '';
+		const lastName  = parts[1]?.trim() ?? '';
+		const email     = parts[2]?.trim().toLowerCase() ?? '';
+		const name = `${firstName} ${lastName}`.trim();
+		if (!email) {
+			rows.push({ name, email, rowNumber });
+			continue;
+		}
+		const identity = volunteerIdentityKey(name, email);
+		if (seen.has(identity)) {
+			skippedRows.push({ sheet: 'Established DTVs', rowNumber, reason: 'duplicate name and email in Established DTVs export', name, email });
+			continue;
+		}
+		seen.add(identity);
+		rows.push({ name, email, rowNumber });
 	}
-	return rows;
+	logSkippedSheetRows(skippedRows);
+	return {
+		rows,
+		skippedRows,
+		rawDataRows: lines.length,
+		nonBlankRows: lines.filter((line) => line.trim()).length
+	};
+}
+
+function logSkippedSheetRows(skippedRows: SkippedSheetRow[]): void {
+	if (skippedRows.length === 0) return;
+	console.warn(`[DTV sheet sync] Skipped ${skippedRows.length} row${skippedRows.length === 1 ? '' : 's'}:`);
+	for (const skipped of skippedRows) {
+		console.warn('[DTV sheet sync] skipped row', skipped);
+	}
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -112,19 +196,39 @@ export async function GET() {
 
 	let rows: CellData[][];
 	let establishedVolunteers: EstablishedRow[];
+	let establishedSkippedRows: SkippedSheetRow[];
+	let establishedRawDataRows = 0;
+	let establishedRowsRead = 0;
 
 	try {
-		[rows, establishedVolunteers] = await Promise.all([
+		const [responseRows, establishedResult] = await Promise.all([
 			fetchSheetRows('Day Trip Volunteer Responses'),
 			fetchEstablishedVolunteers()
 		]);
+		rows = responseRows;
+		establishedVolunteers = establishedResult.rows;
+		establishedSkippedRows = establishedResult.skippedRows;
+		establishedRawDataRows = establishedResult.rawDataRows;
+		establishedRowsRead = establishedResult.nonBlankRows;
 	} catch (e) {
 		throw error(502, `Sheet fetch error: ${e instanceof Error ? e.message : String(e)}`);
 	}
 
-	const establishedEmails = new Set(establishedVolunteers.map((r) => r.email));
+	const establishedIdentities = new Set(establishedVolunteers.map((r) => volunteerIdentityKey(r.name, r.email)));
 
-	if (rows.length < 3) return json([]);
+	if (rows.length < 3) {
+		return json({
+			rows: [],
+			diagnostics: {
+				skippedRows: establishedSkippedRows,
+				establishedRawDataRows,
+				establishedRowsRead,
+				establishedRowsReturned: establishedVolunteers.length,
+				establishedRowsExpected: establishedVolunteers.length,
+				volunteerRowsReturned: 0
+			}
+		} satisfies VolunteerSheetResponse);
+	}
 
 	// Row 0 = column headers (Timestamp, Email Address, Name, Email, ...)
 	// Row 1 = color legend: each cell has a label + color
@@ -198,15 +302,28 @@ export async function GET() {
 		return s.includes(':') && /\d{4}/.test(s);
 	}
 
-	const volunteers: VolunteerSheetRow[] = [];
+	const statusPriority: Record<string, number> = {
+		signed_waiver: 5, no_showed: 4, answered_no: 3, scheduled: 2, emailed: 1, pending: 0
+	};
+
+	// Map from email → best row seen so far (deduplicate by email, keep most-advanced status)
+	const responseByIdentity = new Map<string, VolunteerSheetRow>();
+	const skippedRows: SkippedSheetRow[] = [];
 
 	for (let i = 2; i < rows.length; i++) {
 		const row = rows[i];
-		if (!row || row.length === 0) continue;
+		const rowNumber = i + 1;
+		if (!row || row.length === 0) {
+			skippedRows.push({ sheet: 'Day Trip Volunteer Responses', rowNumber, reason: 'empty row' });
+			continue;
+		}
 		const get = (idx: number) => (idx >= 0 && idx < row.length ? row[idx].text : '');
 		const name = get(iName);
 		const email = get(iEmail).toLowerCase();
-		if (!name && !email) continue;
+		if (!name && !email) {
+			skippedRows.push({ sheet: 'Day Trip Volunteer Responses', rowNumber, reason: 'missing name and email' });
+			continue;
+		}
 
 		const rowColor = row[0]?.color ?? null;
 		const col0 = get(iTimestamp);
@@ -229,7 +346,7 @@ export async function GET() {
 		const submittedAt =
 			status === 'scheduled' || col0HasDate ? null : (col0 || null);
 
-		volunteers.push({
+		const candidate: VolunteerSheetRow = {
 			name,
 			email,
 			submittedAt,
@@ -240,15 +357,30 @@ export async function GET() {
 			photosOk: parseBool(get(iPhotos)),
 			leashCommitment: parseBool(get(iLeash)),
 			orientationStatus: status,
-			isEstablished: establishedEmails.has(email),
-			orientationDate
-		});
+			isEstablished: establishedIdentities.has(volunteerIdentityKey(name, email)),
+			orientationDate,
+			sourceSheet: 'Day Trip Volunteer Responses',
+			sourceRow: rowNumber
+		};
+
+		const key = volunteerIdentityKey(name, email);
+		const existing = responseByIdentity.get(key);
+		if (!existing || (statusPriority[status] ?? 0) >= (statusPriority[existing.orientationStatus] ?? 0)) {
+			if (existing) {
+				skippedRows.push({ sheet: 'Day Trip Volunteer Responses', rowNumber: existing.sourceRow ?? 0, reason: `duplicate name+email — superseded by row ${rowNumber}`, name: existing.name, email: existing.email });
+			}
+			responseByIdentity.set(key, candidate);
+		} else {
+			skippedRows.push({ sheet: 'Day Trip Volunteer Responses', rowNumber, reason: `duplicate name+email — kept row ${existing.sourceRow ?? '?'} (more advanced status)`, name, email });
+		}
 	}
 
+	const volunteers = [...responseByIdentity.values()];
+
 	// Add established volunteers who never submitted the sign-up form
-	const responseEmails = new Set(volunteers.map((v) => v.email));
+	const responseIdentities = new Set(volunteers.map((v) => volunteerIdentityKey(v.name, v.email)));
 	for (const est of establishedVolunteers) {
-		if (!est.email || responseEmails.has(est.email)) continue;
+		if (responseIdentities.has(volunteerIdentityKey(est.name, est.email))) continue;
 		volunteers.push({
 			name: est.name,
 			email: est.email,
@@ -261,9 +393,23 @@ export async function GET() {
 			leashCommitment: false,
 			orientationStatus: 'signed_waiver',
 			isEstablished: true,
-			orientationDate: null
+			orientationDate: null,
+			sourceSheet: 'Established DTVs',
+			sourceRow: est.rowNumber
 		});
 	}
 
-	return json(volunteers);
+	logSkippedSheetRows(skippedRows);
+
+	return json({
+		rows: volunteers,
+		diagnostics: {
+			skippedRows: [...establishedSkippedRows, ...skippedRows],
+			establishedRawDataRows,
+			establishedRowsRead,
+			establishedRowsReturned: establishedVolunteers.length,
+			establishedRowsExpected: establishedVolunteers.length,
+			volunteerRowsReturned: volunteers.length
+		}
+	} satisfies VolunteerSheetResponse);
 }

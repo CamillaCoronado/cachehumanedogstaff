@@ -9,6 +9,24 @@ function emailToId(email: string): string {
 	return email.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
 }
 
+function normalizeIdentityPart(value: string): string {
+	return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function volunteerNameEmailKey(row: VolunteerSheetRow): string {
+	return `${normalizeIdentityPart(row.name)}|${normalizeIdentityPart(row.email)}`;
+}
+
+function volunteerRowToId(row: VolunteerSheetRow, sharedEmailDifferentNameEmails: Set<string>): string {
+	const email = normalizeIdentityPart(row.email);
+	if (row.sourceSheet === 'Established DTVs') {
+		if (!email && row.sourceRow) return `established_dtv_row_${row.sourceRow}`;
+		if (email && sharedEmailDifferentNameEmails.has(email)) return `established_dtv_${emailToId(row.email)}_${emailToId(row.name)}`;
+	}
+	if (row.email) return emailToId(row.email);
+	return emailToId(row.name);
+}
+
 export async function listVolunteers(): Promise<Volunteer[]> {
 	if (!db) return [];
 	const snap = await getDocs(collection(db, COLLECTION));
@@ -20,13 +38,65 @@ export async function syncVolunteers(rows: VolunteerSheetRow[]): Promise<number>
 	const now = new Date();
 	let count = 0;
 
-	const validRows = rows.filter((r) => r.email || r.name);
+	const validRows: VolunteerSheetRow[] = [];
+	const seenIds = new Map<string, VolunteerSheetRow>();
+	const namesByEmail = new Map<string, Set<string>>();
+	for (const row of rows) {
+		const email = normalizeIdentityPart(row.email);
+		if (!email) continue;
+		const names = namesByEmail.get(email) ?? new Set<string>();
+		names.add(normalizeIdentityPart(row.name));
+		namesByEmail.set(email, names);
+	}
+	const sharedEmailDifferentNameEmails = new Set(
+		[...namesByEmail.entries()]
+			.filter(([, names]) => names.size > 1)
+			.map(([email]) => email)
+	);
+
+	for (const row of rows) {
+		if (!row.email && !row.name) {
+			console.warn('[DTV sheet sync] skipped row before Firestore write', {
+				reason: 'missing name and email',
+				sourceSheet: row.sourceSheet,
+				sourceRow: row.sourceRow
+			});
+			continue;
+		}
+
+		const id = volunteerRowToId(row, sharedEmailDifferentNameEmails);
+		const existingRow = seenIds.get(id);
+		if (existingRow && volunteerNameEmailKey(row) === volunteerNameEmailKey(existingRow) && (row.isEstablished || existingRow.isEstablished)) {
+			console.warn('[DTV sheet sync] duplicate DTV row will overwrite the same volunteer document', {
+				documentId: id,
+				current: {
+					name: row.name,
+					email: row.email,
+					isEstablished: row.isEstablished,
+					sourceSheet: row.sourceSheet,
+					sourceRow: row.sourceRow
+				},
+				firstSeen: {
+					name: existingRow.name,
+					email: existingRow.email,
+					isEstablished: existingRow.isEstablished,
+					sourceSheet: existingRow.sourceSheet,
+					sourceRow: existingRow.sourceRow
+				}
+			});
+		}
+		if (!existingRow) {
+			seenIds.set(id, row);
+		}
+
+		validRows.push(row);
+	}
 
 	// Firestore batch limit is 500 writes
 	for (let i = 0; i < validRows.length; i += 500) {
 		const batch = writeBatch(db);
 		for (const row of validRows.slice(i, i + 500)) {
-			const id = emailToId(row.email || row.name);
+			const id = volunteerRowToId(row, sharedEmailDifferentNameEmails);
 			const ref = doc(db, COLLECTION, id);
 			const volunteer: Omit<Volunteer, 'orientationDate'> & { orientationDate?: string | null } = {
 				id,
