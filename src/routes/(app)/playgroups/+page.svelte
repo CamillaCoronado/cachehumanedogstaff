@@ -16,6 +16,7 @@
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import { daysSince, formatDateTime, toDate } from '$lib/utils/dates';
+	import { getCautionDogs } from '$lib/utils/attention';
 	import { canAccessPlaygroups, canEditPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
@@ -117,11 +118,7 @@
 		if (dog.goodWithDogs === 'yes' || isPuppy(dog)) return true;
 		return dogIdsWithHistory.has(dog.id);
 	});
-	$: cautionDogs = activeDogs.filter((dog) => {
-		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no' || dog.awaitingEvaluation) return false;
-		if (dog.goodWithDogs === 'yes' || isPuppy(dog)) return false;
-		return !dogIdsWithHistory.has(dog.id);
-	});
+	$: cautionDogs = getCautionDogs(activeDogs, sessions);
 	$: holdDogs = activeDogs.filter((dog) => getReadiness(dog) === 'hold');
 	$: unknownWeightDogs = readyDogs.filter((d) => d.weightLbs === null || d.weightLbs === undefined);
 	$: ({ groups: readyGroups, swapIns } = buildRecommendations(readyDogs));
@@ -167,7 +164,6 @@
 		const weeks = ageWeeks(dog);
 		if (weeks !== null && weeks < 26) {
 			if (weeks < 12 || !isPuppyVaccinated(dog)) return 'hold';
-			return 'caution';
 		}
 		if (dog.goodWithDogs === 'yes') return 'ready';
 		return 'caution';
@@ -226,6 +222,10 @@
 		return 2;
 	}
 
+	function dogEnergyRank(dog: Dog): number {
+		return isPuppy(dog) ? 3 : energyRank(dog.energyLevel);
+	}
+
 	function sizeCategory(dog: Dog): 'tiny' | 'small' | 'medium' | 'large' | 'unknown' {
 		if (dog.weightLbs === null || dog.weightLbs === undefined) return 'unknown';
 		if (dog.weightLbs < 15) return 'tiny';
@@ -273,7 +273,7 @@
 		const groupedIds = new Set<string>();
 
 		const knownWeight = [...ready.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined)]
-			.sort((a, b) => sizeRank(a) - sizeRank(b) || energyRank(a.energyLevel) - energyRank(b.energyLevel) || a.name.localeCompare(b.name));
+			.sort((a, b) => sizeRank(a) - sizeRank(b) || dogEnergyRank(a) - dogEnergyRank(b) || a.name.localeCompare(b.name));
 
 		let groupNumber = 1;
 		let i = 0;
@@ -317,20 +317,15 @@
 
 	function buildTestSuggestions(caution: Dog[], readyGroups: PlaygroupRecommendation[]): TestSuggestion[] {
 		return caution.map((dog) => {
-			const dogEnergy = energyRank(dog.energyLevel);
-			const pup = isPuppy(dog);
+			const dogEnergy = dogEnergyRank(dog);
 			const compatible = readyGroups.filter((g) => {
 				if (intactConflict([dog, ...g.dogs])) return false;
 				if (!sizeCompatible([dog, ...g.dogs])) return false;
-				if (pup) {
-					// puppies need every dog in the group to be high/very_high energy
-					return g.dogs.every((d) => energyRank(d.energyLevel) >= 3);
-				}
 				return true;
 			});
 			const match = compatible.sort((a, b) => {
-				const avgA = a.dogs.reduce((s, d) => s + energyRank(d.energyLevel), 0) / a.dogs.length;
-				const avgB = b.dogs.reduce((s, d) => s + energyRank(d.energyLevel), 0) / b.dogs.length;
+				const avgA = a.dogs.reduce((s, d) => s + dogEnergyRank(d), 0) / a.dogs.length;
+				const avgB = b.dogs.reduce((s, d) => s + dogEnergyRank(d), 0) / b.dogs.length;
 				return Math.abs(avgA - dogEnergy) - Math.abs(avgB - dogEnergy);
 			})[0] ?? null;
 			return {

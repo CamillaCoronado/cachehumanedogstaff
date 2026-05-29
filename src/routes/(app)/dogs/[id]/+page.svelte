@@ -13,6 +13,7 @@
 		addBehavioralNote,
 		addFeedingLog,
 		addStoolLog,
+		deleteBathLog,
 		listBathLogs,
 		listBehavioralNotes,
 		listFeedingLogs,
@@ -46,6 +47,7 @@
 		return { destroy() { node.remove(); } };
 	}
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+	import { syncVersion } from '$lib/stores/sync';
 
 	let dog: Dog | null = null;
 	let photoLoadFailed = false;
@@ -85,6 +87,7 @@
 	const today = new Date();
 
 	$: dogId = $page.params.id;
+	$: if ($syncVersion > 0 && dogId) void getDog(dogId).then((d) => { if (d) dog = d; });
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
 	$: bathIsEligible = dog ? bathEligible(dog.surgeryDate, today) : true;
@@ -422,14 +425,20 @@
 	}
 
 	async function handleLogBath() {
-		if (!dog) return;
+		if (!dog || savingBath) return;
+		if (!$authProfile) { toast.error('Not signed in.'); return; }
 		if (!bathIsEligible) {
 			toast.error('Baths are blocked for 10 days after surgery.');
 			return;
 		}
-		await logBath(dog.id, $authProfile);
-		toast.success('Bath logged.');
-		await loadAll();
+		savingBath = true;
+		try {
+			await logBath(dog.id, $authProfile);
+			toast.success('Bath logged.');
+			await loadAll();
+		} finally {
+			savingBath = false;
+		}
 	}
 
 	async function handleTripToggle() {
@@ -466,6 +475,14 @@
 			await loadAll();
 		} catch (e) { console.error(e); toast.error('Unable to log bath.'); }
 		finally { savingBath = false; }
+	}
+
+	async function handleDeleteBathLog(logId: string) {
+		if (!dog) return;
+		await deleteBathLog(dog.id, logId);
+		bathLogs = bathLogs.filter((l) => l.id !== logId);
+		dog = (await getDog(dog.id)) ?? dog;
+		toast.success('Bath log deleted.');
 	}
 
 	async function handleSaveFeeding() {
@@ -841,7 +858,7 @@
 					<button
 						class="w-full rounded-full border border-ink-200 px-4 py-2 text-xs"
 						on:click={handleLogBath}
-						disabled={!bathIsEligible}
+						disabled={!bathIsEligible || savingBath}
 					>
 						Log Bath
 					</button>
@@ -909,12 +926,15 @@
 							</thead>
 							<tbody class="divide-y divide-ink-100">
 								{#if filteredBath.length === 0}
-									<tr><td colspan="2" class="py-3 text-xs text-ink-500">No bath logs.</td></tr>
+									<tr><td colspan="3" class="py-3 text-xs text-ink-500">No bath logs.</td></tr>
 								{:else}
 									{#each filteredBath as log}
 										<tr>
 											<td class="py-2">{formatDateTime(log.timestamp)}</td>
 											<td class="py-2">{log.loggedByName}</td>
+											<td class="py-2 text-right">
+												<button class="text-ink-400 hover:text-red-500 transition-colors" on:click={() => handleDeleteBathLog(log.id)} title="Delete">✕</button>
+											</td>
 										</tr>
 									{/each}
 								{/if}

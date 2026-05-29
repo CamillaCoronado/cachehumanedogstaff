@@ -121,6 +121,9 @@ export interface BehavioralNote {
 	loggedByName: string;
 }
 
+export type BehaviorRating = 'good' | 'neutral' | 'reactive' | 'na';
+export type VolunteerOrientationStatus = 'pending' | 'emailed' | 'scheduled' | 'completed' | 'no_showed' | 'disqualified';
+
 export interface DayTripLog {
 	id: string;
 	dogId: string;
@@ -132,6 +135,32 @@ export interface DayTripLog {
 	endedByName: string | null;
 	startNotes: string | null;
 	endNotes: string | null;
+	volunteerName?: string | null;
+	reactionToDogs?: BehaviorRating | null;
+	reactionToStrangers?: BehaviorRating | null;
+	reactionToCats?: BehaviorRating | null;
+	reactionToKids?: BehaviorRating | null;
+	tripNotes?: string | null;
+	source?: 'staff' | 'qr' | null;
+	createdAt: DateValue;
+	updatedAt: DateValue;
+}
+
+export interface Volunteer {
+	id: string;
+	name: string;
+	email: string;
+	submittedAt: string | null;
+	hasDriversLicense: boolean;
+	is18Plus: boolean;
+	dogExperience: string;
+	adventurePlans: string;
+	photosOk: boolean;
+	leashCommitment: boolean;
+	orientationStatus: VolunteerOrientationStatus;
+	waiverSigned: boolean;
+	internalNotes: string;
+	lastSyncedAt: DateValue;
 	createdAt: DateValue;
 	updatedAt: DateValue;
 }

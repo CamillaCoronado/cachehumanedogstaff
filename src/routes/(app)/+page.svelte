@@ -6,6 +6,7 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
+	import { getBathAttentionDogs, getCautionDogs, getOverdueDayTripDogs, getOverduePlaygroupDogs } from '$lib/utils/attention';
 	import { loadCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import type { CleaningShift } from '$lib/data/cleaning';
 	import { onMount } from 'svelte';
@@ -26,8 +27,9 @@
 	interface AttentionItem {
 		dogId: string;
 		dogName: string;
-		type: 'bath' | 'daytrip' | 'playgroup';
+		type: 'bath' | 'daytrip' | 'playgroup' | 'dogstest';
 		days: number;
+		isNewIntake?: boolean;
 	}
 
 	interface AsmRecentAdoption {
@@ -347,92 +349,22 @@
 			.slice(0, 5);
 	}
 
-	function buildAttentionItems(sessions: PlaygroupSession[], tripLogs: DayTripLog[]): AttentionItem[] {
+	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
+		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none');
 		const items: AttentionItem[] = [];
 
-		// Last playgroup date per dog
-		const lastPgMs: Record<string, number> = {};
-		for (const s of sessions) {
-			const t = toDate(s.date)?.getTime();
-			if (!t) continue;
-			for (const id of s.dogIds) {
-				if (!lastPgMs[id] || t > lastPgMs[id]) lastPgMs[id] = t;
-			}
+		for (const { dog, days, isNewIntake } of getBathAttentionDogs(shelterDogs, today)) {
+			items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days, isNewIntake });
 		}
-
-		// Last day trip date per dog — from actual logs, not denormalized field
-		const lastTripMsByDog: Record<string, number> = {};
-		for (const log of tripLogs) {
-			const t = toDate(log.endedAt ?? log.startedAt)?.getTime();
-			if (!t) continue;
-			if (!lastTripMsByDog[log.dogId] || t > lastTripMsByDog[log.dogId]) {
-				lastTripMsByDog[log.dogId] = t;
-			}
+		for (const { dog, days } of getOverdueDayTripDogs(shelterDogs, today)) {
+			items.push({ dogId: dog.id, dogName: dog.name, type: 'daytrip', days });
 		}
-
-		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none');
-
-		// Bath needed: on intake if never bathed, or >= 28 days since last bath
-		for (const dog of shelterDogs) {
-			const availableSince = dog.shelterSince ?? dog.intakeDate;
-			const availableDays = daysSince(availableSince, today) ?? 0;
-			const availableMs = toDate(availableSince)?.getTime() ?? 0;
-			const lastBathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
-			const effectiveBathDate = dog.lastBathDate && lastBathMs >= availableMs ? dog.lastBathDate : null;
-			const bathDays = daysSince(effectiveBathDate, today);
-			const days = bathDays ?? availableDays;
-			if (days >= 28) {
-				items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days });
-			}
+		for (const { dog, days } of getOverduePlaygroupDogs(shelterDogs, sessions, today)) {
+			items.push({ dogId: dog.id, dogName: dog.name, type: 'playgroup', days });
 		}
-
-		// Day trip overdue: eligible dogs that haven't had a trip in >= 7 days, past their ready date
-		for (const dog of shelterDogs) {
-			if (dog.dayTripStatus === 'ineligible') continue;
-			const surgeryDateObj = toDate(dog.surgeryDate);
-			const surgeryDaysAgo = surgeryDateObj ? Math.round((today.getTime() - startOfDay(surgeryDateObj).getTime()) / 86_400_000) : null;
-			if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) continue;
-
-			const availableSince = dog.shelterSince ?? dog.intakeDate;
-			const availableMs = toDate(availableSince)?.getTime() ?? 0;
-			const readyDate = toDate(dog.playgroupReadyDate) ?? new Date(availableMs + 7 * 86_400_000);
-			if (today < readyDate) continue;
-
-			const lastTripMs = lastTripMsByDog[dog.id] ?? 0;
-			const effectiveLastTripMs = lastTripMs >= availableMs ? lastTripMs : null;
-			const tripDays = effectiveLastTripMs !== null ? (daysSince(new Date(effectiveLastTripMs), today) ?? null) : null;
-			const readyDays = daysSince(readyDate, today) ?? 0;
-			const days = tripDays ?? readyDays;
-			if (days >= 7) {
-				items.push({ dogId: dog.id, dogName: dog.name, type: 'daytrip', days });
-			}
-		}
-
-		// Playgroup overdue: dog-friendly, fixed, adult (26+ wks), not isolated, past their ready date, >= 14 days since last playgroup
-		for (const dog of shelterDogs) {
-			if (dog.goodWithDogs === 'no') continue;
-			if (!dog.isFixed) continue;
-			const dob = toDate(dog.dateOfBirth);
-			const ageWeeks = dob ? Math.floor((today.getTime() - dob.getTime()) / (7 * 86_400_000)) : null;
-			if (ageWeeks !== null && ageWeeks < 26) continue;
-
-			const surgeryDateObj = toDate(dog.surgeryDate);
-			const surgeryDaysAgo = surgeryDateObj ? Math.round((today.getTime() - startOfDay(surgeryDateObj).getTime()) / 86_400_000) : null;
-			if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) continue;
-
-			const availableSince = dog.shelterSince ?? dog.intakeDate;
-			const availableMs = toDate(availableSince)?.getTime() ?? 0;
-			const readyDate = toDate(dog.playgroupReadyDate) ?? new Date(availableMs + 7 * 86_400_000);
-			if (today < readyDate) continue;
-
-			const lastMs = lastPgMs[dog.id] ?? null;
-			const effectiveLastMs = lastMs !== null && lastMs >= availableMs ? lastMs : null;
-			const pgDays = effectiveLastMs !== null ? (daysSince(new Date(effectiveLastMs), today) ?? null) : null;
-			const readyDays = daysSince(readyDate, today) ?? 0;
-			const days = pgDays ?? readyDays;
-			if (days >= 14) {
-				items.push({ dogId: dog.id, dogName: dog.name, type: 'playgroup', days });
-			}
+		for (const dog of getCautionDogs(shelterDogs, sessions)) {
+			const days = daysSince(dog.shelterSince ?? dog.intakeDate, today) ?? 0;
+			items.push({ dogId: dog.id, dogName: dog.name, type: 'dogstest', days });
 		}
 
 		return items.sort((a, b) => b.days - a.days);
@@ -830,12 +762,20 @@
 						<a class="planner-row planner-row-link" href="/dogs/{item.dogId}">
 							<span class="planner-row-main">
 								<span class="planner-bullet">
-									{#if item.type === 'bath'}🛁{:else if item.type === 'daytrip'}🚗{:else}🐾{/if}
+									{#if item.type === 'bath'}🛁{:else if item.type === 'daytrip'}🚗{:else if item.type === 'playgroup'}🐾{:else}🔍{/if}
 								</span>
 								<span class="planner-row-text">{item.dogName}</span>
 							</span>
 							<span class="attention-tag attention-tag-{item.type}">
-								{item.type === 'bath' ? 'bath' : item.type === 'daytrip' ? 'no trip' : 'no group'} · {dayGapLabel(item.days)}
+								{#if item.type === 'bath'}
+									{item.isNewIntake ? `bath · new intake · ${item.days}d` : `bath · ${item.days}d overdue`}
+								{:else if item.type === 'daytrip'}
+									no trip · {dayGapLabel(item.days)}
+								{:else if item.type === 'playgroup'}
+									no group · {dayGapLabel(item.days)}
+								{:else}
+									test compatibility · {dayGapLabel(item.days)}
+								{/if}
 							</span>
 						</a>
 					{/each}
@@ -1339,6 +1279,11 @@
 	.attention-tag-playgroup {
 		background: rgba(90, 150, 90, 0.14);
 		color: #3a6e3a;
+	}
+
+	.attention-tag-dogstest {
+		background: rgba(147, 57, 128, 0.12);
+		color: #6b2060;
 	}
 
 

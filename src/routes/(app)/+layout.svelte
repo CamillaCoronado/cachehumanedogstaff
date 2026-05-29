@@ -51,6 +51,8 @@
 	let mobileNavOpen = false;
 	let asmAttempted = false;
 	let bathBackfillAttempted = false;
+	let storedOverlayChanges: SyncChange[] | null = null;
+	let storedOverlayAttempted = false;
 	let asmSyncing = false;
 	let asmSyncedAt: string | null = null;
 	let asmError: string | null = null;
@@ -61,12 +63,25 @@
 	import { getDog } from '$lib/data/dogs';
 	import type { Dog } from '$lib/types';
 	import { confetti } from '@neoconfetti/svelte';
-	let adoptedDogs: Dog[] = [];
-	let showAdoptionCelebration = false;
-	let fosterDogs: Dog[] = [];
-	let showFosterMoment = false;
-	let transferDogs: Dog[] = [];
-	let showTransferMoment = false;
+	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer'; dogs: Dog[] };
+	let overlayQueue: OverlayItem[] = [];
+	let currentOverlay: OverlayItem | null = null;
+
+	function advanceOverlay() {
+		if (overlayQueue.length > 0) {
+			currentOverlay = overlayQueue[0];
+			overlayQueue = overlayQueue.slice(1);
+		} else {
+			currentOverlay = null;
+			try {
+				const raw = localStorage.getItem(STORAGE_KEY);
+				if (raw) {
+					const parsed = JSON.parse(raw);
+					localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, overlayAcked: true }));
+				}
+			} catch { /* ignore */ }
+		}
+	}
 
 	function portal(node: HTMLElement) {
 		document.body.appendChild(node);
@@ -93,15 +108,43 @@
 		try {
 			const stored = localStorage.getItem(STORAGE_KEY);
 			if (stored) {
-				const parsed = JSON.parse(stored) as { changes: SyncChange[]; changedAt: string };
+				const parsed = JSON.parse(stored) as { changes: SyncChange[]; changedAt: string; overlayAcked?: boolean };
 				asmChanges = parsed.changes;
 				asmLastChangedAt = parsed.changedAt;
+				if (!parsed.overlayAcked && parsed.changes.some(
+					(c) => c.isArchived || c.isTransferredOut || c.fields.some((f) => f === 'Foster (yes)')
+				)) {
+					storedOverlayChanges = parsed.changes;
+				}
 			}
 		} catch { /* ignore */ }
 	});
 
 	$: if ($authReady && !$authUser) {
 		goto('/login');
+	}
+
+	$: if ($authReady && $authUser && storedOverlayChanges && !storedOverlayAttempted) {
+		storedOverlayAttempted = true;
+		const changes = storedOverlayChanges;
+		const buildOverlay = async (filtered: SyncChange[], type: OverlayItem['type']): Promise<OverlayItem | null> => {
+			if (filtered.length === 0) return null;
+			try {
+				const dogs = (await Promise.all(filtered.map((c) => getDog(c.id)))).filter((d): d is Dog => d !== null);
+				return dogs.length > 0 ? { type, dogs } : null;
+			} catch { return null; }
+		};
+		Promise.all([
+			buildOverlay(changes.filter((c) => c.isArchived), 'adoption'),
+			buildOverlay(changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)')), 'foster'),
+			buildOverlay(changes.filter((c) => c.isTransferredOut), 'transfer'),
+		]).then((items) => {
+			const pending = items.filter((i): i is OverlayItem => i !== null);
+			if (pending.length > 0 && !currentOverlay) {
+				overlayQueue = pending;
+				advanceOverlay();
+			}
+		});
 	}
 
 	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !asmAttempted) {
@@ -123,34 +166,22 @@
 					} catch { /* ignore */ }
 					asmLogVisible = true;
 
-					const adoptionChanges = result.changes.filter((c) => c.isArchived);
-					if (adoptionChanges.length > 0) {
-						Promise.all(adoptionChanges.map((c) => getDog(c.id)))
-							.then((dogs) => {
-								adoptedDogs = dogs.filter((d): d is Dog => d !== null);
-								if (adoptedDogs.length > 0) showAdoptionCelebration = true;
-							})
-							.catch(() => {/* best-effort */});
-					}
+					const buildOverlay = async (changes: typeof result.changes, type: OverlayItem['type']): Promise<OverlayItem | null> => {
+						if (changes.length === 0) return null;
+						try {
+							const dogs = (await Promise.all(changes.map((c) => getDog(c.id)))).filter((d): d is Dog => d !== null);
+							return dogs.length > 0 ? { type, dogs } : null;
+						} catch { return null; }
+					};
 
-					const fosterChanges = result.changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)'));
-					if (fosterChanges.length > 0) {
-						Promise.all(fosterChanges.map((c) => getDog(c.id)))
-							.then((dogs) => {
-								fosterDogs = dogs.filter((d): d is Dog => d !== null);
-								if (fosterDogs.length > 0) showFosterMoment = true;
-							})
-							.catch(() => {/* best-effort */});
-					}
-					const transferChanges = result.changes.filter((c) => c.isTransferredOut);
-					if (transferChanges.length > 0) {
-						Promise.all(transferChanges.map((c) => getDog(c.id)))
-							.then((dogs) => {
-								transferDogs = dogs.filter((d): d is Dog => d !== null);
-								if (transferDogs.length > 0) showTransferMoment = true;
-							})
-							.catch(() => {/* best-effort */});
-					}
+					Promise.all([
+						buildOverlay(result.changes.filter((c) => c.isArchived), 'adoption'),
+						buildOverlay(result.changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)')), 'foster'),
+						buildOverlay(result.changes.filter((c) => c.isTransferredOut), 'transfer'),
+					]).then((items) => {
+						overlayQueue = items.filter((item): item is OverlayItem => item !== null);
+						advanceOverlay();
+					});
 					}
 			})
 			.catch((err: unknown) => {
@@ -365,9 +396,11 @@
 											<path d="M4 10.6 12 4l8 6.6v8.2a1.2 1.2 0 0 1-1.2 1.2H5.2A1.2 1.2 0 0 1 4 18.8v-8.2Z"></path>
 											<path d="M10.2 20v-5.5h3.6V20"></path>
 										{:else if tab.icon === 'feeding'}
-											<path d="M4 11h16"></path>
-											<path d="M6.3 11c.4 3.9 2.6 6 5.7 6s5.3-2.1 5.7-6"></path>
-											<path d="M12 7v2"></path>
+											<path d="M4 9h16" stroke-linecap="round"></path>
+											<path d="M5 9c0 4.7 3.1 7.5 7 7.5s7-2.8 7-7.5" stroke-linejoin="round"></path>
+											<circle cx="9.5" cy="13" r="0.9" fill="currentColor" stroke="none"></circle>
+											<circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"></circle>
+											<circle cx="14.5" cy="13" r="0.9" fill="currentColor" stroke="none"></circle>
 										{:else if tab.icon === 'cleaning'}
 											<path d="M6 8h12"></path>
 											<path d="M7.5 8v6.6a3 3 0 0 0 3 3h3a3 3 0 0 0 3-3V8"></path>
@@ -439,12 +472,12 @@
 	</div>
 {/if}
 
-{#if showAdoptionCelebration && adoptedDogs.length > 0}
-	<div class="adoption-overlay" use:portal role="presentation" on:click={() => showAdoptionCelebration = false}>
+{#if currentOverlay?.type === 'adoption'}
+	<div class="adoption-overlay" use:portal role="presentation" on:click={advanceOverlay}>
 		<div class="adoption-celebration">
 			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
 			<div class="adoption-dogs-row">
-				{#each adoptedDogs as dog}
+				{#each currentOverlay.dogs as dog}
 					<div class="adoption-dog-item">
 						{#if dog.photoUrl}
 							<img class="adoption-photo" src={dog.photoUrl} alt={dog.name} />
@@ -455,18 +488,16 @@
 					</div>
 				{/each}
 			</div>
-			<p class="adoption-message">{adoptedDogs.length === 1 ? 'Found their forever home!' : `${adoptedDogs.length} dogs found their forever homes!`} 🎉</p>
-			<button class="adoption-close typewriter" on:click={() => showAdoptionCelebration = false}>Close</button>
+			<p class="adoption-message">{currentOverlay.dogs.length === 1 ? 'Found their forever home!' : `${currentOverlay.dogs.length} dogs found their forever homes!`} 🎉</p>
+			<button class="adoption-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
 		</div>
 	</div>
-{/if}
-
-{#if showTransferMoment && transferDogs.length > 0}
-	<div class="transfer-overlay" use:portal role="presentation" on:click={() => showTransferMoment = false}>
+{:else if currentOverlay?.type === 'transfer'}
+	<div class="transfer-overlay" use:portal role="presentation" on:click={advanceOverlay}>
 		<div class="transfer-moment">
 			<p class="transfer-heading">Off to a new shelter! 🚌</p>
 			<div class="transfer-dogs-row">
-				{#each transferDogs as dog}
+				{#each currentOverlay.dogs as dog}
 					<div class="transfer-dog-item">
 						{#if dog.photoUrl}
 							<img class="transfer-photo" src={dog.photoUrl} alt={dog.name} />
@@ -478,18 +509,15 @@
 				{/each}
 			</div>
 			<p class="transfer-subtext">A new chance to find their forever home</p>
-			<button class="transfer-close typewriter" on:click={() => showTransferMoment = false}>Close</button>
+			<button class="transfer-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
 		</div>
 	</div>
-{/if}
-
-
-{#if showFosterMoment && fosterDogs.length > 0}
-	<div class="foster-overlay" use:portal role="presentation" on:click={() => showFosterMoment = false}>
+{:else if currentOverlay?.type === 'foster'}
+	<div class="foster-overlay" use:portal role="presentation" on:click={advanceOverlay}>
 		<div class="foster-moment">
 			<p class="foster-heading">Heading to a foster home 🏡</p>
 			<div class="foster-dogs-row">
-				{#each fosterDogs as dog}
+				{#each currentOverlay.dogs as dog}
 					<div class="foster-dog-item">
 						{#if dog.photoUrl}
 							<img class="foster-photo" src={dog.photoUrl} alt={dog.name} />
@@ -500,7 +528,7 @@
 					</div>
 				{/each}
 			</div>
-			<button class="foster-close typewriter" on:click={() => showFosterMoment = false}>Close</button>
+			<button class="foster-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
 		</div>
 	</div>
 {/if}

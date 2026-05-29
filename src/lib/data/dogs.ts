@@ -152,6 +152,13 @@ interface StoredDayTripLog {
 	endedByName: string | null;
 	startNotes: string | null;
 	endNotes: string | null;
+	volunteerName?: string | null;
+	reactionToDogs?: string | null;
+	reactionToStrangers?: string | null;
+	reactionToCats?: string | null;
+	reactionToKids?: string | null;
+	tripNotes?: string | null;
+	source?: 'staff' | 'qr' | null;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -580,6 +587,13 @@ function serializeDayTripLog(log: DayTripLog): StoredDayTripLog {
 		endedByName: log.endedByName,
 		startNotes: log.startNotes,
 		endNotes: log.endNotes,
+		volunteerName: log.volunteerName ?? null,
+		reactionToDogs: log.reactionToDogs ?? null,
+		reactionToStrangers: log.reactionToStrangers ?? null,
+		reactionToCats: log.reactionToCats ?? null,
+		reactionToKids: log.reactionToKids ?? null,
+		tripNotes: log.tripNotes ?? null,
+		source: log.source ?? null,
 		createdAt: toDateString(log.createdAt) ?? new Date().toISOString(),
 		updatedAt: toDateString(log.updatedAt) ?? new Date().toISOString()
 	};
@@ -597,6 +611,13 @@ function deserializeDayTripLog(log: StoredDayTripLog): DayTripLog {
 		endedByName: log.endedByName ?? null,
 		startNotes: log.startNotes ?? null,
 		endNotes: log.endNotes ?? null,
+		volunteerName: log.volunteerName ?? null,
+		reactionToDogs: (log.reactionToDogs as DayTripLog['reactionToDogs']) ?? null,
+		reactionToStrangers: (log.reactionToStrangers as DayTripLog['reactionToStrangers']) ?? null,
+		reactionToCats: (log.reactionToCats as DayTripLog['reactionToCats']) ?? null,
+		reactionToKids: (log.reactionToKids as DayTripLog['reactionToKids']) ?? null,
+		tripNotes: log.tripNotes ?? null,
+		source: log.source ?? null,
 		createdAt: toDate(log.createdAt) ?? new Date(),
 		updatedAt: toDate(log.updatedAt) ?? new Date()
 	};
@@ -1156,6 +1177,36 @@ export async function logBath(dogId: string, profile?: UserProfile | null, times
 	return entry;
 }
 
+export async function deleteBathLog(dogId: string, logId: string) {
+	const ref = dogSubcollectionRef(dogId, 'bathLogs');
+	if (ref) {
+		await deleteDoc(doc(ref, logId));
+		// Recompute lastBathDate from remaining logs
+		const remaining = await getDocs(ref);
+		let latestMs = 0;
+		let latestLog: StoredBathLog | null = null;
+		for (const snap of remaining.docs) {
+			const data = snap.data() as StoredBathLog;
+			const ms = new Date(data.timestamp).getTime();
+			if (ms > latestMs) { latestMs = ms; latestLog = data; }
+		}
+		await updateDog(dogId, {
+			lastBathDate: latestLog ? new Date(latestLog.timestamp) : null,
+			lastBathBy: latestLog ? latestLog.loggedByName : null
+		});
+		return;
+	}
+	const stored = readJson<LogMap<StoredBathLog>>(BATH_KEY, {});
+	const list = (stored[dogId] ?? []).filter((l) => l.id !== logId);
+	stored[dogId] = list;
+	writeJson(BATH_KEY, stored);
+	const latest = list[0] ?? null;
+	await updateDog(dogId, {
+		lastBathDate: latest ? new Date(latest.timestamp) : null,
+		lastBathBy: latest ? latest.loggedByName : null
+	});
+}
+
 export async function logDayTrip(dogId: string, profile?: UserProfile | null, notes?: string | null) {
 	const identity = getUserIdentity(profile);
 	const now = new Date();
@@ -1330,7 +1381,7 @@ export async function importHistoricalDayTrip(
 		id: createId('trip'),
 		dogId,
 		startedAt: tripDate,
-		endedAt: defaultTripEndTime(tripDate),
+		endedAt: tripDate,
 		startedBy: identity.uid,
 		startedByName: identity.name,
 		endedBy: identity.uid,
@@ -1341,6 +1392,42 @@ export async function importHistoricalDayTrip(
 		updatedAt: new Date()
 	};
 	await setDoc(doc(ref, entry.id), serializeDayTripLog(entry));
+}
+
+export async function fixImportedTripHours(dryRun: boolean): Promise<number | { dogName: string; date: string; currentEnd: string }[]> {
+	if (!db) return dryRun ? [] : 0;
+	const [snapshot, dogsSnapshot] = await Promise.all([
+		getDocs(collectionGroup(db, 'dayTripLogs')),
+		getDocs(collection(db, 'dogs'))
+	]);
+	const dogNames = new Map(dogsSnapshot.docs.map((d) => [d.id, (d.data() as StoredDog).name]));
+	if (dryRun) {
+		const rows: { dogName: string; date: string; currentEnd: string }[] = [];
+		for (const snap of snapshot.docs) {
+			const data = snap.data() as StoredDayTripLog;
+			if (data.startNotes === 'Imported from spreadsheet' && data.endedAt !== data.startedAt) {
+				const dogId = snap.ref.parent.parent?.id ?? '';
+				rows.push({
+					dogName: dogNames.get(dogId) ?? dogId,
+					date: data.startedAt ? data.startedAt.split('T')[0] : '?',
+					currentEnd: data.endedAt ?? '—'
+				});
+			}
+		}
+		return rows;
+	}
+	let fixed = 0;
+	let batch = writeBatch(db);
+	for (const snap of snapshot.docs) {
+		const data = snap.data() as StoredDayTripLog;
+		if (data.startNotes === 'Imported from spreadsheet' && data.endedAt !== data.startedAt) {
+			batch.update(snap.ref, { endedAt: data.startedAt });
+			fixed++;
+			if (fixed % 450 === 0) { await batch.commit(); batch = writeBatch(db); }
+		}
+	}
+	if (fixed % 450 !== 0) await batch.commit();
+	return fixed;
 }
 
 // Returns the default end time for a day trip: 1 hour before closing on the given date.
@@ -1446,4 +1533,61 @@ export async function endDayTrip(dogId: string, profile?: UserProfile | null, no
 		currentDayTripStartedAt: null,
 		lastDayTripDate: endedAt
 	});
+}
+
+export interface ManualTripData {
+	startedAt: Date;
+	endedAt: Date | null;
+	volunteerName: string;
+	reactionToDogs: DayTripLog['reactionToDogs'];
+	reactionToStrangers: DayTripLog['reactionToStrangers'];
+	reactionToCats: DayTripLog['reactionToCats'];
+	reactionToKids: DayTripLog['reactionToKids'];
+	tripNotes: string;
+	source: 'staff' | 'qr';
+}
+
+export async function logManualTrip(
+	dogId: string,
+	data: ManualTripData,
+	profile?: UserProfile | null
+): Promise<void> {
+	const identity = getUserIdentity(profile);
+	const now = new Date();
+	const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
+	const entry: DayTripLog = {
+		id: createId('trip'),
+		dogId,
+		startedAt: data.startedAt,
+		endedAt: data.endedAt,
+		startedBy: identity.uid,
+		startedByName: identity.name,
+		endedBy: data.endedAt ? identity.uid : null,
+		endedByName: data.endedAt ? identity.name : null,
+		startNotes: null,
+		endNotes: null,
+		volunteerName: data.volunteerName || null,
+		reactionToDogs: data.reactionToDogs ?? null,
+		reactionToStrangers: data.reactionToStrangers ?? null,
+		reactionToCats: data.reactionToCats ?? null,
+		reactionToKids: data.reactionToKids ?? null,
+		tripNotes: data.tripNotes || null,
+		source: data.source,
+		createdAt: now,
+		updatedAt: now
+	};
+	if (ref) {
+		await setDoc(doc(ref, entry.id), serializeDayTripLog(entry));
+	} else {
+		const stored = readDayTripMap();
+		(stored[dogId] ??= []).unshift(serializeDayTripLog(entry));
+		writeDayTripMap(stored);
+	}
+	if (data.endedAt) {
+		await updateDog(dogId, {
+			lastDayTripDate: data.endedAt,
+			isOutOnDayTrip: false,
+			currentDayTripStartedAt: null
+		});
+	}
 }

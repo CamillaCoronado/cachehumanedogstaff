@@ -197,6 +197,9 @@
 	let walkPath: WalkPathId = 'snake_route';
 	let editLog: { dogId: string; logId: string; amountEaten: AmountEaten; notes: string } | null = null;
 	let savingEdit = false;
+	let showDidntEatPanel = false;
+	let didntEatIds: string[] = [];
+	let savingDidntEat = false;
 
 	onMount(async () => {
 		await refreshDogs();
@@ -559,7 +562,7 @@
 		if (markingAll) return;
 		markingAll = true;
 		try {
-			const targets = shelterDogs.filter((dog) => !fedMap[dog.id]);
+			const targets = (mealTime === 'second' ? secondMealDogs : shelterDogs).filter((dog) => !fedMap[dog.id]);
 			await Promise.all(
 				targets.map((dog) =>
 					addFeedingLog(
@@ -581,6 +584,33 @@
 			toast.error('Unable to mark all as fed.');
 		} finally {
 			markingAll = false;
+		}
+	}
+
+	function openDidntEatPanel() {
+		didntEatIds = [];
+		showDidntEatPanel = true;
+	}
+
+	async function saveDidntEat() {
+		if (savingDidntEat) return;
+		savingDidntEat = true;
+		const targets = displayDogs.filter((dog) => didntEatIds.includes(dog.id));
+		try {
+			await Promise.all(
+				targets.map((dog) =>
+					addFeedingLog(dog.id, { date: selectedDay, mealTime, amountEaten: 'none', notes: null }, $authProfile)
+				)
+			);
+			await refreshLogs();
+			showDidntEatPanel = false;
+			didntEatIds = [];
+			toast.success(`Logged ${targets.length} dog${targets.length === 1 ? '' : 's'} as didn't eat.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to save.');
+		} finally {
+			savingDidntEat = false;
 		}
 	}
 
@@ -647,6 +677,12 @@
 						2nd
 					</button>
 				</div>
+				<button
+					class="didnt-eat-btn"
+					on:click={openDidntEatPanel}
+				>
+					Didn't eat
+				</button>
 				<button
 					class="mark-all-btn"
 					on:click={markAllFed}
@@ -955,6 +991,48 @@
 	</div>
 </section>
 
+{#if showDidntEatPanel}
+	<div class="didnt-eat-overlay" role="presentation" on:click|self={() => (showDidntEatPanel = false)}>
+		<div class="didnt-eat-modal" role="dialog" aria-modal="true" aria-label="Log who didn't eat">
+			<div class="didnt-eat-head">
+				<p class="didnt-eat-title typewriter">Who didn't eat?</p>
+				<button class="didnt-eat-close" type="button" aria-label="Close" on:click={() => (showDidntEatPanel = false)}>×</button>
+			</div>
+			<p class="didnt-eat-hint typewriter">Select dogs that didn't eat.</p>
+			<div class="didnt-eat-list">
+				{#each displayDogs.filter((d) => !isSurgeryBlocked(d)) as dog}
+					<label class="didnt-eat-item {fedMap[dog.id] ? 'didnt-eat-item-already-fed' : ''}">
+						<input
+							type="checkbox"
+							disabled={!!fedMap[dog.id]}
+							checked={didntEatIds.includes(dog.id)}
+							on:change={(e) => {
+								if (e.currentTarget.checked) {
+									didntEatIds = [...didntEatIds, dog.id];
+								} else {
+									didntEatIds = didntEatIds.filter((id) => id !== dog.id);
+								}
+							}}
+						/>
+						<span class="didnt-eat-name">{dog.name}</span>
+						{#if fedMap[dog.id]}
+							<span class="didnt-eat-fed-note typewriter">already logged</span>
+						{/if}
+					</label>
+				{/each}
+			</div>
+			<button
+				class="didnt-eat-save"
+				type="button"
+				disabled={savingDidntEat || didntEatIds.length === 0}
+				on:click={saveDidntEat}
+			>
+				{savingDidntEat ? 'Saving…' : `Log ${didntEatIds.length} dog${didntEatIds.length === 1 ? '' : 's'} as didn't eat`}
+			</button>
+		</div>
+	</div>
+{/if}
+
 <Modal open={showHistory} title="Feeding History" onClose={() => (showHistory = false)}>
 	<div class="feeding-history-shell">
 		{#if feedingHistoryEntries.length === 0}
@@ -1111,6 +1189,132 @@
 
 	.mark-all-btn:disabled {
 		opacity: 0.6;
+	}
+
+	.didnt-eat-btn {
+		min-height: 2.75rem;
+		border-radius: 0.24rem;
+		border: 1px solid #f5c6c6;
+		background: #fff5f5;
+		padding: 0.28rem 0.62rem;
+		font-size: 0.88rem;
+		font-family: var(--font-typewriter);
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: #7a1f1f;
+		white-space: normal;
+		cursor: pointer;
+	}
+
+	.didnt-eat-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.38);
+		z-index: 200;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+	}
+
+	.didnt-eat-modal {
+		background: #fff;
+		border: 1px solid #c8d5e4;
+		border-radius: 0.42rem;
+		width: 100%;
+		max-width: 26rem;
+		max-height: min(90vh, 90dvh);
+		overflow-y: auto;
+		padding: 0.82rem;
+		display: grid;
+		gap: 0.6rem;
+	}
+
+	.didnt-eat-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.didnt-eat-title {
+		margin: 0;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #7a1f1f;
+	}
+
+	.didnt-eat-close {
+		background: none;
+		border: none;
+		font-size: 1.1rem;
+		line-height: 1;
+		color: #7a8fa6;
+		cursor: pointer;
+		padding: 0 0.2rem;
+	}
+
+	.didnt-eat-hint {
+		margin: 0;
+		font-size: 0.62rem;
+		color: #6a7a8a;
+	}
+
+	.didnt-eat-list {
+		display: grid;
+		gap: 0.1rem;
+	}
+
+	.didnt-eat-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.32rem 0.4rem;
+		border-radius: 0.3rem;
+		cursor: pointer;
+		font-size: 0.88rem;
+	}
+
+	.didnt-eat-item:hover {
+		background: #fef5f5;
+	}
+
+	.didnt-eat-item-already-fed {
+		opacity: 0.45;
+		cursor: default;
+	}
+
+	.didnt-eat-name {
+		flex: 1;
+		font-weight: 600;
+	}
+
+	.didnt-eat-fed-note {
+		font-size: 0.6rem;
+		color: #8a9aaa;
+		letter-spacing: 0.05em;
+	}
+
+	.didnt-eat-save {
+		width: 100%;
+		padding: 0.6rem;
+		border: none;
+		border-radius: 0.34rem;
+		background: #cf4b4b;
+		color: #fff;
+		font-family: var(--font-typewriter);
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+
+	.didnt-eat-save:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.feeding-map-sheet,
@@ -1970,7 +2174,8 @@
 		}
 
 		.meal-switch,
-		.mark-all-btn {
+		.mark-all-btn,
+		.didnt-eat-btn {
 			min-height: 2.2rem;
 		}
 

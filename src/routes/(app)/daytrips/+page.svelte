@@ -4,8 +4,9 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog } from '$lib/data/dogs';
-	import type { DayTripLog, Dog, UserRole } from '$lib/types';
+	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog, fixImportedTripHours, logManualTrip } from '$lib/data/dogs';
+	import { listVolunteers, syncVolunteers, updateVolunteerNotes, deleteVolunteer } from '$lib/data/volunteers';
+	import type { BehaviorRating, DayTripLog, Dog, UserRole, Volunteer, VolunteerOrientationStatus } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 
 	const now = new Date();
@@ -17,8 +18,173 @@
 	let loading = true;
 	let monthFilter = defaultMonth;
 	let loaded = false;
-	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'import' = 'board';
+	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'volunteers' | 'import' = 'board';
 	let boardColorFilter: 'green' | 'yellow' | null = null;
+
+	// ── Volunteers state ──
+	let volunteers: Volunteer[] = [];
+	let volSyncing = false;
+	let volSyncError = '';
+	let volExpandedId: string | null = null;
+	let volNotesDraft: Record<string, string> = {};
+
+	async function syncVolunteersFromSheet() {
+		volSyncing = true;
+		volSyncError = '';
+		try {
+			const res = await fetch('/api/sheets/volunteers');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const rows = await res.json();
+			await syncVolunteers(rows);
+			volunteers = await listVolunteers();
+			toast.success(`${volunteers.length} volunteers synced.`);
+		} catch (e) {
+			volSyncError = e instanceof Error ? e.message : String(e);
+		} finally {
+			volSyncing = false;
+		}
+	}
+
+	async function saveVolunteerNotes(id: string) {
+		await updateVolunteerNotes(id, volNotesDraft[id] ?? '');
+		volunteers = volunteers.map((v) => v.id === id ? { ...v, internalNotes: volNotesDraft[id] ?? '' } : v);
+		toast.success('Notes saved.');
+	}
+
+	async function removeVolunteer(id: string) {
+		await deleteVolunteer(id);
+		volunteers = volunteers.filter((v) => v.id !== id);
+	}
+
+	function statusLabel(s: VolunteerOrientationStatus): string {
+		const map: Record<VolunteerOrientationStatus, string> = {
+			pending: 'Pending', emailed: 'Emailed', scheduled: 'Scheduled',
+			completed: 'Completed', no_showed: 'No-showed', disqualified: 'Disqualified'
+		};
+		return map[s] ?? s;
+	}
+
+	function statusClass(s: VolunteerOrientationStatus): string {
+		if (s === 'completed') return 'vol-status-green';
+		if (s === 'scheduled') return 'vol-status-blue';
+		if (s === 'emailed') return 'vol-status-yellow';
+		if (s === 'no_showed' || s === 'disqualified') return 'vol-status-red';
+		return 'vol-status-gray';
+	}
+
+	// ── Trip log form state ──
+	const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+	let tripDogId = '';
+	let tripVolunteerName = '';
+	let tripDate = todayStr;
+	let tripTimeOut = '';
+	let tripTimeBack = '';
+	let tripDogs: BehaviorRating | '' = '';
+	let tripStrangers: BehaviorRating | '' = '';
+	let tripCats: BehaviorRating | '' = '';
+	let tripKids: BehaviorRating | '' = '';
+	let tripNotes = '';
+	let tripSaving = false;
+	let tripCopyText = '';
+	let tripSaved = false;
+
+	function buildTripDateTime(dateStr: string, timeStr: string): Date | null {
+		if (!dateStr) return null;
+		const [y, m, d] = dateStr.split('-').map(Number);
+		if (!timeStr) return new Date(y, m - 1, d, 0, 0, 0);
+		const [h, min] = timeStr.split(':').map(Number);
+		return new Date(y, m - 1, d, h, min, 0);
+	}
+
+	function buildCopyText(): string {
+		const dog = dogs.find((d) => d.id === tripDogId);
+		if (!dog) return '';
+		const dateObj = buildTripDateTime(tripDate, '');
+		const dateLabel = dateObj ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : tripDate;
+		const timeOutLabel = tripTimeOut || '—';
+		const timeBackLabel = tripTimeBack || '—';
+		const ratingLabel = (r: BehaviorRating | '') => r === 'good' ? 'Good' : r === 'neutral' ? 'Neutral' : r === 'reactive' ? 'Reactive' : r === 'na' ? 'N/A' : '—';
+		const lines = [
+			`Day Trip — ${dog.name} — ${dateLabel}`,
+			`Volunteer: ${tripVolunteerName || '—'}`,
+			`Time out: ${timeOutLabel} | Time back: ${timeBackLabel}`,
+			``,
+			`Behavior:`,
+			`• Around dogs: ${ratingLabel(tripDogs)}`,
+			`• Around strangers: ${ratingLabel(tripStrangers)}`,
+			`• Around cats: ${ratingLabel(tripCats)}`,
+			`• Around kids: ${ratingLabel(tripKids)}`,
+		];
+		if (tripNotes.trim()) lines.push(``, `Notes: ${tripNotes.trim()}`);
+		return lines.join('\n');
+	}
+
+	async function submitTripLog() {
+		if (!tripDogId) { toast.error('Select a dog.'); return; }
+		tripSaving = true;
+		try {
+			const startedAt = buildTripDateTime(tripDate, tripTimeOut) ?? new Date();
+			const endedAt = tripTimeBack ? buildTripDateTime(tripDate, tripTimeBack) : null;
+			await logManualTrip(tripDogId, {
+				startedAt,
+				endedAt,
+				volunteerName: tripVolunteerName,
+				reactionToDogs: (tripDogs as BehaviorRating) || null,
+				reactionToStrangers: (tripStrangers as BehaviorRating) || null,
+				reactionToCats: (tripCats as BehaviorRating) || null,
+				reactionToKids: (tripKids as BehaviorRating) || null,
+				tripNotes,
+				source: 'staff'
+			}, $authProfile);
+			tripCopyText = buildCopyText();
+			tripSaved = true;
+			await refresh();
+		} catch (e) {
+			toast.error('Failed to save trip.');
+			console.error(e);
+		} finally {
+			tripSaving = false;
+		}
+	}
+
+	function resetTripForm() {
+		tripDogId = ''; tripVolunteerName = ''; tripDate = todayStr;
+		tripTimeOut = ''; tripTimeBack = ''; tripDogs = ''; tripStrangers = '';
+		tripCats = ''; tripKids = ''; tripNotes = ''; tripCopyText = ''; tripSaved = false;
+	}
+
+	async function copyToClipboard(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+			toast.success('Copied!');
+		} catch {
+			toast.error('Copy failed — select and copy manually.');
+		}
+	}
+
+	const tripRatingOptions: BehaviorRating[] = ['good', 'neutral', 'reactive', 'na'];
+
+	const volStatusOrder: Record<VolunteerOrientationStatus, number> = {
+		pending: 0, emailed: 1, scheduled: 2, completed: 3, no_showed: 4, disqualified: 5
+	};
+
+	$: sortedVolunteers = volunteers.slice().sort(
+		(a, b) => volStatusOrder[a.orientationStatus] - volStatusOrder[b.orientationStatus]
+	);
+
+	function setTripRating(key: string, r: BehaviorRating) {
+		if (key === 'tripDogs') tripDogs = tripDogs === r ? '' : r;
+		else if (key === 'tripStrangers') tripStrangers = tripStrangers === r ? '' : r;
+		else if (key === 'tripCats') tripCats = tripCats === r ? '' : r;
+		else tripKids = tripKids === r ? '' : r;
+	}
+
+	function getTripRating(key: string): BehaviorRating | '' {
+		if (key === 'tripDogs') return tripDogs;
+		if (key === 'tripStrangers') return tripStrangers;
+		if (key === 'tripCats') return tripCats;
+		return tripKids;
+	}
 
 	// ── Import state ──
 	let sheetData: { name: string; dates: string[] }[] = [];
@@ -60,6 +226,45 @@
 	let importing = false;
 	let importDone = false;
 	let importLog: string[] = [];
+
+	let fixingHours = false;
+	let fixHoursResult = '';
+	let fixHoursDryRunRows: { dogName: string; date: string; currentEnd: string }[] = [];
+	let fixHoursDryRunDone = false;
+
+	async function handleFixHoursDryRun() {
+		fixingHours = true;
+		fixHoursResult = '';
+		fixHoursDryRunRows = [];
+		fixHoursDryRunDone = false;
+		try {
+			const rows = await fixImportedTripHours(true);
+			fixHoursDryRunRows = rows as { dogName: string; date: string; currentEnd: string }[];
+			fixHoursDryRunDone = true;
+		} catch (e) {
+			fixHoursResult = 'Error — check console.';
+			console.error(e);
+		} finally {
+			fixingHours = false;
+		}
+	}
+
+	async function handleFixHours() {
+		fixingHours = true;
+		fixHoursResult = '';
+		try {
+			const count = await fixImportedTripHours(false);
+			fixHoursResult = `Fixed ${count as number} trip${(count as number) === 1 ? '' : 's'}.`;
+			fixHoursDryRunDone = false;
+			fixHoursDryRunRows = [];
+			if ((count as number) > 0) await refresh();
+		} catch (e) {
+			fixHoursResult = 'Error — check console.';
+			console.error(e);
+		} finally {
+			fixingHours = false;
+		}
+	}
 
 	// ── Merge duplicates ──
 	let merging = false;
@@ -519,10 +724,11 @@
 		try {
 			let dogRows: typeof dogs = [];
 			let colorsRes: Record<string, string> = {};
-			[dogRows, logs, colorsRes] = await Promise.all([
+			[dogRows, logs, colorsRes, volunteers] = await Promise.all([
 				listDogs(),
 				listAllDayTripLogs(),
-				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+				listVolunteers()
 			]);
 			sheetColors = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
 			dogs = dogRows;
@@ -597,6 +803,7 @@
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'log'} on:click={() => activeTab = 'log'}>Log</button>
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'dogs'} on:click={() => activeTab = 'dogs'}>Dogs</button>
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
+			<button class="dt-tab" class:dt-tab-active={activeTab === 'volunteers'} on:click={() => activeTab = 'volunteers'}>Volunteers{#if volunteers.length > 0}<span class="dt-tab-count">{volunteers.length}</span>{/if}</button>
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'import'} on:click={() => activeTab = 'import'}>Import</button>
 		</nav>
 
@@ -647,14 +854,15 @@
 						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
 							{@const effectiveSince = dog.shelterSince ?? dog.intakeDate}
-							{@const days = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
+							{@const displayDays = daysSince(dog.lastDayTripDate)}
+							{@const sinceReturnDays = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
 							{@const daysAtShelter = daysSince(effectiveSince) ?? 0}
-							{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
+							{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= 14 : daysAtShelter >= 14}
 							{@const stripe = dogStripeColor(dog, sheetColors)}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
-								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'} · {days !== null ? `${days}d ago` : 'No trips yet'}</p>
+								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'} · {displayDays !== null ? `${displayDays}d ago` : 'No trips yet'}</p>
 								<div class="cal-event-tags">
 									{#if eligibility.status === 'difficult'}<span class="cal-tag cal-tag-yellow">Adults only</span>{/if}
 									{#if overdue}<span class="cal-tag cal-tag-red">Overdue</span>{/if}
@@ -693,6 +901,91 @@
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}
+			<!-- Trip log form -->
+			<div class="dt-panel dt-logform-panel">
+				<div class="dt-panel-head">
+					<div>
+						<p class="dt-panel-title">Log a Trip</p>
+						<p class="dt-panel-sub">Transcribe a paper form or enter a completed trip.</p>
+					</div>
+				</div>
+
+				{#if tripSaved && tripCopyText}
+					<div class="trip-copy-block">
+						<p class="trip-copy-label">Saved — copy for ASM:</p>
+						<pre class="trip-copy-pre">{tripCopyText}</pre>
+						<div class="trip-copy-actions">
+							<button class="dt-import-btn dt-import-btn-go" on:click={() => copyToClipboard(tripCopyText)}>Copy</button>
+							<button class="dt-import-btn" on:click={resetTripForm}>Log another</button>
+						</div>
+					</div>
+				{:else}
+					<div class="trip-form-grid">
+						<div class="trip-field trip-field-wide">
+							<label class="trip-label" for="trip-dog">Dog</label>
+							<select id="trip-dog" class="trip-select" bind:value={tripDogId}>
+								<option value="">— select dog —</option>
+								{#each activeDogs as dog}
+									<option value={dog.id}>{dog.name}</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="trip-field trip-field-wide">
+							<label class="trip-label" for="trip-volunteer">Volunteer name</label>
+							<input id="trip-volunteer" class="trip-input" type="text" bind:value={tripVolunteerName} placeholder="Full name" />
+						</div>
+
+						<div class="trip-field">
+							<label class="trip-label" for="trip-date">Date</label>
+							<input id="trip-date" class="trip-input" type="date" bind:value={tripDate} />
+						</div>
+
+						<div class="trip-field">
+							<label class="trip-label" for="trip-time-out">Time out</label>
+							<input id="trip-time-out" class="trip-input" type="time" bind:value={tripTimeOut} />
+						</div>
+
+						<div class="trip-field">
+							<label class="trip-label" for="trip-time-back">Time back</label>
+							<input id="trip-time-back" class="trip-input" type="time" bind:value={tripTimeBack} />
+						</div>
+
+						<div class="trip-field trip-field-wide trip-ratings">
+							<p class="trip-label">Behavior ratings</p>
+							<div class="trip-ratings-grid">
+								{#each [['Dogs', 'tripDogs'], ['Strangers', 'tripStrangers'], ['Cats', 'tripCats'], ['Kids', 'tripKids']] as [label, key]}
+									<div class="trip-rating-row">
+										<span class="trip-rating-label">{label}</span>
+										<div class="trip-rating-btns">
+											{#each tripRatingOptions as r}
+												<button
+													type="button"
+													class="trip-rating-btn"
+													class:active={getTripRating(key) === r}
+													on:click={() => setTripRating(key, r)}
+												>{r === 'na' ? 'N/A' : r.charAt(0).toUpperCase() + r.slice(1)}</button>
+											{/each}
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+
+						<div class="trip-field trip-field-wide">
+							<label class="trip-label" for="trip-notes">Notes</label>
+							<textarea id="trip-notes" class="trip-textarea" bind:value={tripNotes} rows="3" placeholder="Any notes from the trip..."></textarea>
+						</div>
+
+						<div class="trip-field trip-field-wide trip-actions">
+							<button class="dt-import-btn dt-import-btn-go" on:click={submitTripLog} disabled={tripSaving || !tripDogId}>
+								{tripSaving ? 'Saving…' : 'Save & Generate Copy Text'}
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+
 			<div class="dt-panel">
 				<div class="dt-panel-head">
 					<div>
@@ -771,9 +1064,10 @@
 						<tbody>
 							{#each dogStatsRows as dog}
 								{@const effectiveSince = dog.shelterSince ?? dog.intakeDate}
-								{@const days = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
+								{@const displayDays = daysSince(dog.lastDayTripDate)}
+								{@const sinceReturnDays = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
 								{@const daysAtShelter = daysSince(effectiveSince) ?? 0}
-								{@const overdue = days !== null ? days >= 14 : daysAtShelter >= 14}
+								{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= 14 : daysAtShelter >= 14}
 								{@const eligibility = getEligibility(dog)}
 								{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 								<tr class:tr-overdue={overdue && eligibility.eligible && !dog.isOutOnDayTrip}>
@@ -787,8 +1081,8 @@
 										<span class="dt-alltime-num">{allTime}</span>
 									</td>
 									<td class="td-muted">
-										{#if days !== null}
-											{days}d ago{#if overdue && eligibility.eligible && !dog.isOutOnDayTrip}&thinsp;<span class="dt-overdue-flag">overdue</span>{/if}
+										{#if displayDays !== null}
+											{displayDays}d ago{#if overdue && eligibility.eligible && !dog.isOutOnDayTrip}&thinsp;<span class="dt-overdue-flag">overdue</span>{/if}
 										{:else}
 											never
 										{/if}
@@ -851,6 +1145,88 @@
 				</div>
 			</div>
 
+		<!-- ───── VOLUNTEERS ───── -->
+		{:else if activeTab === 'volunteers'}
+			<div class="dt-panel">
+				<div class="dt-panel-head">
+					<div>
+						<p class="dt-panel-title">Volunteers</p>
+						<p class="dt-panel-sub">{volunteers.length} volunteer{volunteers.length === 1 ? '' : 's'} · synced from spreadsheet</p>
+					</div>
+					<div class="vol-head-actions">
+						<button class="dt-import-btn" on:click={syncVolunteersFromSheet} disabled={volSyncing}>
+							{volSyncing ? 'Syncing…' : 'Sync from Sheet'}
+						</button>
+						{#if volSyncError}<span class="dt-import-error">{volSyncError}</span>{/if}
+					</div>
+				</div>
+
+				{#if volunteers.length === 0}
+					<p class="dt-panel-empty">No volunteers yet — click "Sync from Sheet" to load.</p>
+				{:else}
+					<div class="vol-list">
+						{#each sortedVolunteers as vol}
+							<div class="vol-row" class:vol-row-open={volExpandedId === vol.id}>
+								<button class="vol-row-header" on:click={() => {
+									volExpandedId = volExpandedId === vol.id ? null : vol.id;
+									if (!volNotesDraft[vol.id]) volNotesDraft[vol.id] = vol.internalNotes ?? '';
+								}}>
+									<span class="vol-name">{vol.name || '—'}</span>
+									<span class="vol-email">{vol.email}</span>
+									<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
+									<span class="vol-chevron">{volExpandedId === vol.id ? '▲' : '▼'}</span>
+								</button>
+
+								{#if volExpandedId === vol.id}
+									<div class="vol-detail">
+										<div class="vol-detail-grid">
+											<div class="vol-detail-field">
+												<span class="vol-detail-label">Submitted</span>
+												<span class="vol-detail-val">{vol.submittedAt || '—'}</span>
+											</div>
+											<div class="vol-detail-field">
+												<span class="vol-detail-label">Driver's license</span>
+												<span class="vol-detail-val">{vol.hasDriversLicense ? 'Yes' : 'No'}</span>
+											</div>
+											<div class="vol-detail-field">
+												<span class="vol-detail-label">18+</span>
+												<span class="vol-detail-val">{vol.is18Plus ? 'Yes' : 'No'}</span>
+											</div>
+											<div class="vol-detail-field">
+												<span class="vol-detail-label">Waiver signed</span>
+												<span class="vol-detail-val">{vol.waiverSigned ? 'Yes' : 'No'}</span>
+											</div>
+											{#if vol.dogExperience}
+												<div class="vol-detail-field vol-detail-full">
+													<span class="vol-detail-label">Dog experience</span>
+													<span class="vol-detail-val">{vol.dogExperience}</span>
+												</div>
+											{/if}
+											{#if vol.adventurePlans}
+												<div class="vol-detail-field vol-detail-full">
+													<span class="vol-detail-label">Adventure plans</span>
+													<span class="vol-detail-val">{vol.adventurePlans}</span>
+												</div>
+											{/if}
+											<div class="vol-detail-field vol-detail-full">
+												<label class="vol-detail-label" for="vol-notes-{vol.id}">Internal notes</label>
+												<textarea id="vol-notes-{vol.id}" class="vol-notes-input" rows="2"
+													bind:value={volNotesDraft[vol.id]}
+													placeholder="Staff notes…"></textarea>
+												<div class="vol-notes-actions">
+													<button class="dt-import-btn dt-import-btn-go" on:click={() => saveVolunteerNotes(vol.id)}>Save notes</button>
+													<button class="dt-import-btn vol-delete-btn" on:click={() => removeVolunteer(vol.id)}>Remove</button>
+												</div>
+											</div>
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
 		<!-- ───── IMPORT ───── -->
 		{:else if activeTab === 'import'}
 			<div class="dt-panel dt-import-panel">
@@ -882,7 +1258,50 @@
 					{#if importDone}
 						<span class="dt-import-done typewriter">Import complete!</span>
 					{/if}
+					<button class="dt-import-btn" on:click={handleFixHoursDryRun} disabled={fixingHours || importing}>
+						{fixingHours && !fixHoursDryRunDone ? 'Checking…' : 'Preview Hour Fix'}
+					</button>
+					{#if fixHoursDryRunDone}
+						<button class="dt-import-btn dt-import-btn-go" on:click={handleFixHours} disabled={fixingHours}>
+							{fixingHours ? 'Fixing…' : `Fix ${fixHoursDryRunRows.length} Trip${fixHoursDryRunRows.length === 1 ? '' : 's'}`}
+						</button>
+					{/if}
+					{#if fixHoursResult}
+						<span class="dt-import-done typewriter">{fixHoursResult}</span>
+					{/if}
 				</div>
+
+				{#if fixHoursDryRunDone}
+					<div class="dt-import-preview">
+						<p class="dt-import-section-label typewriter">Hour Fix Preview — {fixHoursDryRunRows.length} trip{fixHoursDryRunRows.length === 1 ? '' : 's'} to fix</p>
+						{#if fixHoursDryRunRows.length === 0}
+							<p class="dt-panel-sub typewriter">No imported trips with incorrect hours found.</p>
+						{:else}
+							<div class="dt-table-wrap">
+								<table class="dt-table dt-import-table">
+									<thead>
+										<tr>
+											<th>Dog</th>
+											<th>Trip Date</th>
+											<th>Current End Time</th>
+											<th>Will Become</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each fixHoursDryRunRows as row}
+											<tr>
+												<td class="typewriter">{row.dogName}</td>
+												<td class="typewriter">{row.date}</td>
+												<td class="typewriter td-muted">{row.currentEnd}</td>
+												<td class="typewriter td-muted">same as start (0h)</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{/if}
+					</div>
+				{/if}
 
 				{#if importDryRunDone}
 					<div class="dt-import-preview">
@@ -1550,6 +1969,210 @@
 	}
 
 	.dt-import-note p { margin: 0; font-size: 0.74rem; color: #594300; line-height: 1.5; }
+
+	/* ── Tab count badge ── */
+	.dt-tab-count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin-left: 0.3rem;
+		min-width: 1.2rem;
+		height: 1.2rem;
+		padding: 0 0.25rem;
+		border-radius: 999px;
+		font-size: 0.6rem;
+		font-weight: 700;
+		background: #e8f0fe;
+		color: #1a73e8;
+		vertical-align: middle;
+	}
+
+	/* ── Trip log form ── */
+	.dt-logform-panel { display: grid; gap: 0.9rem; }
+
+	.trip-form-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.7rem;
+	}
+
+	.trip-field { display: flex; flex-direction: column; gap: 0.3rem; }
+	.trip-field-wide { grid-column: 1 / -1; }
+
+	.trip-label {
+		font-size: 0.66rem;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: #5f6368;
+	}
+
+	.trip-input, .trip-select {
+		height: 2.1rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0 0.6rem;
+		font-size: 0.82rem;
+		color: #202124;
+		background: #fff;
+		width: 100%;
+	}
+
+	.trip-textarea {
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0.4rem 0.6rem;
+		font-size: 0.82rem;
+		color: #202124;
+		background: #fff;
+		resize: vertical;
+		width: 100%;
+		font-family: inherit;
+	}
+
+	.trip-ratings-grid { display: grid; gap: 0.4rem; }
+
+	.trip-rating-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.trip-rating-label {
+		font-size: 0.78rem;
+		color: #3c4043;
+		min-width: 5rem;
+	}
+
+	.trip-rating-btns { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+	.trip-rating-btn {
+		padding: 0.2rem 0.6rem;
+		border-radius: 4px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.72rem;
+		color: #5f6368;
+		cursor: pointer;
+	}
+
+	.trip-rating-btn.active { border-color: #016aa5; background: #e8f0fe; color: #016aa5; font-weight: 600; }
+	.trip-rating-btn:hover:not(.active) { background: #f8f9fa; }
+
+	.trip-actions { padding-top: 0.2rem; }
+
+	.trip-copy-block { display: grid; gap: 0.5rem; }
+
+	.trip-copy-label {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: #1e7e34;
+	}
+
+	.trip-copy-pre {
+		margin: 0;
+		padding: 0.75rem 1rem;
+		background: #f8f9fa;
+		border: 1px solid #dadce0;
+		border-radius: 6px;
+		font-size: 0.8rem;
+		line-height: 1.6;
+		white-space: pre-wrap;
+		color: #202124;
+	}
+
+	.trip-copy-actions { display: flex; gap: 0.5rem; }
+
+	/* ── Volunteers ── */
+	.vol-head-actions { display: flex; align-items: center; gap: 0.5rem; }
+
+	.vol-list { display: flex; flex-direction: column; gap: 0.4rem; }
+
+	.vol-row {
+		border: 1px solid #dadce0;
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.vol-row-header {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.55rem 0.75rem;
+		background: #fff;
+		border: none;
+		cursor: pointer;
+		text-align: left;
+		font-size: 0.82rem;
+	}
+
+	.vol-row-header:hover { background: #f8f9fa; }
+
+	.vol-name { font-weight: 600; color: #202124; flex: 1; min-width: 0; }
+	.vol-email { color: #5f6368; font-size: 0.74rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.vol-chevron { font-size: 0.6rem; color: #9aa0a6; margin-left: auto; }
+
+	.vol-status {
+		display: inline-flex;
+		padding: 0.12rem 0.45rem;
+		border-radius: 999px;
+		font-size: 0.62rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.vol-status-green  { background: #e6f4ea; color: #1e7e34; }
+	.vol-status-blue   { background: #e8f0fe; color: #1a73e8; }
+	.vol-status-yellow { background: #fef7e0; color: #b06000; }
+	.vol-status-red    { background: #fce8e6; color: #c5221f; }
+	.vol-status-gray   { background: #f1f3f4; color: #5f6368; }
+
+	.vol-detail {
+		padding: 0.75rem;
+		border-top: 1px solid #f1f3f4;
+		background: #fafafa;
+	}
+
+	.vol-detail-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.6rem;
+	}
+
+	.vol-detail-full { grid-column: 1 / -1; }
+
+	.vol-detail-field { display: flex; flex-direction: column; gap: 0.2rem; }
+
+	.vol-detail-label {
+		font-size: 0.62rem;
+		font-weight: 600;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		color: #9aa0a6;
+	}
+
+	.vol-detail-val {
+		font-size: 0.78rem;
+		color: #202124;
+		line-height: 1.4;
+	}
+
+	.vol-notes-input {
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		padding: 0.4rem 0.6rem;
+		font-size: 0.78rem;
+		color: #202124;
+		font-family: inherit;
+		resize: vertical;
+		width: 100%;
+		background: #fff;
+	}
+
+	.vol-notes-actions { display: flex; gap: 0.5rem; margin-top: 0.3rem; }
+	.vol-delete-btn { color: #c5221f; border-color: #f5c6cb; }
+	.vol-delete-btn:hover:not(:disabled) { background: #fce8e6; }
 
 	/* ── Responsive ── */
 	@media (min-width: 768px) {

@@ -8,7 +8,8 @@
 	import { listDogs, updateDog, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
-	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { getBathStatus, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -24,9 +25,6 @@
 		action?: 'log_bath';
 	};
 
-	const BATH_DUE_DAYS = 7;
-	const ACTIVITY_WARNING_DAYS = 2;
-	const ACTIVITY_DUE_DAYS = 3;
 const today = new Date();
 
 	let dogs: Dog[] = [];
@@ -380,9 +378,7 @@ const today = new Date();
 
 	function isBathDue(dog: Dog) {
 		if (dog.inFoster) return false;
-		if (!bathEligible(dog.surgeryDate, today)) return false;
-		const sinceLastBath = daysSince(sinceReturn(dog.lastBathDate, dog.shelterSince ?? dog.intakeDate), today);
-		return sinceLastBath === null || sinceLastBath >= BATH_DUE_DAYS;
+		return getBathStatus(dog, today).isDue;
 	}
 
 	function missingEvaluations(dog: Dog) {
@@ -456,23 +452,9 @@ const today = new Date();
 		if (!dog.awaitingEvaluation && tripEligibility.eligible) {
 			const dayTripGap = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince ?? dog.intakeDate), today);
 			if (dayTripGap === null) {
-				items.push({
-					label: 'No day trip logged yet.',
-					tone: 'info',
-					priority: 68
-				});
-			} else if (dayTripGap >= ACTIVITY_DUE_DAYS) {
-				items.push({
-					label: `${dayTripGap} days since last day trip.`,
-					tone: 'info',
-					priority: 66
-				});
-			} else if (dayTripGap >= ACTIVITY_WARNING_DAYS) {
-				items.push({
-					label: `${dayTripGap} days since last day trip (watch).`,
-					tone: 'info',
-					priority: 64
-				});
+				items.push({ label: 'No day trip logged yet.', tone: 'info', priority: 68 });
+			} else if (dayTripGap >= DAYTRIP_OVERDUE_DAYS) {
+				items.push({ label: `${dayTripGap} days since last day trip — overdue.`, tone: 'info', priority: 66 });
 			}
 		}
 
@@ -482,23 +464,9 @@ const today = new Date();
 		if (!dog.awaitingEvaluation && isPlaygroupReady) {
 			const playgroupGap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince ?? dog.intakeDate), today);
 			if (playgroupGap === null) {
-				items.push({
-					label: 'No playgroup logged yet.',
-					tone: 'info',
-					priority: 63
-				});
-			} else if (playgroupGap >= ACTIVITY_DUE_DAYS) {
-				items.push({
-					label: `${playgroupGap} days since last playgroup.`,
-					tone: 'info',
-					priority: 62
-				});
-			} else if (playgroupGap >= ACTIVITY_WARNING_DAYS) {
-				items.push({
-					label: `${playgroupGap} days since last playgroup (watch).`,
-					tone: 'info',
-					priority: 61
-				});
+				items.push({ label: 'No playgroup logged yet.', tone: 'info', priority: 63 });
+			} else if (playgroupGap >= PLAYGROUP_OVERDUE_DAYS) {
+				items.push({ label: `${playgroupGap} days since last playgroup — overdue.`, tone: 'info', priority: 62 });
 			}
 		}
 
@@ -512,8 +480,13 @@ const today = new Date();
 		}
 
 		if (bathDue) {
+			const bathStatus = getBathStatus(dog, today);
 			items.push({
-				label: 'Bath is due.',
+				label: bathStatus.isNewIntake
+					? 'Bath needed (new intake).'
+					: bathStatus.overdueDays !== null && bathStatus.overdueDays > 0
+						? `Bath overdue by ${bathStatus.overdueDays} day${bathStatus.overdueDays === 1 ? '' : 's'}.`
+						: 'Bath is due.',
 				tone: 'ready',
 				priority: 59,
 				action: 'log_bath'
