@@ -10,7 +10,7 @@
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
-	import { canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
+	import { canAccessVolunteers, canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { backfillBathLogsFromDogs } from '$lib/data/dogs';
 	import { syncVersion } from '$lib/stores/sync';
@@ -28,6 +28,7 @@
 			| 'daytrips'
 			| 'playgroups'
 			| 'medical'
+			| 'volunteers'
 			| 'admin';
 	};
 
@@ -38,9 +39,10 @@
 		{ href: '/feeding', label: 'Feeding', colorClass: 'tab-blue', icon: 'feeding' },
 		{ href: '/cleaning', label: 'Cleaning', colorClass: 'tab-green', icon: 'cleaning' }
 	];
-	const dayTripsTab: TabItem = { href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' };
 	const playgroupsTab: TabItem = { href: '/playgroups', label: 'Playgroups', colorClass: 'tab-blue', icon: 'playgroups' };
 	const medicalTab: TabItem = { href: '/medical', label: 'Medical', colorClass: 'tab-red', icon: 'medical' };
+	const dayTripsTab: TabItem = { href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' };
+	const volunteersTab: TabItem = { href: '/volunteers', label: 'Volunteers', colorClass: 'tab-green', icon: 'volunteers' };
 	const adminTab: TabItem = { href: '/admin', label: 'Admin', colorClass: 'tab-accent', icon: 'admin' };
 	let tabs: TabItem[] = baseTabs;
 	let currentTabIndex = 0;
@@ -211,11 +213,15 @@
 	$: currentPath = $page.url.pathname;
 	$: isAdmin = $authProfile?.role === 'admin';
 
+	$: canViewVolunteers = canAccessVolunteers($authProfile?.role);
 	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
 	$: tabs = [
 		...baseTabs,
 		playgroupsTab,
 		medicalTab,
+		...(canViewDayTrips ? [dayTripsTab] : []),
+		// volunteers tab hidden until ready
+		// ...(canViewVolunteers ? [volunteersTab] : []),
 		...(isAdmin ? [adminTab] : [])
 	];
 	$: {
@@ -423,7 +429,13 @@
 											<path d="M14.4 17.5c.4-1.6 1.8-2.7 3.3-2.7 1.2 0 2.2.6 2.9 1.7"></path>
 										{:else if tab.icon === 'medical'}
 											<path d="M12 5v14M5 12h14" stroke-linecap="round"></path>
-										{:else if tab.icon === 'admin'}
+										{:else if tab.icon === 'volunteers'}
+										<circle cx="9" cy="7.5" r="2.5"></circle>
+										<path d="M4 19v-1.5C4 14.9 6.2 13 9 13s5 1.9 5 4.5V19"></path>
+										<circle cx="17" cy="8.5" r="2"></circle>
+										<path d="M15.5 19v-1c0-1.7 1.1-3.1 2.7-3.6"></path>
+										<path d="M20 19v-1c-.1-1.2-.7-2.2-1.5-2.9"></path>
+									{:else if tab.icon === 'admin'}
 											<path d="M12 3.8 18.7 6.7v4.1c0 4.2-2.6 7.7-6.7 9.4C7.9 18.5 5.3 15 5.3 10.8V6.7z"></path>
 											<path d="M12 8.4v4.7"></path>
 											<circle cx="12" cy="15.8" r="0.8" fill="currentColor" stroke="none"></circle>

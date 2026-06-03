@@ -13,7 +13,19 @@ export function canEditPlaygroups(role: UserRole | null | undefined) {
 }
 
 export function canAccessDayTrips(role: UserRole | null | undefined) {
-	return role === 'admin' || role === 'manager';
+	return role === 'admin' || role === 'manager' || role === 'coordinator';
+}
+
+export function canEditDayTrips(role: UserRole | null | undefined) {
+	return role === 'admin' || role === 'coordinator';
+}
+
+export function canAccessVolunteers(role: UserRole | null | undefined) {
+	return role === 'admin' || role === 'manager' || role === 'coordinator';
+}
+
+export function canEditVolunteers(role: UserRole | null | undefined) {
+	return role === 'admin' || role === 'coordinator';
 }
 
 export function roleLabel(role: UserRole | null | undefined) {
@@ -27,6 +39,7 @@ export function resolveRole(profile: UserProfile | null | undefined, fallbackRol
 const roleRank: Record<UserRole, number> = {
 	volunteer: 0,
 	staff: 1,
+	coordinator: 2,
 	manager: 2,
 	admin: 3
 };

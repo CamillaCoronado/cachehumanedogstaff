@@ -1260,6 +1260,16 @@ export async function logDayTrip(dogId: string, profile?: UserProfile | null, no
 	});
 }
 
+// Visual-only toggle — updates the dog's status without creating a trip log entry.
+export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<void> {
+	const now = new Date();
+	if (isOut) {
+		await updateDog(dogId, { isOutOnDayTrip: true, currentDayTripStartedAt: now });
+	} else {
+		await updateDog(dogId, { isOutOnDayTrip: false, currentDayTripStartedAt: null, lastDayTripDate: now });
+	}
+}
+
 export async function startDayTrip(dogId: string, profile?: UserProfile | null, notes?: string | null) {
 	const identity = getUserIdentity(profile);
 	const now = new Date();

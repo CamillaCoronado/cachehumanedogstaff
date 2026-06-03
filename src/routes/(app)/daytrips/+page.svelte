@@ -1,12 +1,16 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
+	import { Chart, BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, BarController, LineController } from 'chart.js';
 	import toast from 'svelte-french-toast';
+
+	Chart.register(BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, BarController, LineController);
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
-	import { canAccessDayTrips, resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog, fixImportedTripHours, logManualTrip } from '$lib/data/dogs';
-	import { listVolunteers, syncVolunteers, updateVolunteerNotes, updateOrientationDate, updateVolunteerStatus, deleteVolunteer } from '$lib/data/volunteers';
-	import type { BehaviorRating, DayTripLog, Dog, UserRole, Volunteer, VolunteerOrientationStatus } from '$lib/types';
+	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, resolveRole } from '$lib/utils/permissions';
+	import { listDogs, startDayTrip, endDayTrip, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog, fixImportedTripHours, logManualTrip } from '$lib/data/dogs';
+	import { listVolunteers } from '$lib/data/volunteers';
+	import type { BehaviorRating, DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 
 	const now = new Date();
@@ -18,208 +22,11 @@
 	let loading = true;
 	let monthFilter = defaultMonth;
 	let loaded = false;
-	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'volunteers' | 'import' = 'board';
+	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'import' = 'board';
 	let boardColorFilter: 'green' | 'yellow' | null = null;
 
-	// ── Volunteers state ──
+	// ── Volunteers (loaded for trip form dropdown) ──
 	let volunteers: Volunteer[] = [];
-	let volSyncing = false;
-	let volSyncError = '';
-	let volExpandedId: string | null = null;
-	let volNotesDraft: Record<string, string> = {};
-	let volOrientationDraft: Record<string, string> = {};
-	let volSearch = '';
-	let volStatusFilter = 'all';
-	// IDs where user clicked "Scheduled" but hasn't picked a date yet
-	let volAwaitingDate = new Set<string>();
-
-	async function syncVolunteersFromSheet() {
-		volSyncing = true;
-		volSyncError = '';
-		try {
-			const res = await fetch('/api/sheets/volunteers');
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const payload = await res.json();
-			const rows = Array.isArray(payload) ? payload : (payload.rows ?? []);
-			const diagnostics = Array.isArray(payload) ? null : payload.diagnostics;
-			if (diagnostics) logDtvSheetDiagnostics(diagnostics);
-			await syncVolunteers(rows);
-			volunteers = await listVolunteers();
-			logDtvAppComparison(rows, volunteers);
-			toast.success(`${volunteers.length} volunteers synced.`);
-		} catch (e) {
-			volSyncError = e instanceof Error ? e.message : String(e);
-		} finally {
-			volSyncing = false;
-		}
-	}
-
-	function logDtvSheetDiagnostics(diagnostics: {
-		skippedRows?: Array<{ sheet: string; rowNumber: number; reason: string; name?: string; email?: string }>;
-		establishedRawDataRows?: number;
-		establishedRowsRead?: number;
-		establishedRowsReturned?: number;
-		establishedRowsExpected?: number;
-		volunteerRowsReturned?: number;
-	}) {
-		const skippedRows = diagnostics.skippedRows ?? [];
-		const skippedDtvRows = diagnostics.skippedRows?.filter((row) => row.sheet === 'Established DTVs') ?? [];
-		const skippedResponseRows = skippedRows.filter((row) => row.sheet !== 'Established DTVs');
-		console.info('[DTV sheet sync] DTV tab counts', {
-			rawDataRowsAfterHeader: diagnostics.establishedRawDataRows,
-			nonBlankRows: diagnostics.establishedRowsRead,
-			dtvRowsLoadedFromTab: diagnostics.establishedRowsReturned,
-			expectedDtvRowsInApp: diagnostics.establishedRowsExpected,
-			allVolunteerRowsReturned: diagnostics.volunteerRowsReturned,
-			skippedDtvRows: skippedDtvRows.length,
-			skippedResponseRows: skippedResponseRows.length,
-			totalSkippedRows: skippedRows.length
-		});
-		for (const row of skippedDtvRows) {
-			console.warn('[DTV sheet sync] skipped DTV tab row', row);
-		}
-	}
-
-	function volunteerIdentity(name: string | null | undefined, email: string | null | undefined): string {
-		return `${(name ?? '').toLowerCase().replace(/\s+/g, ' ').trim()}|${(email ?? '').toLowerCase().trim()}`;
-	}
-
-	function logDtvAppComparison(
-		sheetRows: Array<{ name?: string; email?: string; isEstablished?: boolean }>,
-		appVolunteers: Volunteer[]
-	) {
-		const sheetDtvRows = sheetRows.filter((row) => row.isEstablished);
-		const sheetDtvIdentities = new Set(
-			sheetDtvRows.map((row) => volunteerIdentity(row.name, row.email))
-		);
-		const appDtvRows = appVolunteers.filter((volunteer) => volunteer.isEstablished);
-		const appDtvIdentityMap = new Map<string, Volunteer[]>();
-		for (const volunteer of appDtvRows) {
-			const identity = volunteerIdentity(volunteer.name, volunteer.email);
-			appDtvIdentityMap.set(identity, [...(appDtvIdentityMap.get(identity) ?? []), volunteer]);
-		}
-		const duplicateAppDtvRows = [...appDtvIdentityMap.entries()].filter(([, rows]) => rows.length > 1);
-		const appOnlyDtvRows = appDtvRows.filter(
-			(volunteer) => !sheetDtvIdentities.has(volunteerIdentity(volunteer.name, volunteer.email))
-		);
-		console.info('[DTV sheet sync] App DTV comparison', {
-			sheetDtvRowsReturned: sheetDtvRows.length,
-			sheetDtvUniqueIdentities: sheetDtvIdentities.size,
-			appDtvRows: appDtvRows.length,
-			appDtvUniqueIdentities: appDtvIdentityMap.size,
-			duplicateAppDtvIdentities: duplicateAppDtvRows.length,
-			appOnlyDtvRows: appOnlyDtvRows.length
-		});
-		for (const [identity, rows] of duplicateAppDtvRows) {
-			console.warn('[DTV sheet sync] duplicate DTV identity in app', {
-				identity,
-				records: rows.map((volunteer) => ({
-					id: volunteer.id,
-					name: volunteer.name,
-					email: volunteer.email
-				}))
-			});
-		}
-		for (const volunteer of appOnlyDtvRows) {
-			console.warn('[DTV sheet sync] DTV in app but not current sheet import', {
-				id: volunteer.id,
-				name: volunteer.name,
-				email: volunteer.email
-			});
-		}
-	}
-
-	async function saveVolunteerNotes(id: string) {
-		await updateVolunteerNotes(id, volNotesDraft[id] ?? '');
-		volunteers = volunteers.map((v) => v.id === id ? { ...v, internalNotes: volNotesDraft[id] ?? '' } : v);
-		toast.success('Notes saved.');
-	}
-
-	async function removeVolunteer(id: string) {
-		await deleteVolunteer(id);
-		volunteers = volunteers.filter((v) => v.id !== id);
-	}
-
-	async function changeVolunteerStatus(id: string, status: VolunteerOrientationStatus) {
-		await updateVolunteerStatus(id, status);
-		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationStatus: status } : v);
-	}
-
-	function setVolStep(id: string, s: string, orientationDate: string | null | undefined) {
-		if (s === 'scheduled') {
-			// Don't commit status yet — show the date picker and wait for a date
-			volOrientationDraft[id] = volOrientationDraft[id] ?? orientationDate ?? '';
-			volAwaitingDate = new Set([...volAwaitingDate, id]);
-			return;
-		}
-		// Cancelling a pending schedule pick
-		volAwaitingDate = new Set([...volAwaitingDate].filter((x) => x !== id));
-		changeVolunteerStatus(id, s as VolunteerOrientationStatus);
-	}
-
-	async function confirmScheduled(id: string, date: string) {
-		if (!date) return;
-		await updateOrientationDate(id, date);
-		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationDate: date, orientationStatus: 'scheduled' } : v);
-		volAwaitingDate = new Set([...volAwaitingDate].filter((x) => x !== id));
-	}
-
-	async function saveOrientationDate(id: string, date: string) {
-		await updateOrientationDate(id, date);
-		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationDate: date || null } : v);
-		toast.success('Orientation date saved.');
-	}
-
-	function formatOrientationDate(d: string | null | undefined): string {
-		if (!d) return '—';
-		const [y, m, day] = d.split('-').map(Number);
-		return new Date(y, m - 1, day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-	}
-
-	function addOrientationToCalendar(date: string, names: string[]) {
-		const d = date.replace(/-/g, '');
-		const [y, mo, day] = date.split('-').map(Number);
-		const next = new Date(y, mo - 1, day + 1);
-		const dEnd = `${next.getFullYear()}${String(next.getMonth() + 1).padStart(2, '0')}${String(next.getDate()).padStart(2, '0')}`;
-		const details = names.length ? `Volunteers: ${names.join(', ')}` : '';
-		const params = new URLSearchParams({
-			action: 'TEMPLATE',
-			text: 'Dog Day Trip Orientation',
-			dates: `${d}/${dEnd}`,
-			details
-		});
-		window.open(`https://calendar.google.com/calendar/render?${params}`, '_blank');
-	}
-
-const today = new Date().toISOString().split('T')[0];
-
-	$: overdueScheduled = volunteers.filter(
-		(v) => v.orientationStatus === 'scheduled' && v.orientationDate && v.orientationDate < today
-	);
-	$: needsOutreach = volunteers.filter(
-		(v) => !v.isEstablished && v.orientationStatus === 'pending'
-	);
-	$: volAttentionList = [...overdueScheduled, ...needsOutreach];
-
-	$: upcomingOrientations = volunteers
-		.filter((v) => v.orientationStatus === 'scheduled' && v.orientationDate && v.orientationDate >= today)
-		.sort((a, b) => (a.orientationDate ?? '').localeCompare(b.orientationDate ?? ''));
-
-	function statusLabel(s: VolunteerOrientationStatus): string {
-		const map: Record<VolunteerOrientationStatus, string> = {
-			pending: 'Pending', emailed: 'Emailed', scheduled: 'Scheduled',
-			signed_waiver: 'Signed Waiver', answered_no: 'Answered No', no_showed: 'No-showed'
-		};
-		return map[s] ?? s;
-	}
-
-	function statusClass(s: VolunteerOrientationStatus): string {
-		if (s === 'signed_waiver') return 'vol-status-green';
-		if (s === 'scheduled') return 'vol-status-blue';
-		if (s === 'emailed') return 'vol-status-yellow';
-		if (s === 'no_showed' || s === 'answered_no') return 'vol-status-red';
-		return 'vol-status-gray';
-	}
 
 	// ── Trip log form state ──
 	const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -313,54 +120,6 @@ const today = new Date().toISOString().split('T')[0];
 
 	const tripRatingOptions: BehaviorRating[] = ['good', 'neutral', 'reactive', 'na'];
 
-	const volStatusOrder: Record<VolunteerOrientationStatus, number> = {
-		pending: 0, emailed: 1, scheduled: 2, signed_waiver: 3, no_showed: 4, answered_no: 5
-	};
-
-	$: volFlaggedCount = volunteers.filter((v) => !v.isEstablished && (v.orientationStatus === 'no_showed' || v.orientationStatus === 'answered_no')).length;
-	$: volFilterPills = [
-		['all',          'All',       volunteers.length],
-		['attention',    'Attention', volAttentionList.length],
-		['pending',      'Pending',   volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'pending').length],
-		['emailed',      'Emailed',   volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'emailed').length],
-		['scheduled',    'Scheduled', volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'scheduled').length],
-		['signed_waiver','Signed',    volunteers.filter((v) => !v.isEstablished && v.orientationStatus === 'signed_waiver').length],
-		['established',  'DTVs',      volunteers.filter((v) => v.isEstablished).length],
-		['flagged',      'Flagged',   volFlaggedCount],
-	] as [string, string, number][];
-
-	$: filteredVolunteers = volunteers
-		.filter((v) => {
-			// Always keep the currently-expanded card visible so status changes don't
-			// yank it from view mid-edit (e.g. changing Pending → Scheduled before setting date)
-			if (v.id === volExpandedId) return true;
-			if (volSearch.trim()) {
-				const q = volSearch.toLowerCase();
-				if (!(v.name + ' ' + v.email).toLowerCase().includes(q)) return false;
-			}
-			switch (volStatusFilter) {
-				case 'all': return true;
-				case 'attention': return volAttentionList.some((a) => a.id === v.id);
-				case 'established': return v.isEstablished;
-				case 'flagged': return !v.isEstablished && (v.orientationStatus === 'no_showed' || v.orientationStatus === 'answered_no');
-				default: return !v.isEstablished && v.orientationStatus === volStatusFilter;
-			}
-		})
-		.sort((a, b) => {
-			const aAttn = volAttentionList.some((x) => x.id === a.id);
-			const bAttn = volAttentionList.some((x) => x.id === b.id);
-			if (aAttn && !bAttn) return -1;
-			if (!aAttn && bAttn) return 1;
-			if (a.isEstablished && !b.isEstablished) return 1;
-			if (!a.isEstablished && b.isEstablished) return -1;
-			const ao = volStatusOrder[a.orientationStatus] ?? 99;
-			const bo = volStatusOrder[b.orientationStatus] ?? 99;
-			if (ao !== bo) return ao - bo;
-			if (a.orientationStatus === 'scheduled' && b.orientationStatus === 'scheduled')
-				return (a.orientationDate ?? 'zzz').localeCompare(b.orientationDate ?? 'zzz');
-			return (a.name ?? '').localeCompare(b.name ?? '');
-		});
-
 	function setTripRating(key: string, r: BehaviorRating) {
 		if (key === 'tripDogs') tripDogs = tripDogs === r ? '' : r;
 		else if (key === 'tripStrangers') tripStrangers = tripStrangers === r ? '' : r;
@@ -374,6 +133,89 @@ const today = new Date().toISOString().split('T')[0];
 		if (key === 'tripCats') return tripCats;
 		return tripKids;
 	}
+
+	// ── Sheet stats state (2024/2025/2026 Day Trip Data Chart tabs) ──
+	interface MonthStat { name: string; hours: number; trips: number; }
+	interface YearStat { year: number; months: MonthStat[]; totalHours: number; totalTrips: number; error: string | null; }
+
+	let sheetStatsData: YearStat[] = [];
+	let sheetStatsLoading = false;
+	let sheetStatsError = '';
+	let sheetStatsLoaded = false;
+	let statsYearFilter = new Date().getFullYear();
+
+	async function loadSheetStats() {
+		if (sheetStatsLoaded || sheetStatsLoading) return;
+		sheetStatsLoading = true;
+		sheetStatsError = '';
+		try {
+			const res = await fetch('/api/sheets/stats');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			sheetStatsData = await res.json();
+			sheetStatsLoaded = true;
+		} catch (e) {
+			sheetStatsError = e instanceof Error ? e.message : String(e);
+		} finally {
+			sheetStatsLoading = false;
+		}
+	}
+
+	$: if (activeTab === 'stats' && !sheetStatsLoaded && !sheetStatsLoading) {
+		void loadSheetStats();
+	}
+
+	$: selectedYearStat = sheetStatsData.find((y) => y.year === statsYearFilter) ?? null;
+
+	let statsCanvas: HTMLCanvasElement | null = null;
+	let statsChart: Chart | null = null;
+
+	function buildChart() {
+		if (!statsCanvas || !selectedYearStat) return;
+		statsChart?.destroy();
+		const labels = selectedYearStat.months.map((m) => m.name.slice(0, 3));
+		const trips   = selectedYearStat.months.map((m) => m.trips);
+		const hours   = selectedYearStat.months.map((m) => Math.round(m.hours));
+		statsChart = new Chart(statsCanvas, {
+			type: 'bar',
+			data: {
+				labels,
+				datasets: [
+					{
+						label: 'Trips',
+						data: trips,
+						backgroundColor: 'rgba(1, 106, 165, 0.8)',
+						borderRadius: 4
+					},
+					{
+						label: 'Hours',
+						data: hours,
+						backgroundColor: 'rgba(58, 175, 42, 0.75)',
+						borderRadius: 4
+					}
+				]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				interaction: { mode: 'index', intersect: false },
+				plugins: {
+					legend: { position: 'top', labels: { font: { size: 12 }, boxWidth: 14 } },
+					tooltip: { callbacks: {
+						label: (ctx) => ctx.dataset.label === 'Hours'
+							? ` ${ctx.parsed.y}h`
+							: ` ${ctx.parsed.y} trips`
+					}}
+				},
+				scales: {
+					y: { beginAtZero: true, ticks: { precision: 0 } }
+				}
+			}
+		});
+	}
+
+	$: if (statsCanvas && selectedYearStat) buildChart();
+
+	onDestroy(() => { statsChart?.destroy(); });
 
 	// ── Import state ──
 	let sheetData: { name: string; dates: string[] }[] = [];
@@ -757,8 +599,13 @@ const today = new Date().toISOString().split('T')[0];
 	$: activeDogs = dogs
 		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
 		.sort((a, b) => a.name.localeCompare(b.name));
+
+	$: establishedDTVs = volunteers
+		.filter((v) => (v.volunteerType ?? 'dtv') === 'dtv' && v.isEstablished)
+		.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
+	$: canEditDayTrips = checkCanEditDayTrips($authProfile?.role);
 
 	$: monthStart = (() => {
 		const [year, month] = monthFilter.split('-').map(Number);
@@ -949,14 +796,14 @@ const today = new Date().toISOString().split('T')[0];
 	async function toggleOut(dog: Dog) {
 		const eligibility = getEligibility(dog);
 		if (dog.isOutOnDayTrip) {
-			await endDayTrip(dog.id, $authProfile);
+			await setDogTripStatus(dog.id, false);
 			toast.success(`${dog.name} marked as returned.`);
 		} else {
 			if (!eligibility.eligible) {
 				toast.error(eligibility.reasons[0] ?? `${dog.name} is not eligible for day trips.`);
 				return;
 			}
-			await startDayTrip(dog.id, $authProfile);
+			await setDogTripStatus(dog.id, true);
 			toast.success(`${dog.name} marked as out on day trip.`);
 		}
 		await refresh();
@@ -970,9 +817,6 @@ const today = new Date().toISOString().split('T')[0];
 		<p class="dt-restricted-sub">Day trips are available to manager and admin accounts only.</p>
 	</div>
 {:else}
-	<div class="dt-construction-banner">
-		🚧 Day Trips is under construction — it'll be back soon with improvements!
-	</div>
 	<div class="dt-shell">
 
 		<!-- Top bar -->
@@ -984,7 +828,6 @@ const today = new Date().toISOString().split('T')[0];
 				<span class="dt-chip">{monthLabel} · {monthlyTripCount} trips · {monthlyHourTotal.toFixed(1)}h</span>
 			</div>
 			<div class="dt-topbar-right">
-				<input type="month" class="dt-month-input" bind:value={monthFilter} />
 				<button class="dt-btn-sm" on:click={refresh}>Refresh</button>
 			</div>
 		</div>
@@ -992,11 +835,10 @@ const today = new Date().toISOString().split('T')[0];
 		<!-- Tab bar -->
 		<nav class="dt-tabbar" aria-label="Day trip views">
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'board'} on:click={() => activeTab = 'board'}>Board</button>
-			<button class="dt-tab" class:dt-tab-active={activeTab === 'log'} on:click={() => activeTab = 'log'}>Log</button>
+			{#if canEditDayTrips}<button class="dt-tab" class:dt-tab-active={activeTab === 'log'} on:click={() => activeTab = 'log'}>Log</button>{/if}
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'dogs'} on:click={() => activeTab = 'dogs'}>Dogs</button>
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
-			<button class="dt-tab" class:dt-tab-active={activeTab === 'volunteers'} on:click={() => activeTab = 'volunteers'}>Volunteers{#if volunteers.length > 0}<span class="dt-tab-count">{volunteers.length}</span>{/if}</button>
-			<button class="dt-tab" class:dt-tab-active={activeTab === 'import'} on:click={() => activeTab = 'import'}>Import</button>
+			{#if canEditDayTrips}<button class="dt-tab" class:dt-tab-active={activeTab === 'import'} on:click={() => activeTab = 'import'}>Import</button>{/if}
 		</nav>
 
 		{#if loading}
@@ -1093,7 +935,8 @@ const today = new Date().toISOString().split('T')[0];
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}
-			<!-- Trip log form -->
+			<!-- Trip log form (coordinators only) -->
+			{#if canEditDayTrips}
 			<div class="dt-panel dt-logform-panel">
 				<div class="dt-panel-head">
 					<div>
@@ -1124,8 +967,13 @@ const today = new Date().toISOString().split('T')[0];
 						</div>
 
 						<div class="trip-field trip-field-wide">
-							<label class="trip-label" for="trip-volunteer">Volunteer name</label>
-							<input id="trip-volunteer" class="trip-input" type="text" bind:value={tripVolunteerName} placeholder="Full name" />
+							<label class="trip-label" for="trip-volunteer">Volunteer</label>
+							<select id="trip-volunteer" class="trip-select" bind:value={tripVolunteerName}>
+								<option value="">— select volunteer —</option>
+								{#each establishedDTVs as vol}
+									<option value={vol.name}>{vol.name}</option>
+								{/each}
+							</select>
 						</div>
 
 						<div class="trip-field">
@@ -1230,6 +1078,7 @@ const today = new Date().toISOString().split('T')[0];
 					</div>
 				{/if}
 			</div>
+			{/if}<!-- end canEditDayTrips log form -->
 
 		<!-- ───── DOGS ───── -->
 		{:else if activeTab === 'dogs'}
@@ -1297,256 +1146,45 @@ const today = new Date().toISOString().split('T')[0];
 
 		<!-- ───── STATS ───── -->
 		{:else if activeTab === 'stats'}
-			<div class="dt-panel">
-				<div class="dt-panel-head">
-					<div>
-						<p class="dt-panel-title">{currentYear} Summary</p>
-						<p class="dt-panel-sub">{yearTripTotal} trips · {yearHourTotal.toFixed(1)} hrs total</p>
+			{#if sheetStatsLoading}
+				<p class="dt-loading">Loading stats from spreadsheet…</p>
+			{:else if sheetStatsError}
+				<p class="dt-import-error">{sheetStatsError}</p>
+			{:else if selectedYearStat}
+				<!-- Year selector + summary -->
+				<div class="dt-stats-header">
+					<div class="dt-stats-year-pills">
+						{#each sheetStatsData as y}
+							<button
+								class="dt-stats-year-btn"
+								class:dt-stats-year-active={statsYearFilter === y.year}
+								on:click={() => statsYearFilter = y.year}
+							>{y.year}</button>
+						{/each}
 					</div>
-				</div>
-
-				<div class="dt-table-wrap">
-					<table class="dt-table dt-table-stats">
-						<thead>
-							<tr>
-								<th>Month</th>
-								<th class="th-center">Trips</th>
-								<th class="th-center">Hours</th>
-								<th class="th-center">Avg per Trip</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each yearlyStats as month}
-								<tr class:tr-empty={month.trips === 0}>
-									<td class="td-month-name">{month.name}</td>
-									<td class="td-center typewriter">{month.trips > 0 ? month.trips : '—'}</td>
-									<td class="td-center typewriter">{month.hours > 0 ? month.hours.toFixed(1) : '—'}</td>
-									<td class="td-center typewriter">{month.trips > 0 ? formatDuration(month.hours / month.trips) : '—'}</td>
-								</tr>
-							{/each}
-						</tbody>
-						<tfoot>
-							<tr class="dt-table-foot">
-								<td class="td-foot-label typewriter">Total</td>
-								<td class="td-center typewriter">{yearTripTotal}</td>
-								<td class="td-center typewriter">{yearHourTotal.toFixed(1)}</td>
-								<td class="td-center typewriter">{yearTripTotal > 0 ? `${formatDuration(yearHourTotal / yearTripTotal)} avg` : '—'}</td>
-							</tr>
-						</tfoot>
-					</table>
-				</div>
-			</div>
-
-		<!-- ───── VOLUNTEERS ───── -->
-		{:else if activeTab === 'volunteers'}
-			<div class="vol-shell">
-				<!-- Header -->
-				<div class="vol-header">
-					<div class="vol-header-left">
-						<span class="vol-header-title">Volunteers</span>
-						{#if volunteers.length > 0}<span class="vol-header-count">{volunteers.length}</span>{/if}
-					</div>
-					<div class="vol-header-right">
-						<button class="dt-import-btn vol-sync-btn" on:click={syncVolunteersFromSheet} disabled={volSyncing}>
-							{volSyncing ? 'Syncing…' : 'Sync from Sheet'}
-						</button>
-						{#if volSyncError}<span class="dt-import-error">{volSyncError}</span>{/if}
-					</div>
-				</div>
-
-				{#if volunteers.length === 0}
-					<p class="vol-empty-state">No volunteers yet — click "Sync from Sheet" to load.</p>
-				{:else}
-					<!-- Upcoming orientations -->
-					{#if upcomingOrientations.length > 0}
-						{@const nextDate = upcomingOrientations[0].orientationDate}
-						{@const nextGroup = upcomingOrientations.filter((v) => v.orientationDate === nextDate)}
-						{@const laterDates = [...new Set(upcomingOrientations.filter((v) => v.orientationDate !== nextDate).map((v) => v.orientationDate))]}
-						<div class="vol-next-hero">
-							<div class="vol-next-hero-left">
-								<span class="vol-next-hero-label">Next orientation</span>
-								<span class="vol-next-hero-date">{formatOrientationDate(nextDate)}</span>
-							</div>
-							<div class="vol-next-hero-names">
-								{#each nextGroup as v}
-									<span class="vol-next-hero-name">{v.name.split(' ')[0]}</span>
-								{/each}
-							</div>
-							<button class="vol-add-cal-btn" on:click={() => addOrientationToCalendar(nextDate ?? '', nextGroup.map((v) => v.name.split(' ')[0]))}>
-								+ Calendar
-							</button>
-						</div>
-						{#if laterDates.length > 0}
-							<div class="vol-upcoming">
-								<p class="vol-section-label">Also upcoming</p>
-								{#each laterDates as date}
-									{@const group = upcomingOrientations.filter((v) => v.orientationDate === date)}
-									<div class="vol-upcoming-date-group">
-										<span class="vol-upcoming-date-label">{formatOrientationDate(date)}</span>
-										<div class="vol-upcoming-names">
-											{#each group as v}<span class="vol-upcoming-name-chip">{v.name.split(' ')[0]}</span>{/each}
-										</div>
-									</div>
-								{/each}
-							</div>
+					<div class="dt-stats-totals">
+						<span class="dt-stats-total-num">{selectedYearStat.totalTrips}</span>
+						<span class="dt-stats-total-label">trips</span>
+						<span class="dt-stats-total-sep">·</span>
+						<span class="dt-stats-total-num">{Math.round(selectedYearStat.totalHours)}h</span>
+						<span class="dt-stats-total-label">total</span>
+						{#if selectedYearStat.totalTrips > 0}
+							<span class="dt-stats-total-sep">·</span>
+							<span class="dt-stats-total-num">{formatDuration(selectedYearStat.totalHours / selectedYearStat.totalTrips)}</span>
+							<span class="dt-stats-total-label">avg per trip</span>
 						{/if}
-					{/if}
-
-					<!-- Search + filter pills -->
-					<div class="vol-controls-bar">
-						<input class="vol-search-input" type="search" placeholder="Search name or email…" bind:value={volSearch} />
-						<div class="vol-filter-pills">
-							{#each volFilterPills as [key, label, count]}
-								{#if (key !== 'flagged' && key !== 'attention') || count > 0}
-									<button
-										class="vol-filter-pill"
-										class:vol-filter-active={volStatusFilter === key}
-										class:vol-filter-flagged={key === 'flagged'}
-										class:vol-filter-attention={key === 'attention'}
-										on:click={() => volStatusFilter = key}
-									>{label}{count > 0 ? ` · ${count}` : ''}</button>
-								{/if}
-							{/each}
-						</div>
 					</div>
+				</div>
 
-					<!-- Volunteer list -->
-					{#if filteredVolunteers.length === 0}
-						<p class="vol-empty-state">No volunteers match this filter.</p>
-					{:else}
-						<div class="vol-list">
-							{#each filteredVolunteers as vol}
-								<div class="vol-card vol-card-{vol.isEstablished ? 'established' : vol.orientationStatus}" class:vol-card-open={volExpandedId === vol.id} class:vol-card-alert={volAttentionList.some((x) => x.id === vol.id)}>
-									<!-- Clickable row -->
-									<button class="vol-card-row" on:click={() => {
-										const closing = volExpandedId === vol.id;
-										volExpandedId = closing ? null : vol.id;
-										if (closing) {
-											// Discard pending scheduled pick if card is closed without choosing a date
-											volAwaitingDate = new Set([...volAwaitingDate].filter((x) => x !== vol.id));
-										}
-										if (volNotesDraft[vol.id] === undefined) volNotesDraft[vol.id] = vol.internalNotes ?? '';
-										if (volOrientationDraft[vol.id] === undefined) volOrientationDraft[vol.id] = vol.orientationDate ?? '';
-									}}>
-										<div class="vol-card-main">
-											<span class="vol-card-name">{vol.name || '—'}</span>
-											{#if vol.email}
-												<span class="vol-card-email">{vol.email}</span>
-											{:else}
-												<span class="vol-card-warning">Missing email</span>
-											{/if}
-										</div>
-										<div class="vol-card-right">
-											{#if volAttentionList.some((x) => x.id === vol.id)}
-												{@const reason = overdueScheduled.some((x) => x.id === vol.id) ? 'Orientation passed — follow up' : 'Never contacted'}
-												<span class="vol-alert-dot" title={reason}>!</span>
-												<span class="vol-alert-reason">{reason}</span>
-											{/if}
-											{#if vol.orientationDate && (vol.orientationStatus === 'scheduled' || vol.orientationStatus === 'no_showed')}
-												<span class="vol-date-chip">{formatOrientationDate(vol.orientationDate)}</span>
-											{/if}
-											{#if vol.isEstablished}
-												<span class="vol-status vol-status-dtv">DTV</span>
-											{:else}
-												<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
-											{/if}
-											<span class="vol-card-chevron">{volExpandedId === vol.id ? '▲' : '▼'}</span>
-										</div>
-									</button>
-
-									<!-- Expanded detail -->
-									{#if volExpandedId === vol.id}
-										<div class="vol-card-detail">
-											{#if !vol.isEstablished}
-												<!-- Status stepper -->
-												<div class="vol-stepper">
-													{#each [['pending','Pending'],['emailed','Emailed'],['scheduled','Scheduled'],['signed_waiver','Signed']] as [s, label]}
-														<button
-															class="vol-step-btn"
-															class:vol-step-active={vol.orientationStatus === s || (s === 'scheduled' && volAwaitingDate.has(vol.id))}
-															on:click={() => setVolStep(vol.id, s, vol.orientationDate)}
-														>{label}</button>
-													{/each}
-													{#if vol.orientationStatus === 'no_showed' || vol.orientationStatus === 'answered_no'}
-														<span class="vol-status {statusClass(vol.orientationStatus)}">{statusLabel(vol.orientationStatus)}</span>
-													{/if}
-												</div>
-												{#if vol.orientationStatus === 'scheduled' || volAwaitingDate.has(vol.id)}
-													<div class="vol-date-inline">
-														<label class="vol-detail-label" for="vol-date-{vol.id}">
-															{volAwaitingDate.has(vol.id) ? 'Pick a date to confirm scheduling' : 'Orientation date'}
-														</label>
-														<input id="vol-date-{vol.id}" class="vol-date-input" type="date"
-															bind:value={volOrientationDraft[vol.id]}
-															on:change={() => {
-																if (volAwaitingDate.has(vol.id)) {
-																	confirmScheduled(vol.id, volOrientationDraft[vol.id] ?? '');
-																} else {
-																	saveOrientationDate(vol.id, volOrientationDraft[vol.id] ?? '');
-																}
-															}}
-														/>
-													</div>
-												{/if}
-											{/if}
-
-											<!-- Info fields -->
-											<div class="vol-info-grid">
-												{#if vol.submittedAt}
-													<div class="vol-detail-field">
-														<span class="vol-detail-label">Submitted</span>
-														<span class="vol-detail-val">{vol.submittedAt}</span>
-													</div>
-												{/if}
-												{#if !vol.isEstablished}
-													<div class="vol-detail-field">
-														<span class="vol-detail-label">Driver's license</span>
-														<span class="vol-detail-val">{vol.hasDriversLicense ? 'Yes' : 'No'}</span>
-													</div>
-													<div class="vol-detail-field">
-														<span class="vol-detail-label">18+</span>
-														<span class="vol-detail-val">{vol.is18Plus ? 'Yes' : 'No'}</span>
-													</div>
-												{/if}
-											</div>
-											{#if vol.dogExperience}
-												<div class="vol-detail-field">
-													<span class="vol-detail-label">Dog experience</span>
-													<span class="vol-detail-val">{vol.dogExperience}</span>
-												</div>
-											{/if}
-											{#if vol.adventurePlans}
-												<div class="vol-detail-field">
-													<span class="vol-detail-label">Adventure plans</span>
-													<span class="vol-detail-val">{vol.adventurePlans}</span>
-												</div>
-											{/if}
-
-											<!-- Notes -->
-											<div class="vol-detail-field">
-												<label class="vol-detail-label" for="vol-notes-{vol.id}">Internal notes</label>
-												<textarea id="vol-notes-{vol.id}" class="vol-notes-input" rows="2"
-													bind:value={volNotesDraft[vol.id]}
-													placeholder="Staff notes…"></textarea>
-											</div>
-
-											<!-- Actions -->
-											<div class="vol-card-actions">
-												<button class="dt-import-btn dt-import-btn-go" on:click={() => saveVolunteerNotes(vol.id)}>Save notes</button>
-												{#if !vol.isEstablished && vol.orientationStatus !== 'no_showed' && vol.orientationStatus !== 'answered_no'}
-													<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'no_showed')}>No-showed</button>
-													<button class="dt-import-btn vol-dropout-btn" on:click={() => changeVolunteerStatus(vol.id, 'answered_no')}>Answered No</button>
-												{/if}
-												<button class="dt-import-btn vol-delete-btn" on:click={() => removeVolunteer(vol.id)}>Remove</button>
-											</div>
-										</div>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{/if}
-				{/if}
-			</div>
+				<!-- Chart -->
+				<div class="dt-panel dt-stats-chart-panel">
+					<div class="dt-stats-canvas-wrap">
+						<canvas bind:this={statsCanvas}></canvas>
+					</div>
+				</div>
+			{:else if sheetStatsLoaded}
+				<p class="dt-panel-empty">No stats found for {statsYearFilter}.</p>
+			{/if}
 
 		<!-- ───── IMPORT ───── -->
 		{:else if activeTab === 'import'}
@@ -2476,49 +2114,90 @@ const today = new Date().toISOString().split('T')[0];
 		align-items: center;
 		gap: 1rem;
 		padding: 0.75rem 1rem;
-		background: #e8f0fe;
-		border: 1px solid #aecbfa;
+		background: #f8faff;
+		border: 1px solid #dadce0;
 		border-radius: 8px;
 		flex-wrap: wrap;
 	}
 
-	.vol-next-hero-left {
+	/* Calendar day tile */
+	.vol-cal-icon {
 		display: flex;
 		flex-direction: column;
-		gap: 0.1rem;
+		align-items: center;
+		border-radius: 6px;
+		overflow: hidden;
+		border: 1px solid #dadce0;
+		min-width: 3.8rem;
 		flex-shrink: 0;
+		box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+	}
+
+	.vol-cal-month {
+		width: 100%;
+		background: #016aa5;
+		color: #fff;
+		font-size: 0.58rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-align: center;
+		padding: 0.22rem 0;
+		text-transform: uppercase;
+	}
+
+	.vol-cal-day {
+		background: #fff;
+		width: 100%;
+		text-align: center;
+		font-size: 1.9rem;
+		font-weight: 700;
+		color: #202124;
+		line-height: 1.1;
+		padding: 0.15rem 0 0;
+	}
+
+	.vol-cal-weekday {
+		background: #fff;
+		width: 100%;
+		text-align: center;
+		font-size: 0.52rem;
+		font-weight: 600;
+		color: #5f6368;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		padding: 0 0 0.22rem;
+	}
+
+	.vol-next-hero-right {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		flex: 1;
+		min-width: 0;
 	}
 
 	.vol-next-hero-label {
-		font-size: 0.58rem;
+		font-size: 0.6rem;
 		font-weight: 700;
-		letter-spacing: 0.09em;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: #1a73e8;
-	}
-
-	.vol-next-hero-date {
-		font-size: 1.1rem;
-		font-weight: 700;
-		color: #0d47a1;
-		white-space: nowrap;
+		color: #016aa5;
 	}
 
 	.vol-next-hero-names {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.35rem;
-		flex: 1;
+		gap: 0.3rem;
 	}
 
 	.vol-next-hero-name {
 		padding: 0.2rem 0.55rem;
-		background: #fff;
+		background: #e8f0fe;
 		border: 1px solid #aecbfa;
 		border-radius: 999px;
 		font-size: 0.75rem;
 		font-weight: 500;
-		color: #1a73e8;
+		color: #016aa5;
 	}
 
 	.vol-add-cal-btn {
@@ -2921,6 +2600,138 @@ const today = new Date().toISOString().split('T')[0];
 	.vol-dropout-btn:hover:not(:disabled) { background: #fffde7; }
 	.vol-delete-btn { color: #c5221f; border-color: #f5c6cb; }
 	.vol-delete-btn:hover:not(:disabled) { background: #fce8e6; }
+
+	/* ── IHV type toggle ── */
+	.vol-type-toggle {
+		display: flex;
+		gap: 0;
+		border: 1px solid #dadce0;
+		border-radius: 6px;
+		overflow: hidden;
+		align-self: flex-start;
+	}
+
+	.vol-type-btn {
+		padding: 0.35rem 0.9rem;
+		font-size: 0.76rem;
+		font-weight: 600;
+		color: #5f6368;
+		background: #fff;
+		border: none;
+		cursor: pointer;
+		border-right: 1px solid #dadce0;
+	}
+
+	.vol-type-btn:last-child { border-right: none; }
+	.vol-type-btn:hover { background: #f1f3f4; color: #202124; }
+
+	.vol-type-active {
+		background: #016aa5;
+		color: #fff;
+	}
+
+	.vol-type-active:hover { background: #015a8e; }
+
+	/* ── IHV training steps ── */
+	.vol-training-steps {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+	}
+
+	.vol-training-step {
+		display: inline-flex;
+		padding: 0.12rem 0.45rem;
+		border-radius: 999px;
+		font-size: 0.65rem;
+		font-weight: 600;
+		background: #f1f3f4;
+		color: #9aa0a6;
+	}
+
+	.vol-training-done {
+		background: #e6f4ea;
+		color: #1e7e34;
+	}
+
+	.vol-phone-link {
+		color: #1a73e8;
+		text-decoration: none;
+	}
+
+	.vol-phone-link:hover { text-decoration: underline; }
+
+	.vol-cross-role-badge {
+		display: inline-flex;
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
+		font-size: 0.6rem;
+		font-weight: 700;
+		background: #f3e8ff;
+		color: #7c3aed;
+		border: 1px solid #ddd6fe;
+		white-space: nowrap;
+	}
+
+	/* ── Stats ── */
+	.dt-stats-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.dt-stats-totals {
+		display: flex;
+		align-items: baseline;
+		gap: 0.35rem;
+		font-size: 0.8rem;
+		color: #5f6368;
+	}
+
+	.dt-stats-total-num {
+		font-size: 1rem;
+		font-weight: 700;
+		color: #202124;
+	}
+
+	.dt-stats-total-label { font-size: 0.72rem; color: #5f6368; }
+	.dt-stats-total-sep { color: #bdc1c6; }
+
+	.dt-stats-chart-panel { padding: 1rem; }
+
+	.dt-stats-canvas-wrap {
+		position: relative;
+		height: 280px;
+	}
+
+	.dt-stats-year-pills {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+	}
+
+	.dt-stats-year-btn {
+		padding: 0.25rem 0.9rem;
+		border-radius: 999px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: #5f6368;
+		cursor: pointer;
+	}
+
+	.dt-stats-year-btn:hover { background: #f1f3f4; color: #202124; }
+
+	.dt-stats-year-active {
+		background: #016aa5;
+		border-color: #016aa5;
+		color: #fff;
+	}
+
+	.dt-stats-year-active:hover { background: #015a8e; }
 
 	/* ── Responsive ── */
 	@media (max-width: 640px) {

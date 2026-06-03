@@ -2,6 +2,7 @@ import type { Volunteer } from '$lib/types';
 import { db } from '$lib/firebase/config';
 import { collection, doc, getDocs, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import type { VolunteerSheetRow } from '../../routes/api/sheets/volunteers/+server';
+import type { IHVSheetRow } from '../../routes/api/sheets/volunteers-ihv/+server';
 
 const COLLECTION = 'volunteers';
 
@@ -102,6 +103,7 @@ export async function syncVolunteers(rows: VolunteerSheetRow[]): Promise<number>
 				id,
 				name: row.name,
 				email: row.email,
+				volunteerType: 'dtv',
 				submittedAt: row.submittedAt,
 				hasDriversLicense: row.hasDriversLicense,
 				is18Plus: row.is18Plus,
@@ -152,7 +154,65 @@ export async function updateVolunteerNotes(id: string, notes: string): Promise<v
 	});
 }
 
+export async function updateVolunteerEstablished(id: string, established: boolean): Promise<void> {
+	if (!db) return;
+	await updateDoc(doc(db, COLLECTION, id), { isEstablished: established, updatedAt: new Date() });
+}
+
 export async function deleteVolunteer(id: string): Promise<void> {
 	if (!db) return;
 	await deleteDoc(doc(db, COLLECTION, id));
+}
+
+export async function syncIHVVolunteers(rows: IHVSheetRow[]): Promise<number> {
+	if (!db) return 0;
+	const now = new Date();
+	let count = 0;
+
+	for (let i = 0; i < rows.length; i += 500) {
+		const batch = writeBatch(db);
+		for (const row of rows.slice(i, i + 500)) {
+			if (!row.name && !row.email) continue;
+			const idBase = row.email ? row.email.toLowerCase().replace(/[^a-z0-9]/g, '_') : row.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+			const id = `ihv_${idBase}`;
+			const ref = doc(db, COLLECTION, id);
+
+			const orientationStatus: Volunteer['orientationStatus'] = row.isNonActive
+				? 'answered_no'
+				: row.noShowed
+					? 'no_showed'
+					: row.orientationDate
+						? 'scheduled'
+						: 'pending';
+
+			const record: Partial<Volunteer> = {
+				id,
+				name: row.name,
+				email: row.email,
+				phone: row.phone || null,
+				volunteerType: 'ihv',
+				submittedAt: null,
+				hasDriversLicense: false,
+				is18Plus: false,
+				dogExperience: '',
+				adventurePlans: '',
+				photosOk: false,
+				leashCommitment: false,
+				orientationStatus,
+				isEstablished: row.isEstablished,
+				isNonActive: row.isNonActive,
+				trainingSteps: row.trainingSteps,
+				sheetNotes: row.sheetNotes || null,
+				internalNotes: '',
+				lastSyncedAt: now,
+				createdAt: now,
+				updatedAt: now
+			};
+			if (row.orientationDate) (record as Record<string, unknown>).orientationDate = row.orientationDate;
+			batch.set(ref, record, { merge: true });
+			count++;
+		}
+		await batch.commit();
+	}
+	return count;
 }

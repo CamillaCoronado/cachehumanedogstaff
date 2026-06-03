@@ -19,7 +19,7 @@
 		draftRole: UserRole;
 	};
 
-	const roleOptions: UserRole[] = ['admin', 'manager', 'staff', 'volunteer'];
+	const roleOptions: UserRole[] = ['admin', 'manager', 'coordinator', 'staff', 'volunteer'];
 
 	let users: EditableUser[] = [];
 	let usersLoaded = false;
@@ -123,6 +123,7 @@
 	function roleTone(role: UserRole) {
 		if (role === 'admin') return 'role-chip-admin';
 		if (role === 'manager') return 'role-chip-manager';
+		if (role === 'coordinator') return 'role-chip-coordinator';
 		if (role === 'staff') return 'role-chip-staff';
 		return 'role-chip-volunteer';
 	}
@@ -754,6 +755,11 @@
 	.role-chip-manager {
 		background: rgba(1, 107, 165, 0.1);
 		color: #016ba5;
+	}
+
+	.role-chip-coordinator {
+		background: rgba(242, 153, 0, 0.12);
+		color: #a06500;
 	}
 
 	.role-chip-staff {

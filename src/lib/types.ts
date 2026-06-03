@@ -1,7 +1,7 @@
 import type { Timestamp } from 'firebase/firestore';
 
 export type DateValue = Date | Timestamp;
-export type UserRole = 'admin' | 'manager' | 'staff' | 'volunteer';
+export type UserRole = 'admin' | 'manager' | 'coordinator' | 'staff' | 'volunteer';
 
 export interface UserProfile {
 	uid: string;
@@ -150,6 +150,8 @@ export interface Volunteer {
 	id: string;
 	name: string;
 	email: string;
+	phone?: string | null;
+	volunteerType?: 'dtv' | 'ihv';
 	submittedAt: string | null;
 	hasDriversLicense: boolean;
 	is18Plus: boolean;
@@ -159,6 +161,9 @@ export interface Volunteer {
 	leashCommitment: boolean;
 	orientationStatus: VolunteerOrientationStatus;
 	isEstablished: boolean;
+	isNonActive?: boolean;
+	trainingSteps?: { point: boolean; trained: boolean; computer: boolean; moved: boolean };
+	sheetNotes?: string | null;
 	orientationDate?: string | null;
 	internalNotes: string;
 	lastSyncedAt: DateValue;
