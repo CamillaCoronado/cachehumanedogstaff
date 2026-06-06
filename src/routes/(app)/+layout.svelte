@@ -65,7 +65,7 @@
 	import { getDog } from '$lib/data/dogs';
 	import type { Dog } from '$lib/types';
 	import { confetti } from '@neoconfetti/svelte';
-	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer'; dogs: Dog[] };
+	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer' | 'incoming'; dogs: Dog[] };
 	let overlayQueue: OverlayItem[] = [];
 	let currentOverlay: OverlayItem | null = null;
 
@@ -76,12 +76,13 @@
 		} else {
 			currentOverlay = null;
 			try {
+				// Ack the sync-change overlay
 				const raw = localStorage.getItem(STORAGE_KEY);
 				if (raw) {
 					const parsed = JSON.parse(raw);
 					localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, overlayAcked: true }));
 				}
-			} catch { /* ignore */ }
+				} catch { /* ignore */ }
 		}
 	}
 
@@ -109,14 +110,20 @@
 		initAuthListener();
 		try {
 			const stored = localStorage.getItem(STORAGE_KEY);
+			console.log('[Layout] localStorage stored:', stored ? 'found' : 'empty');
 			if (stored) {
 				const parsed = JSON.parse(stored) as { changes: SyncChange[]; changedAt: string; overlayAcked?: boolean };
+				console.log('[Layout] stored changes:', parsed.changes.length, 'overlayAcked:', parsed.overlayAcked, 'changedAt:', parsed.changedAt);
+				console.log('[Layout] stored archived:', parsed.changes.filter(c => c.isArchived).map(c => c.name));
 				asmChanges = parsed.changes;
 				asmLastChangedAt = parsed.changedAt;
 				if (!parsed.overlayAcked && parsed.changes.some(
-					(c) => c.isArchived || c.isTransferredOut || c.fields.some((f) => f === 'Foster (yes)')
+					(c) => c.isArchived || c.isTransferredOut || c.isNew || c.fields.some((f) => f === 'Foster (yes)')
 				)) {
 					storedOverlayChanges = parsed.changes;
+					console.log('[Layout] storedOverlayChanges set — will fire overlay');
+				} else {
+					console.log('[Layout] stored overlay NOT firing — overlayAcked:', parsed.overlayAcked);
 				}
 			}
 		} catch { /* ignore */ }
@@ -148,6 +155,7 @@
 			buildOverlay(changes.filter((c) => c.isArchived), 'adoption'),
 			buildOverlay(changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)')), 'foster'),
 			buildOverlay(changes.filter((c) => c.isTransferredOut), 'transfer'),
+			buildOverlay(changes.filter((c) => c.isNew), 'incoming'),
 		]).then((items) => {
 			const pending = items.filter((i): i is OverlayItem => i !== null);
 			if (pending.length > 0 && !currentOverlay) {
@@ -158,10 +166,14 @@
 	}
 
 	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !asmAttempted) {
+		console.log('[Layout] ASM sync triggered, role:', $authProfile?.role);
 		asmAttempted = true;
 		asmSyncing = true;
 		void syncAnimalsFromASM()
 			.then((result) => {
+				console.log('[Layout] syncAnimalsFromASM complete, changes:', result.changes.length, 'isNew:', result.changes.filter(c => c.isNew).map(c => c.name));
+				console.log('[Layout] Archived changes:', result.changes.filter(c => c.isArchived).map(c => ({ id: c.id, name: c.name })));
+				console.log('[Layout] Transfer changes:', result.changes.filter(c => c.isTransferredOut).map(c => ({ id: c.id, name: c.name })));
 				asmSyncedAt = new Intl.DateTimeFormat('en-US', {
 					hour: 'numeric',
 					minute: '2-digit',
@@ -175,24 +187,34 @@
 						localStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: asmChanges, changedAt: asmLastChangedAt }));
 					} catch { /* ignore */ }
 					asmLogVisible = true;
+				} else {
+					console.log('[Layout] No sync changes');
+				}
 
-					const buildOverlay = async (changes: typeof result.changes, type: OverlayItem['type']): Promise<OverlayItem | null> => {
-						if (changes.length === 0) return null;
-						try {
-							const dogs = (await Promise.all(changes.map((c) => getDog(c.id)))).filter((d): d is Dog => d !== null);
-							return dogs.length > 0 ? { type, dogs } : null;
-						} catch { return null; }
-					};
-
-					Promise.all([
-						buildOverlay(result.changes.filter((c) => c.isArchived), 'adoption'),
-						buildOverlay(result.changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)')), 'foster'),
-						buildOverlay(result.changes.filter((c) => c.isTransferredOut), 'transfer'),
-					]).then((items) => {
-						overlayQueue = items.filter((item): item is OverlayItem => item !== null);
-						advanceOverlay();
-					});
+				const buildOverlay = async (ids: string[], type: OverlayItem['type']): Promise<OverlayItem | null> => {
+					console.log(`[Layout] buildOverlay(${type}) — ${ids.length} ids:`, ids);
+					if (ids.length === 0) return null;
+					try {
+						const dogs = (await Promise.all(ids.map((id) => getDog(id)))).filter((d): d is Dog => d !== null);
+						console.log(`[Layout] buildOverlay(${type}) — getDog results:`, dogs.map(d => ({ id: d.id, name: d.name, status: d.status })));
+						return dogs.length > 0 ? { type, dogs } : null;
+					} catch (err) {
+						console.error(`[Layout] buildOverlay(${type}) error:`, err);
+						return null;
 					}
+				};
+
+				Promise.all([
+					buildOverlay(result.changes.filter((c) => c.isArchived).map(c => c.id), 'adoption'),
+					buildOverlay(result.changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)')).map(c => c.id), 'foster'),
+					buildOverlay(result.changes.filter((c) => c.isTransferredOut).map(c => c.id), 'transfer'),
+					buildOverlay(result.changes.filter((c) => c.isNew).map(c => c.id), 'incoming'),
+				]).then((items) => {
+					console.log('[Layout] overlayQueue items:', items.filter(Boolean).map(i => i?.type));
+					overlayQueue = items.filter((item): item is OverlayItem => item !== null);
+					console.log('[Layout] advanceOverlay — queue length:', overlayQueue.length, 'currentOverlay:', currentOverlay?.type ?? 'none');
+					advanceOverlay();
+				});
 			})
 			.catch((err: unknown) => {
 				asmError = err instanceof Error ? err.message : 'Sync failed';
@@ -548,6 +570,25 @@
 				{/each}
 			</div>
 			<button class="foster-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+		</div>
+	</div>
+{:else if currentOverlay?.type === 'incoming'}
+	<div class="incoming-overlay" use:portal role="presentation" on:click={advanceOverlay}>
+		<div class="incoming-moment">
+			<p class="incoming-heading">New arrival{currentOverlay.dogs.length > 1 ? 's' : ''} at the shelter 🐾</p>
+			<div class="incoming-dogs-row">
+				{#each currentOverlay.dogs as dog}
+					<div class="incoming-dog-item">
+						{#if dog.photoUrl}
+							<img class="incoming-photo" src={dog.photoUrl} alt={dog.name} />
+						{:else}
+							<div class="incoming-photo incoming-photo-placeholder"></div>
+						{/if}
+						<p class="incoming-name">{dog.name}</p>
+					</div>
+				{/each}
+			</div>
+			<button class="incoming-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
 		</div>
 	</div>
 {/if}
@@ -1559,6 +1600,96 @@
 
 .foster-close:hover {
 	background: rgba(200, 153, 58, 0.28);
+}
+
+.incoming-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(220, 240, 255, 0.88);
+	backdrop-filter: blur(4px);
+	z-index: 500;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+	animation: fosterFadeIn 0.4s ease;
+}
+
+.incoming-moment {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	text-align: center;
+	max-width: 28rem;
+	width: 100%;
+}
+
+.incoming-heading {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1.4rem, 5vw, 2rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #014e7a;
+	line-height: 1.1;
+}
+
+.incoming-dogs-row {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 1.2rem;
+}
+
+.incoming-dog-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.incoming-photo {
+	width: clamp(5rem, 20vw, 8rem);
+	height: clamp(5rem, 20vw, 8rem);
+	object-fit: cover;
+	border-radius: 50%;
+	border: 3px solid #7ab8e8;
+	box-shadow: 0 4px 18px rgba(1, 106, 165, 0.22);
+}
+
+.incoming-photo-placeholder {
+	background: rgba(1, 106, 165, 0.12);
+}
+
+.incoming-name {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1rem, 3.5vw, 1.5rem);
+	font-weight: 400;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #003560;
+	line-height: 1;
+}
+
+.incoming-close {
+	margin-top: 0.2rem;
+	border: 1px solid #7ab8e8;
+	border-radius: 999px;
+	padding: 0.4rem 1.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	font-weight: 700;
+	background: rgba(1, 106, 165, 0.12);
+	color: #014e7a;
+	cursor: pointer;
+}
+
+.incoming-close:hover {
+	background: rgba(1, 106, 165, 0.22);
 }
 
 .adoption-overlay {

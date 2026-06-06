@@ -4,7 +4,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessVolunteers, canEditVolunteers, resolveRole } from '$lib/utils/permissions';
-	import { listVolunteers, syncVolunteers, syncIHVVolunteers, updateVolunteerNotes, updateOrientationDate, updateVolunteerStatus, updateVolunteerEstablished, deleteVolunteer } from '$lib/data/volunteers';
+	import { listVolunteers, syncVolunteers, syncIHVVolunteers, clearAllVolunteers, updateVolunteerNotes, updateOrientationDate, updateVolunteerStatus, updateVolunteerEstablished, deleteVolunteer } from '$lib/data/volunteers';
 	import type { UserRole, Volunteer, VolunteerOrientationStatus } from '$lib/types';
 
 	let volunteers: Volunteer[] = [];
@@ -52,6 +52,36 @@
 	}
 
 	// ── Sync ──
+	async function clearAndResync() {
+		if (!confirm('This will delete ALL volunteer records and re-sync from the spreadsheet. Are you sure?')) return;
+		volSyncing = true;
+		volSyncError = '';
+		try {
+			const deleted = await clearAllVolunteers();
+			console.log(`[Volunteers] Cleared ${deleted} records. Re-syncing...`);
+
+			const [dtvRes, ihvRes] = await Promise.all([
+				fetch('/api/sheets/volunteers'),
+				fetch('/api/sheets/volunteers-ihv')
+			]);
+			if (!dtvRes.ok) throw new Error(`DTV sheet HTTP ${dtvRes.status}`);
+			if (!ihvRes.ok) throw new Error(`IHV sheet HTTP ${ihvRes.status}`);
+
+			const dtvPayload = await dtvRes.json();
+			const dtvRows = Array.isArray(dtvPayload) ? dtvPayload : (dtvPayload.rows ?? []);
+			const ihvRows = await ihvRes.json();
+
+			await syncVolunteers(dtvRows);
+			await syncIHVVolunteers(ihvRows);
+			volunteers = await listVolunteers();
+			toast.success(`Cleared ${deleted} records and re-synced ${volunteers.length} volunteers.`);
+		} catch (e) {
+			volSyncError = e instanceof Error ? e.message : String(e);
+		} finally {
+			volSyncing = false;
+		}
+	}
+
 	async function syncDTVsFromSheet() {
 		volSyncing = true;
 		volSyncError = '';
@@ -202,7 +232,7 @@
 	})();
 
 	$: overdueScheduled = volsForType.filter(
-		(v) => v.orientationStatus === 'scheduled' && v.orientationDate && v.orientationDate < today
+		(v) => !v.isEstablished && v.orientationStatus === 'scheduled' && v.orientationDate && v.orientationDate < today
 	);
 	$: needsOutreach = volsForType.filter(
 		(v) => !v.isEstablished && v.orientationStatus === 'pending'
@@ -329,6 +359,9 @@
 				<button class="vp-sync-btn" on:click={volTypeFilter === 'dtv' ? syncDTVsFromSheet : syncIHVsFromSheet} disabled={volSyncing}>
 					{volSyncing ? 'Syncing…' : `Sync ${volTypeFilter === 'dtv' ? 'DTVs' : 'IHVs'}`}
 				</button>
+				<button class="vp-sync-btn vp-sync-danger" on:click={clearAndResync} disabled={volSyncing}>
+					Clear & Re-sync All
+				</button>
 				{#if volSyncError}<span class="vp-error">{volSyncError}</span>{/if}
 			</div>
 		{/if}
@@ -439,7 +472,9 @@
 								{#if isAlert}
 									{@const reason = overdueScheduled.some((x) => x.id === vol.id)
 										? (isIHV ? 'Mark active or no-showed' : 'Orientation passed — follow up')
-										: (isIHV ? 'Schedule training' : 'Never contacted')}
+										: (isIHV
+											? (vol.trainingSteps?.trained ? (vol.trainingSteps?.pointPending ? 'Point registration pending' : 'Needs Point registration') : 'Schedule training')
+											: 'Never contacted')}
 									<span class="vp-alert-dot" title={reason}>!</span>
 									<span class="vp-alert-reason">{reason}</span>
 								{/if}
@@ -544,7 +579,7 @@
 									<div class="vp-training">
 										<span class="vp-field-label">Training steps</span>
 										<div class="vp-training-steps">
-											<span class="vp-training-step" class:done={vol.trainingSteps.point}>Point {vol.trainingSteps.point ? '✓' : '—'}</span>
+											<span class="vp-training-step" class:done={vol.trainingSteps.point} class:pending={!vol.trainingSteps.point && vol.trainingSteps.pointPending}>Point {vol.trainingSteps.point ? '✓' : vol.trainingSteps.pointPending ? '…' : '—'}</span>
 											<span class="vp-training-step" class:done={vol.trainingSteps.trained}>Trained {vol.trainingSteps.trained ? '✓' : '—'}</span>
 											<span class="vp-training-step" class:done={vol.trainingSteps.computer}>Computer {vol.trainingSteps.computer ? '✓' : '—'}</span>
 											<span class="vp-training-step" class:done={vol.trainingSteps.moved}>Moved {vol.trainingSteps.moved ? '✓' : '—'}</span>
@@ -694,6 +729,13 @@
 
 	.vp-sync-btn:hover:not(:disabled) { background: #e8f4fd; }
 	.vp-sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	.vp-sync-danger {
+		border-color: #f5c6cb;
+		color: #a8200d;
+		background: #fff4f3;
+	}
+	.vp-sync-danger:hover:not(:disabled) { background: #fde0de; }
 
 	.vp-error { font-size: 0.7rem; font-weight: 600; color: #d93025; text-align: right; }
 	.vp-loading { font-size: 0.85rem; color: #5f6368; padding: 1rem 0; }
@@ -1121,6 +1163,7 @@
 	}
 
 	.vp-training-step.done { background: #dcf2d8; color: #1a6b12; border-color: #b8e0b3; }
+	.vp-training-step.pending { background: #fff8e1; color: #8a5a00; border-color: #f9d678; }
 
 	/* Notes */
 	.vp-notes {

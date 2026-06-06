@@ -598,9 +598,13 @@
 		const targets = displayDogs.filter((dog) => didntEatIds.includes(dog.id));
 		try {
 			await Promise.all(
-				targets.map((dog) =>
-					addFeedingLog(dog.id, { date: selectedDay, mealTime, amountEaten: 'none', notes: null }, $authProfile)
-				)
+				targets.map((dog) => {
+					const existing = fedMap[dog.id];
+					if (existing) {
+						return updateFeedingLog(dog.id, existing.id, { amountEaten: 'none', notes: existing.notes });
+					}
+					return addFeedingLog(dog.id, { date: selectedDay, mealTime, amountEaten: 'none', notes: null }, $authProfile);
+				})
 			);
 			await refreshLogs();
 			showDidntEatPanel = false;
@@ -998,13 +1002,13 @@
 				<p class="didnt-eat-title typewriter">Who didn't eat?</p>
 				<button class="didnt-eat-close" type="button" aria-label="Close" on:click={() => (showDidntEatPanel = false)}>×</button>
 			</div>
-			<p class="didnt-eat-hint typewriter">Select dogs that didn't eat.</p>
+			<p class="didnt-eat-hint typewriter">Select dogs that didn't eat. Already-logged dogs can be updated.</p>
 			<div class="didnt-eat-list">
 				{#each displayDogs.filter((d) => !isSurgeryBlocked(d)) as dog}
-					<label class="didnt-eat-item {fedMap[dog.id] ? 'didnt-eat-item-already-fed' : ''}">
+					{@const existingLog = fedMap[dog.id]}
+					<label class="didnt-eat-item {existingLog && existingLog.amountEaten === 'none' ? 'didnt-eat-item-already-none' : ''}">
 						<input
 							type="checkbox"
-							disabled={!!fedMap[dog.id]}
 							checked={didntEatIds.includes(dog.id)}
 							on:change={(e) => {
 								if (e.currentTarget.checked) {
@@ -1015,8 +1019,8 @@
 							}}
 						/>
 						<span class="didnt-eat-name">{dog.name}</span>
-						{#if fedMap[dog.id]}
-							<span class="didnt-eat-fed-note typewriter">already logged</span>
+						{#if existingLog}
+							<span class="didnt-eat-fed-note typewriter">{existingLog.amountEaten === 'none' ? 'already none' : `logged: ${existingLog.amountEaten}`}</span>
 						{/if}
 					</label>
 				{/each}
@@ -1281,9 +1285,8 @@
 		background: #fef5f5;
 	}
 
-	.didnt-eat-item-already-fed {
-		opacity: 0.45;
-		cursor: default;
+	.didnt-eat-item-already-none {
+		opacity: 0.55;
 	}
 
 	.didnt-eat-name {

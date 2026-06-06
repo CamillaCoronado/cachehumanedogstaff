@@ -12,6 +12,11 @@ function isGreen(c: CellColor | null): boolean {
 	return c.green > 0.6 && c.red < 0.7 && c.blue < 0.65;
 }
 
+function isYellow(c: CellColor | null): boolean {
+	if (!c) return false;
+	return c.red > 0.9 && c.green > 0.8 && c.blue < 0.55;
+}
+
 function isRed(c: CellColor | null): boolean {
 	if (!c) return false;
 	return c.red > 0.8 && c.green < 0.5 && c.blue < 0.5;
@@ -25,7 +30,7 @@ export interface IHVSheetRow {
 	isEstablished: boolean;
 	isNonActive: boolean;
 	noShowed: boolean;
-	trainingSteps: { point: boolean; trained: boolean; computer: boolean; moved: boolean };
+	trainingSteps: { point: boolean; pointPending: boolean; trained: boolean; computer: boolean; moved: boolean };
 	orientationDate: string | null;
 	sheetNotes: string;
 	rsvpGroup?: string;
@@ -107,7 +112,7 @@ async function fetchActiveIHVs(): Promise<IHVSheetRow[]> {
 			isEstablished: true,
 			isNonActive: false,
 			noShowed: false,
-			trainingSteps: { point: true, trained: true, computer: true, moved: true },
+			trainingSteps: { point: true, pointPending: false, trained: true, computer: true, moved: true },
 			orientationDate: null,
 			sheetNotes: '',
 			sourceSheet: 'In House Volunteers'
@@ -159,7 +164,8 @@ async function fetchIHVTraining(): Promise<IHVSheetRow[]> {
 		if (!looksLikeEmail(email) && !name) continue;
 
 		// Step completion = individual cell is green
-		const point    = isGreen(row[3]?.color ?? null);
+		const point        = isGreen(row[3]?.color ?? null);
+		const pointPending = !point && isYellow(row[3]?.color ?? null);
 		const trained  = isGreen(row[4]?.color ?? null);
 		const computer = isGreen(row[5]?.color ?? null);
 		const moved    = isGreen(row[6]?.color ?? null);
@@ -175,7 +181,7 @@ async function fetchIHVTraining(): Promise<IHVSheetRow[]> {
 			isEstablished: established,
 			isNonActive: false,
 			noShowed,
-			trainingSteps: { point, trained, computer, moved },
+			trainingSteps: { point, pointPending, trained, computer, moved },
 			orientationDate: currentGroupDate,
 			sheetNotes: row[7]?.text ?? '',
 			rsvpGroup: currentGroup,
@@ -198,12 +204,18 @@ async function fetchNonActiveVolunteers(): Promise<IHVSheetRow[]> {
 		if (!line.trim()) continue;
 		const cols = parseCSVLine(line);
 
-		// Layout varies: either "First, Last, Phone, Email" or "Full Name, (empty|phone), Email"
 		let name = '';
 		let phone = '';
 		let email = '';
+		let rowNote = '';
 
-		if (looksLikeEmail(cols[3] ?? '')) {
+		if (looksLikeEmail(cols[4] ?? '')) {
+			// Notes | First | Last | Phone | Email  (rows 73-94 pattern)
+			rowNote = cols[0] ?? '';
+			name    = `${cols[1] ?? ''} ${cols[2] ?? ''}`.trim();
+			phone   = cols[3] ?? '';
+			email   = cols[4] ?? '';
+		} else if (looksLikeEmail(cols[3] ?? '')) {
 			// First | Last | Phone | Email
 			name  = `${cols[0] ?? ''} ${cols[1] ?? ''}`.trim();
 			phone = cols[2] ?? '';
@@ -214,7 +226,7 @@ async function fetchNonActiveVolunteers(): Promise<IHVSheetRow[]> {
 			phone = cols[1] ?? '';
 			email = cols[2] ?? '';
 		} else {
-			// Try any column for email
+			// Last resort: find email in any column
 			const emailCol = cols.findIndex(looksLikeEmail);
 			if (emailCol < 0) continue;
 			email = cols[emailCol] ?? '';
@@ -231,9 +243,9 @@ async function fetchNonActiveVolunteers(): Promise<IHVSheetRow[]> {
 			isEstablished: false,
 			isNonActive: true,
 			noShowed: false,
-			trainingSteps: { point: false, trained: false, computer: false, moved: false },
+			trainingSteps: { point: false, pointPending: false, trained: false, computer: false, moved: false },
 			orientationDate: null,
-			sheetNotes: '',
+			sheetNotes: rowNote.trim(),
 			sourceSheet: 'Non Active Volunteers'
 		});
 	}

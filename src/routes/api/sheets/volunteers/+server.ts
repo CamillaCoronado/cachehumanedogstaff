@@ -215,6 +215,8 @@ export async function GET() {
 	}
 
 	const establishedIdentities = new Set(establishedVolunteers.map((r) => volunteerIdentityKey(r.name, r.email)));
+	// Name-only fallback: catches cases where the same person signed up with a different email (e.g. Google temp accounts)
+	const establishedNames = new Set(establishedVolunteers.map((r) => normalizeIdentityPart(r.name)));
 
 	if (rows.length < 3) {
 		return json({
@@ -346,6 +348,16 @@ export async function GET() {
 		const submittedAt =
 			status === 'scheduled' || col0HasDate ? null : (col0 || null);
 
+		const isEst = establishedIdentities.has(volunteerIdentityKey(name, email));
+		if (name.toLowerCase().includes('wendi') || email.toLowerCase().includes('wendi')) {
+			console.log('[DTV sync DEBUG] Wendi row found:', {
+				name, email,
+				identityKey: volunteerIdentityKey(name, email),
+				isEst,
+				colorStatus: status,
+				establishedSetSize: establishedIdentities.size,
+			});
+		}
 		const candidate: VolunteerSheetRow = {
 			name,
 			email,
@@ -356,8 +368,9 @@ export async function GET() {
 			adventurePlans: get(iAdv),
 			photosOk: parseBool(get(iPhotos)),
 			leashCommitment: parseBool(get(iLeash)),
-			orientationStatus: status,
-			isEstablished: establishedIdentities.has(volunteerIdentityKey(name, email)),
+			// Established DTVs always get signed_waiver regardless of response-sheet color
+			orientationStatus: isEst ? 'signed_waiver' : status,
+			isEstablished: isEst,
 			orientationDate,
 			sourceSheet: 'Day Trip Volunteer Responses',
 			sourceRow: rowNumber

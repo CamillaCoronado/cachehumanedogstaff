@@ -28,6 +28,21 @@ function volunteerRowToId(row: VolunteerSheetRow, sharedEmailDifferentNameEmails
 	return emailToId(row.name);
 }
 
+export async function clearAllVolunteers(): Promise<number> {
+	if (!db) return 0;
+	const snap = await getDocs(collection(db, COLLECTION));
+	let deleted = 0;
+	for (let i = 0; i < snap.docs.length; i += 500) {
+		const batch = writeBatch(db);
+		for (const d of snap.docs.slice(i, i + 500)) {
+			batch.delete(d.ref);
+			deleted++;
+		}
+		await batch.commit();
+	}
+	return deleted;
+}
+
 export async function listVolunteers(): Promise<Volunteer[]> {
 	if (!db) return [];
 	const snap = await getDocs(collection(db, COLLECTION));
@@ -177,13 +192,17 @@ export async function syncIHVVolunteers(rows: IHVSheetRow[]): Promise<number> {
 			const id = `ihv_${idBase}`;
 			const ref = doc(db, COLLECTION, id);
 
+			const today = new Date().toISOString().split('T')[0];
+			const isUpcomingDate = Boolean(row.orientationDate && row.orientationDate >= today);
 			const orientationStatus: Volunteer['orientationStatus'] = row.isNonActive
 				? 'answered_no'
 				: row.noShowed
 					? 'no_showed'
-					: row.orientationDate
-						? 'scheduled'
-						: 'pending';
+					: row.isEstablished
+						? 'pending'
+						: isUpcomingDate
+							? 'scheduled'
+							: 'pending';
 
 			const record: Partial<Volunteer> = {
 				id,
@@ -208,7 +227,9 @@ export async function syncIHVVolunteers(rows: IHVSheetRow[]): Promise<number> {
 				createdAt: now,
 				updatedAt: now
 			};
-			if (row.orientationDate) (record as Record<string, unknown>).orientationDate = row.orientationDate;
+			// Only keep orientation date if upcoming — explicitly null out past/stale dates
+			(record as Record<string, unknown>).orientationDate =
+				(!row.isEstablished && isUpcomingDate) ? row.orientationDate : null;
 			batch.set(ref, record, { merge: true });
 			count++;
 		}

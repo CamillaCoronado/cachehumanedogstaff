@@ -162,7 +162,7 @@
 		if (!ffDogId || !ffDate) return;
 		addingFf = true;
 		try {
-			const days = ffDays.trim() ? Number(ffDays) : null;
+			const days = ffDays ? Number(ffDays) : null;
 			await updateDog(ffDogId, {
 				fortifloraDate: new Date(ffDate + 'T12:00:00'),
 				fortifloraDays: Number.isFinite(days) && days! > 0 ? days : null,
@@ -175,7 +175,8 @@
 			ffTime = 'both';
 			showAddFf = false;
 			toast.success('Added to FortiFlora list.');
-		} catch {
+		} catch (error) {
+			console.error('FortiFlora add failed:', error);
 			toast.error('Could not add to FortiFlora list.');
 		} finally {
 			addingFf = false;

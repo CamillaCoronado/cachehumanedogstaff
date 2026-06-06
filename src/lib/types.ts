@@ -162,7 +162,7 @@ export interface Volunteer {
 	orientationStatus: VolunteerOrientationStatus;
 	isEstablished: boolean;
 	isNonActive?: boolean;
-	trainingSteps?: { point: boolean; trained: boolean; computer: boolean; moved: boolean };
+	trainingSteps?: { point: boolean; pointPending: boolean; trained: boolean; computer: boolean; moved: boolean };
 	sheetNotes?: string | null;
 	orientationDate?: string | null;
 	internalNotes: string;
