@@ -1115,13 +1115,16 @@
 											{/if}
 										</div>
 									</div>
+									{@const resolvedNames = session.dogNames.length > 0
+										? session.dogNames
+										: session.dogIds.map((id) => dogs.find((d) => d.id === id)?.name ?? id)}
 									<p class="history-meta typewriter">
-										{formatDateTime(session.date)} • {session.dogNames.length} dog(s)
+										{formatDateTime(session.date)} • {resolvedNames.length} dog(s)
 										{#if session.durationMinutes}
 											• {session.durationMinutes} min
 										{/if}
 									</p>
-									<p class="history-dogs">{session.dogNames.join(', ')}</p>
+									<p class="history-dogs">{resolvedNames.join(', ')}</p>
 									{#if session.notes}
 										<p class="history-notes">{session.notes}</p>
 									{/if}

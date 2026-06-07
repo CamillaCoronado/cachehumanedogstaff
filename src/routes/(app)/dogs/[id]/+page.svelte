@@ -36,6 +36,7 @@
 		toDate,
 		checkDayTripEligibility
 	} from '$lib/utils/dates';
+	import { getDayTripGapDays } from '$lib/utils/attention';
 	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -123,7 +124,7 @@
 	$: handlingLevelText = handlingLevelLabel(effectiveHandlingLevel);
 	$: isManagerHandlingOnly = effectiveHandlingLevel === 'manager_only';
 	$: isStaffHandlingOnly = effectiveHandlingLevel === 'staff_only';
-	$: daysSinceLastTrip = dog ? daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince ?? dog.intakeDate), today) : null;
+	$: daysSinceLastTrip = dog ? getDayTripGapDays(dog, today) : null;
 	$: currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 	$: nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 	$: thisMonthTrips = dayTripLogs.filter((log) => {

@@ -12,6 +12,7 @@
 	import { listVolunteers } from '$lib/data/volunteers';
 	import type { BehaviorRating, DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
+	import { getDayTripGapDays, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -887,11 +888,10 @@
 					{:else}
 						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
-							{@const effectiveSince = dog.shelterSince ?? dog.intakeDate}
 							{@const displayDays = daysSince(dog.lastDayTripDate)}
-							{@const sinceReturnDays = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
-							{@const daysAtShelter = daysSince(effectiveSince) ?? 0}
-							{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= 14 : daysAtShelter >= 14}
+							{@const sinceReturnDays = getDayTripGapDays(dog, now)}
+							{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
+							{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS}
 							{@const stripe = dogStripeColor(dog, sheetColors)}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
@@ -1104,11 +1104,10 @@
 						</thead>
 						<tbody>
 							{#each dogStatsRows as dog}
-								{@const effectiveSince = dog.shelterSince ?? dog.intakeDate}
 								{@const displayDays = daysSince(dog.lastDayTripDate)}
-								{@const sinceReturnDays = daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince))}
-								{@const daysAtShelter = daysSince(effectiveSince) ?? 0}
-								{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= 14 : daysAtShelter >= 14}
+								{@const sinceReturnDays = getDayTripGapDays(dog, now)}
+								{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
+								{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS}
 								{@const eligibility = getEligibility(dog)}
 								{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 								<tr class:tr-overdue={overdue && eligibility.eligible && !dog.isOutOnDayTrip}>

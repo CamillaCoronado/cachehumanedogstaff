@@ -9,7 +9,7 @@
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
-	import { getBathStatus, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
+	import { getBathStatus, isBathDue, getDayTripGapDays, isPlaygroupEligible, buildLastPlaygroupMap, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -215,21 +215,6 @@ const today = new Date();
 		}
 	}
 
-	function buildLastPlaygroupMap(sessions: PlaygroupSession[]) {
-		const latestByDog: Record<string, Date> = {};
-		for (const session of sessions) {
-			const sessionDate = toDate(session.date);
-			if (!sessionDate) continue;
-			for (const dogId of session.dogIds ?? []) {
-				if (!dogId) continue;
-				const current = latestByDog[dogId];
-				if (!current || sessionDate.getTime() > current.getTime()) {
-					latestByDog[dogId] = sessionDate;
-				}
-			}
-		}
-		return latestByDog;
-	}
 
 	async function handleAddDog() {
 		if (!draftDog.name.trim()) {
@@ -376,12 +361,7 @@ const today = new Date();
 		return 'status-pill-red';
 	}
 
-	function isBathDue(dog: Dog) {
-		if (dog.inFoster) return false;
-		return getBathStatus(dog, today).isDue;
-	}
-
-	function missingEvaluations(dog: Dog) {
+function missingEvaluations(dog: Dog) {
 		const missing: string[] = [];
 		if (dog.goodWithDogs === 'unknown') missing.push('dogs');
 		if (dog.goodWithCats === 'unknown') missing.push('cats');
@@ -449,8 +429,8 @@ const today = new Date();
 			});
 		}
 
-		if (!dog.awaitingEvaluation && tripEligibility.eligible) {
-			const dayTripGap = daysSince(sinceReturn(dog.lastDayTripDate, dog.shelterSince ?? dog.intakeDate), today);
+		if (!dog.inFoster && !dog.awaitingEvaluation && tripEligibility.eligible) {
+			const dayTripGap = getDayTripGapDays(dog, today);
 			if (dayTripGap === null) {
 				items.push({ label: 'No day trip logged yet.', tone: 'info', priority: 68 });
 			} else if (dayTripGap >= DAYTRIP_OVERDUE_DAYS) {
@@ -458,10 +438,7 @@ const today = new Date();
 			}
 		}
 
-		const playgroupReadyCutoff = toDate(dog.playgroupReadyDate) ??
-			(toDate(dog.intakeDate) ? new Date(toDate(dog.intakeDate)!.getTime() + 7 * 86_400_000) : null);
-		const isPlaygroupReady = playgroupReadyCutoff ? today >= playgroupReadyCutoff : false;
-		if (!dog.awaitingEvaluation && isPlaygroupReady) {
+		if (isPlaygroupEligible(dog, today)) {
 			const playgroupGap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince ?? dog.intakeDate), today);
 			if (playgroupGap === null) {
 				items.push({ label: 'No playgroup logged yet.', tone: 'info', priority: 63 });
@@ -740,7 +717,7 @@ const today = new Date();
 					{#each sortedDogs as dog}
 						{@const tripEligibility = getTripEligibility(dog)}
 					{@const expandedPillType = expandedPill.get(dog.id) ?? null}
-						{@const bathDue = isBathDue(dog)}
+						{@const bathDue = isBathDue(dog, today)}
 						{@const effectiveHandlingLevel = dogHandlingLevel(dog)}
 						{@const lastPlaygroupDate = lastPlaygroupByDogId[dog.id] ?? null}
 						{@const cardPendingItems = pendingItems(dog, tripEligibility, bathDue, lastPlaygroupDate)}

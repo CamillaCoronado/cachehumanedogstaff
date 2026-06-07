@@ -89,9 +89,57 @@ export function getBathAttentionDogs(dogs: Dog[], today: Date): BathAttentionIte
 	return items;
 }
 
+// ─── Shared helpers ──────────────────────────────────────────────────────────
+
+export function getDayTripGapDays(dog: Dog, today: Date): number | null {
+	const effectiveSince = dog.shelterSince ?? dog.intakeDate;
+	return daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince), today);
+}
+
+export function buildLastPlaygroupMap(sessions: PlaygroupSession[]): Record<string, Date> {
+	const map: Record<string, Date> = {};
+	for (const s of sessions) {
+		const d = toDate(s.date);
+		if (!d) continue;
+		for (const id of s.dogIds) {
+			if (!map[id] || d.getTime() > map[id].getTime()) map[id] = d;
+		}
+	}
+	return map;
+}
+
+export function isBathDue(dog: Dog, today: Date): boolean {
+	if (dog.inFoster) return false;
+	return getBathStatus(dog, today).isDue;
+}
+
+function isSurgeryResting(dog: Dog, today: Date): boolean {
+	const surgeryDateObj = toDate(dog.surgeryDate);
+	const surgeryDaysAgo = surgeryDateObj
+		? Math.round((today.getTime() - startOfDay(surgeryDateObj).getTime()) / 86_400_000)
+		: null;
+	return surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0);
+}
+
+export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
+	if (dog.goodWithDogs !== 'yes') return false;
+	if (!dog.isFixed) return false;
+	if (dog.isolationStatus !== 'none') return false;
+	if (dog.awaitingEvaluation) return false;
+
+	const dob = toDate(dog.dateOfBirth);
+	const ageWeeks = dob ? Math.floor((today.getTime() - dob.getTime()) / (7 * 86_400_000)) : null;
+	if (ageWeeks !== null && ageWeeks < 26) return false;
+
+	if (isSurgeryResting(dog, today)) return false;
+
+	const availableSince = dog.shelterSince ?? dog.intakeDate;
+	const availableMs = toDate(availableSince)?.getTime() ?? 0;
+	const readyDate = toDate(dog.playgroupReadyDate) ?? new Date(availableMs + 7 * 86_400_000);
+	return today >= readyDate;
+}
+
 // ─── Day Trips ───────────────────────────────────────────────────────────────
-// Mirrors day trips page: overdue when 14+ days since last trip (since return)
-// or 14+ days at shelter with no trips.
 
 export interface DayTripAttentionItem {
 	dog: Dog;
@@ -101,21 +149,14 @@ export interface DayTripAttentionItem {
 export function getOverdueDayTripDogs(dogs: Dog[], today: Date): DayTripAttentionItem[] {
 	const items: DayTripAttentionItem[] = [];
 	for (const dog of dogs) {
+		if (dog.inFoster) continue;
 		if (dog.dayTripStatus === 'ineligible') continue;
 		if (dog.isolationStatus !== 'none') continue;
 		if (dog.isOutOnDayTrip) continue;
+		if (isSurgeryResting(dog, today)) continue;
 
-		const surgeryDateObj = toDate(dog.surgeryDate);
-		const surgeryDaysAgo = surgeryDateObj
-			? Math.round((today.getTime() - startOfDay(surgeryDateObj).getTime()) / 86_400_000)
-			: null;
-		if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0))
-			continue;
-
-		const effectiveSince = dog.shelterSince ?? dog.intakeDate;
-		const sinceReturnDate = sinceReturn(dog.lastDayTripDate, effectiveSince);
-		const sinceReturnDays = daysSince(sinceReturnDate, today);
-		const daysAtShelter = daysSince(effectiveSince, today) ?? 0;
+		const sinceReturnDays = getDayTripGapDays(dog, today);
+		const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate, today) ?? 0;
 		const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS;
 
 		if (overdue) {
@@ -126,7 +167,6 @@ export function getOverdueDayTripDogs(dogs: Dog[], today: Date): DayTripAttentio
 }
 
 // ─── Playgroups ───────────────────────────────────────────────────────────────
-// Dogs confirmed good-with-dogs that haven't been in a group for 14+ days.
 
 export interface PlaygroupAttentionItem {
 	dog: Dog;
@@ -138,39 +178,18 @@ export function getOverduePlaygroupDogs(
 	sessions: PlaygroupSession[],
 	today: Date
 ): PlaygroupAttentionItem[] {
-	const lastPgMs: Record<string, number> = {};
-	for (const s of sessions) {
-		const t = toDate(s.date)?.getTime();
-		if (!t) continue;
-		for (const id of s.dogIds) {
-			if (!lastPgMs[id] || t > lastPgMs[id]) lastPgMs[id] = t;
-		}
-	}
+	const lastPgMap = buildLastPlaygroupMap(sessions);
 
 	const items: PlaygroupAttentionItem[] = [];
 	for (const dog of dogs) {
-		if (dog.goodWithDogs !== 'yes') continue;
-		if (!dog.isFixed) continue;
-		if (dog.isolationStatus !== 'none') continue;
-
-		const dob = toDate(dog.dateOfBirth);
-		const ageWeeks = dob ? Math.floor((today.getTime() - dob.getTime()) / (7 * 86_400_000)) : null;
-		if (ageWeeks !== null && ageWeeks < 26) continue;
-
-		const surgeryDateObj = toDate(dog.surgeryDate);
-		const surgeryDaysAgo = surgeryDateObj
-			? Math.round((today.getTime() - startOfDay(surgeryDateObj).getTime()) / 86_400_000)
-			: null;
-		if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0))
-			continue;
+		if (!isPlaygroupEligible(dog, today)) continue;
 
 		const availableSince = dog.shelterSince ?? dog.intakeDate;
 		const availableMs = toDate(availableSince)?.getTime() ?? 0;
 		const readyDate = toDate(dog.playgroupReadyDate) ?? new Date(availableMs + 7 * 86_400_000);
-		if (today < readyDate) continue;
 
-		const lastMs = lastPgMs[dog.id] ?? null;
-		const effectiveLastMs = lastMs !== null && lastMs >= availableMs ? lastMs : null;
+		const lastDate = lastPgMap[dog.id] ?? null;
+		const effectiveLastMs = lastDate !== null && lastDate.getTime() >= availableMs ? lastDate.getTime() : null;
 		const pgDays = effectiveLastMs !== null ? (daysSince(new Date(effectiveLastMs), today) ?? null) : null;
 		const readyDays = daysSince(readyDate, today) ?? 0;
 		const days = pgDays ?? readyDays;
