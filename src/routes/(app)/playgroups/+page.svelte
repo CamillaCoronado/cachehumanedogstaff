@@ -372,18 +372,22 @@
 	}
 
 	function matchImportDogs(names: string[]) {
-		const searchable = dogs.filter((d) => !d.permanentFoster);
-		return names.map((name) => {
-			const lower = name.toLowerCase();
-			// Exact match first
-			let dog = searchable.find((d) => d.name.toLowerCase() === lower) ?? null;
-			// Partial: "Rosie" matches "Rosie Mae", "Mac" matches "Big Mac", etc.
-			if (!dog) {
-				dog = searchable.find((d) => {
+		const active = dogs.filter((d) => d.status === 'active' && !d.permanentFoster);
+		const all = dogs.filter((d) => !d.permanentFoster);
+		function findIn(list: Dog[], lower: string) {
+			return (
+				list.find((d) => d.name.toLowerCase() === lower) ??
+				list.find((d) => {
 					const dogLower = d.name.toLowerCase();
 					return dogLower.includes(lower) || lower.includes(dogLower);
-				}) ?? null;
-			}
+				}) ??
+				null
+			);
+		}
+		return names.map((name) => {
+			const lower = name.toLowerCase();
+			// Always prefer an active dog; fall back to inactive only if no active match
+			const dog = findIn(active, lower) ?? findIn(all, lower);
 			return { name, dog, isActive: dog ? dog.status === 'active' : false };
 		});
 	}
@@ -603,7 +607,7 @@
 		if (!editingSessionId) return;
 		savingEdit = true;
 		try {
-			const editSelectedDogs = activeDogs.filter((d) => editDogIds.includes(d.id));
+			const editSelectedDogs = dogs.filter((d) => editDogIds.includes(d.id));
 			await updatePlaygroupSession(editingSessionId, {
 				date: parseInputDate(editDate),
 				groupName: editGroupName.trim(),
@@ -1074,6 +1078,21 @@
 														}}
 													/>
 													{dog.name}
+												</label>
+											{/each}
+											{#each dogs.filter((d) => d.status !== 'active' && editDogIds.includes(d.id)) as dog}
+												<label class="edit-dog-item edit-dog-item-inactive">
+													<input
+														type="checkbox"
+														value={dog.id}
+														checked={true}
+														on:change={(e) => {
+															if (!e.currentTarget.checked) {
+																editDogIds = editDogIds.filter((id) => id !== dog.id);
+															}
+														}}
+													/>
+													{dog.name} <span class="edit-dog-left">left shelter</span>
 												</label>
 											{/each}
 										</div>
@@ -1871,6 +1890,16 @@
 		color: #2c3e50;
 		cursor: pointer;
 		white-space: nowrap;
+	}
+
+	.edit-dog-item-inactive {
+		opacity: 0.6;
+	}
+
+	.edit-dog-left {
+		font-size: 0.62rem;
+		color: #7a8fa0;
+		font-style: italic;
 	}
 
 	.btn-save-edit {

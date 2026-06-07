@@ -6,7 +6,7 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDateTime } from '$lib/utils/dates';
-	import { getDog, listDogs } from '$lib/data/dogs';
+	import { getDog, listDogs, mergeDogs } from '$lib/data/dogs';
 	import { confetti } from '@neoconfetti/svelte';
 
 	function portal(node: HTMLElement) {
@@ -37,6 +37,14 @@
 
 	let showCelebrationTest = false;
 	let testDogs: Dog[] = [];
+
+	// Merge dogs
+	let allDogs: Dog[] = [];
+	let allDogsLoaded = false;
+	let mergeKeepId = '';
+	let mergeDeleteId = '';
+	let merging = false;
+	let mergeConfirm = false;
 
 	let showFosterTest = false;
 	let fosterTestDog: Dog | null = null;
@@ -84,6 +92,35 @@
 	$: if ($authReady && $authUser && isAdmin && !usersLoaded && !usersLoading) {
 		usersLoaded = true;
 		void loadUsers();
+	}
+
+	$: if ($authReady && $authUser && isAdmin && !allDogsLoaded) {
+		allDogsLoaded = true;
+		void listDogs().then((dogs) => {
+			allDogs = dogs.filter((d) => d.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
+		});
+	}
+
+	$: mergeKeepDog = allDogs.find((d) => d.id === mergeKeepId) ?? null;
+	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
+	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
+
+	async function runMerge() {
+		if (!mergeValid || merging) return;
+		merging = true;
+		try {
+			await mergeDogs(mergeKeepId, mergeDeleteId);
+			toast.success(`Merged — ${mergeDeleteDog?.name} deleted, records moved to ${mergeKeepDog?.name}.`);
+			allDogs = allDogs.filter((d) => d.id !== mergeDeleteId);
+			mergeKeepId = '';
+			mergeDeleteId = '';
+			mergeConfirm = false;
+		} catch (error) {
+			console.error(error);
+			toast.error('Merge failed. Check the console for details.');
+		} finally {
+			merging = false;
+		}
 	}
 
 	function toEditableUser(user: UserProfile): EditableUser {
@@ -358,6 +395,64 @@
 							</li>
 						{/each}
 					</ul>
+				{/if}
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Merge duplicate dogs</h3>
+						<p class="section-copy">Move all logs and notes from the duplicate into the dog you want to keep, then delete the duplicate.</p>
+					</div>
+				</div>
+
+				<div class="merge-fields">
+					<label class="field">
+						<span class="field-label">Keep (canonical record)</span>
+						<select class="field-select" bind:value={mergeKeepId} disabled={merging}>
+							<option value="">— select dog to keep —</option>
+							{#each allDogs as dog}
+								<option value={dog.id}>{dog.name}</option>
+							{/each}
+						</select>
+					</label>
+					<label class="field">
+						<span class="field-label">Delete (duplicate)</span>
+						<select class="field-select" bind:value={mergeDeleteId} disabled={merging}>
+							<option value="">— select dog to delete —</option>
+							{#each allDogs.filter((d) => d.id !== mergeKeepId) as dog}
+								<option value={dog.id}>{dog.name}</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+
+				{#if mergeValid && !mergeConfirm}
+					<div class="merge-preview">
+						<p class="merge-preview-text">
+							All feeding logs, stool logs, bath logs, behavioral notes, and day trip logs from
+							<strong>{mergeDeleteDog?.name}</strong> will be moved to <strong>{mergeKeepDog?.name}</strong>,
+							then <strong>{mergeDeleteDog?.name}</strong> will be permanently deleted.
+						</p>
+						<button class="danger-btn" type="button" on:click={() => (mergeConfirm = true)}>
+							Merge dogs
+						</button>
+					</div>
+				{/if}
+
+				{#if mergeConfirm}
+					<div class="merge-confirm">
+						<p class="merge-confirm-text">This cannot be undone. Are you sure?</p>
+						<div class="merge-confirm-actions">
+							<button class="danger-btn" type="button" on:click={runMerge} disabled={merging}>
+								{merging ? 'Merging…' : 'Yes, merge and delete duplicate'}
+							</button>
+							<button class="ghost-btn" type="button" on:click={() => (mergeConfirm = false)} disabled={merging}>
+								Cancel
+							</button>
+						</div>
+					</div>
 				{/if}
 			</section>
 
@@ -643,6 +738,70 @@
 	.ghost-btn:disabled {
 		opacity: 0.65;
 		box-shadow: none;
+	}
+
+	.danger-btn {
+		min-height: 2.5rem;
+		padding: 0.6rem 0.9rem;
+		border-radius: 0.8rem;
+		font-family: var(--font-ui);
+		font-size: 0.86rem;
+		font-weight: 700;
+		border: 1px solid #9e2929;
+		background: linear-gradient(180deg, #d95050 0%, #b83232 100%);
+		color: #fff;
+		box-shadow: 0 10px 18px rgba(180, 40, 40, 0.18);
+	}
+
+	.danger-btn:disabled {
+		opacity: 0.65;
+		box-shadow: none;
+	}
+
+	.merge-fields {
+		display: grid;
+		gap: 0.6rem;
+		margin-top: 0.8rem;
+	}
+
+	.merge-preview {
+		margin-top: 0.8rem;
+		padding: 0.7rem 0.8rem;
+		border: 1px solid #e8d5b0;
+		border-radius: 0.5rem;
+		background: #fffbf2;
+		display: grid;
+		gap: 0.6rem;
+	}
+
+	.merge-preview-text {
+		margin: 0;
+		font-size: 0.84rem;
+		line-height: 1.5;
+		color: #5a3e1a;
+	}
+
+	.merge-confirm {
+		margin-top: 0.8rem;
+		padding: 0.7rem 0.8rem;
+		border: 1px solid #e8b0b0;
+		border-radius: 0.5rem;
+		background: #fff5f5;
+		display: grid;
+		gap: 0.6rem;
+	}
+
+	.merge-confirm-text {
+		margin: 0;
+		font-size: 0.84rem;
+		font-weight: 700;
+		color: #7a1f1f;
+	}
+
+	.merge-confirm-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
 	}
 
 	.status-row {

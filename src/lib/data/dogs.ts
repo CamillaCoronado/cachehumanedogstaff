@@ -762,6 +762,53 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 	return getDog(id);
 }
 
+export async function mergeDogs(keepId: string, deleteId: string) {
+	const subcollections = ['behavioralNotes', 'bathLogs', 'feedingLogs', 'stoolLogs', 'dayTripLogs'] as const;
+
+	if (db) {
+		for (const sub of subcollections) {
+			const srcRef = collection(db, 'dogs', deleteId, sub);
+			const dstRef = collection(db, 'dogs', keepId, sub);
+			const snapshot = await getDocs(srcRef);
+			const batch = writeBatch(db);
+			for (const docSnap of snapshot.docs) {
+				batch.set(doc(dstRef, docSnap.id), docSnap.data());
+			}
+			await batch.commit();
+		}
+		await deleteDog(deleteId);
+		return;
+	}
+
+	// localStorage path
+	const notes = readJson<NoteMap>(NOTES_KEY, {});
+	notes[keepId] = [...(notes[keepId] ?? []), ...(notes[deleteId] ?? [])];
+	delete notes[deleteId];
+	writeJson(NOTES_KEY, notes);
+
+	const baths = readJson<LogMap<StoredBathLog>>(BATH_KEY, {});
+	baths[keepId] = [...(baths[keepId] ?? []), ...(baths[deleteId] ?? [])];
+	delete baths[deleteId];
+	writeJson(BATH_KEY, baths);
+
+	const feeding = readJson<LogMap<StoredFeedingLog>>(FEEDING_KEY, {});
+	feeding[keepId] = [...(feeding[keepId] ?? []), ...(feeding[deleteId] ?? [])];
+	delete feeding[deleteId];
+	writeJson(FEEDING_KEY, feeding);
+
+	const stools = readJson<LogMap<StoredStoolLog>>(STOOL_KEY, {});
+	stools[keepId] = [...(stools[keepId] ?? []), ...(stools[deleteId] ?? [])];
+	delete stools[deleteId];
+	writeJson(STOOL_KEY, stools);
+
+	const dayTrips = readDayTripMap();
+	dayTrips[keepId] = [...(dayTrips[keepId] ?? []), ...(dayTrips[deleteId] ?? [])];
+	delete dayTrips[deleteId];
+	writeDayTripMap(dayTrips);
+
+	await deleteDog(deleteId);
+}
+
 export async function archiveDog(id: string) {
 	return updateDog(id, {
 		status: 'adopted',
