@@ -37,6 +37,7 @@
 		checkDayTripEligibility
 	} from '$lib/utils/dates';
 	import { getDayTripGapDays } from '$lib/utils/attention';
+	import { shelterTimeLabel, stoolColor, stoolLabel, reentryDatesLabel } from '$lib/utils/labels';
 	import { durationHours as dayTripHours } from '$lib/utils/daytrips';
 	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
@@ -459,6 +460,10 @@
 		await loadAll();
 	}
 
+	$: filteredFeeding = feedingLogs;
+	$: filteredBath = bathLogs;
+	$: filteredStool = stoolLogs;
+
 	async function handleSaveBath() {
 		if (!dog || !newBathDate) return;
 		if (!bathIsEligible) { toast.error('Baths are blocked for 10 days after surgery.'); return; }
@@ -504,46 +509,6 @@
 		finally { savingStool = false; }
 	}
 
-	function shelterTimeLabel(entryDate: Dog['intakeDate']) {
-		const days = daysSince(entryDate, today);
-		if (days === null) return 'Unknown';
-		if (days < 7) return `${days} day${days === 1 ? '' : 's'}`;
-		const weeks = Math.floor(days / 7);
-		return `${weeks} week${weeks === 1 ? '' : 's'} (${days} days)`;
-	}
-
-	$: filteredFeeding = feedingLogs;
-	$: filteredBath = bathLogs;
-	$: filteredStool = stoolLogs;
-
-	function stoolColor(type: number) {
-		if (type >= 3 && type <= 4) return 'bg-emerald-100 text-emerald-700';
-		if (type === 1 || type === 2 || type === 5) return 'bg-yellow-100 text-yellow-700';
-		return 'bg-rose-100 text-rose-700';
-	}
-
-	function stoolLabel(type: number) {
-		const labels = {
-			1: 'Separate hard lumps',
-			2: 'Lumpy sausage',
-			3: 'Cracked sausage',
-			4: 'Smooth sausage',
-			5: 'Soft blobs',
-			6: 'Mushy pieces',
-			7: 'Watery liquid'
-		};
-		return labels[type as keyof typeof labels] ?? 'Unknown';
-	}
-
-	function reentryDatesLabel(reentryDates: Dog['reentryDates']) {
-		if (!Array.isArray(reentryDates) || reentryDates.length === 0) return 'None';
-		const normalized = reentryDates
-			.map((date) => toDate(date))
-			.filter((date): date is Date => Boolean(date))
-			.sort((a, b) => a.getTime() - b.getTime());
-		if (normalized.length === 0) return 'None';
-		return normalized.map((date) => formatDate(date)).join(', ');
-	}
 </script>
 
 <svelte:head>
@@ -732,7 +697,7 @@
 									<div class="kennel-section-body kennel-facts">
 										<p><span>Original Entry:</span> <strong class="detail-value">{formatDate(dog.originalIntakeDate)}</strong></p>
 										<p><span>Current Entry:</span> <strong class="detail-value">{formatDate(dog.intakeDate)}</strong></p>
-										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate)}</strong></p>
+										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate, today)}</strong></p>
 										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
 										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
 										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
