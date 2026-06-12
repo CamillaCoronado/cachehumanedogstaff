@@ -38,7 +38,7 @@ Continue the pattern already established by `attention.ts` and `feeding.ts`.
 | `daytrips/+page.svelte` | `durationHours`, `formatDuration`, `formatTime`, `formatShortDate`, `getEligibility`, stats aggregation helpers | `src/lib/utils/dates.ts` (formatters) + new `src/lib/utils/daytrips.ts` |
 | `dogs/+page.svelte` | pill/label helpers (`tripPillClass`, `tripLabel`, `handlingPillClass`, `handlingLabel`, `adoptionLabel`, `adoptionPillClass`, `missingEvaluations`, `pendingItems`, `getTripEligibility`) | extend `src/lib/utils/dogs.ts` / `labels.ts` / `attention.ts` |
 | `dogs/[id]/+page.svelte` | `stoolColor`, `stoolLabel`, `shelterTimeLabel`, `reentryDatesLabel`, `dayTripHours` | shared utils (note: `dayTripHours` ≈ daytrips' `durationHours` — unify) |
-| `volunteers/+page.svelte` | local `formatDate` | delete; use `src/lib/utils/dates.ts` |
+| `volunteers/+page.svelte` | local `formatDate` | ~~delete~~ NOT a duplicate (checked 2026-06-12): renders "Sat, Jun 13" (weekday, no year) vs shared "Jun 13, 2026". Keep page-local. |
 
 Each row = one commit. Add a small vitest file per extracted module if vitest was set up.
 
