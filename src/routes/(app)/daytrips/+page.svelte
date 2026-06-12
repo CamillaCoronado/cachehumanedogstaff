@@ -9,6 +9,7 @@
 	import { listVolunteers } from '$lib/data/volunteers';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
+	import ImportTab from '$lib/components/daytrips/ImportTab.svelte';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 	import { getDayTripGapDays, isDayTripEligible, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { durationHours, formatDuration, formatTime, formatShortDate } from '$lib/utils/daytrips';
@@ -42,47 +43,6 @@
 			toast.error('Copy failed — select and copy manually.');
 		}
 	}
-
-	// ── Import state ──
-	let sheetData: { name: string; dates: string[] }[] = [];
-	let sheetLoading = false;
-	let sheetError = '';
-
-	async function loadFromSheet() {
-		sheetLoading = true;
-		sheetError = '';
-		importDryRunDone = false;
-		importDone = false;
-		importPreview = [];
-		importLog = [];
-		try {
-			const res = await fetch('/api/sheets/daytrips');
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			sheetData = await res.json();
-		} catch (e) {
-			sheetError = e instanceof Error ? e.message : String(e);
-		} finally {
-			sheetLoading = false;
-		}
-	}
-
-	interface ImportPreviewRow {
-		sheetName: string;
-		dogId: string | null;
-		dogName: string | null;
-		dates: string[];
-		tripCount: number;
-		matched: boolean;
-		willCreate: boolean;
-		asmStatus?: string;  // status found in ASM for unmatched dogs
-		overrideId?: string;
-	}
-
-	let importPreview: ImportPreviewRow[] = [];
-	let importDryRunDone = false;
-	let importing = false;
-	let importDone = false;
-	let importLog: string[] = [];
 
 	async function autoImportFromHiddenNotes() {
 		const dogsWithNotes = dogs.filter(d => /day trip notes/i.test(d.hiddenComments ?? ''));
@@ -159,160 +119,6 @@
 			if (totalPatched) parts.push(`${totalPatched} updated`);
 			toast.success(`Synced trips from hidden notes: ${parts.join(', ')}.`);
 		}
-	}
-
-	async function runDryRun() {
-		importPreview = sheetData.map((row) => {
-			const matched = matchDogByName(row.name, dogs);
-			return {
-				sheetName: row.name,
-				dogId: matched?.id ?? null,
-				dogName: matched?.name ?? null,
-				dates: row.dates,
-				tripCount: row.dates.length,
-				matched: Boolean(matched),
-				willCreate: !matched
-			};
-		});
-		importDryRunDone = true;
-		importDone = false;
-		importLog = [];
-
-		// Look up unmatched dogs in ASM to show their status
-		const unmatched = importPreview.filter((r) => r.willCreate);
-		await Promise.all(
-			unmatched.map(async (row) => {
-				try {
-					const res = await fetch(`/api/asm/search?q=${encodeURIComponent(row.sheetName)}`);
-					if (!res.ok) return;
-					const results: { name: string; status: string }[] = await res.json();
-					const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
-					const hit = results.find((a) =>
-						norm(a.name).includes(norm(row.sheetName)) ||
-						norm(row.sheetName).includes(norm(a.name))
-					);
-					if (hit) {
-						importPreview = importPreview.map((r) =>
-							r.sheetName === row.sheetName ? { ...r, asmStatus: hit.status } : r
-						);
-					}
-				} catch {
-					// silently ignore ASM lookup failures
-				}
-			})
-		);
-	}
-
-	async function runImport() {
-		if (!importDryRunDone) return;
-		importing = true;
-		importLog = [];
-
-		let totalCreated = 0;
-		let totalSkipped = 0;
-
-		const previewMap = Object.fromEntries(importPreview.map((r) => [r.sheetName, r]));
-		let totalNewDogs = 0;
-
-		for (const row of sheetData) {
-			const preview = previewMap[row.name];
-			const overrideDog = preview?.overrideId ? dogs.find((d) => d.id === preview.overrideId) : undefined;
-			let dog = overrideDog ?? matchDogByName(row.name, dogs);
-
-			if (!dog) {
-				// Create a minimal record flagged as adopted (not in system)
-				const newDog = await createDog({
-					name: row.name,
-					breed: '',
-					sex: 'unknown',
-					intakeDate: null,
-					originalIntakeDate: null,
-					reentryDates: [],
-					dateOfBirth: null,
-					weightLbs: null,
-					foodType: '',
-					foodAmount: '',
-					dietaryNotes: '',
-					origin: '',
-					pottyTrained: 'unknown',
-					goodWithDogs: 'unknown',
-					goodWithCats: 'unknown',
-					goodWithKids: 'unknown',
-					idealHome: '',
-					energyLevel: 'unknown',
-					outdoorKennelAssignment: '',
-					lastBathDate: null,
-					lastBathBy: null,
-					lastDayTripDate: null,
-					isOutOnDayTrip: false,
-					currentDayTripStartedAt: null,
-					surgeryDate: null,
-					surgeryRestDays: null,
-					lastSurgeryDate: null,
-					fortifloraDate: null,
-					fortifloraDays: null,
-					fortifloraTime: null,
-					isMicrochipped: false,
-					isFixed: false,
-					fixedDate: null,
-					isVaccinated: false,
-					vaccineCount: 0,
-					vaccinatedDate: null,
-					dayTripStatus: 'eligible',
-					dayTripManagerOnly: false,
-					dayTripNotes: null,
-					handlingLevel: 'volunteer',
-					inFoster: false,
-					isolationStatus: 'none',
-					isolationReason: null,
-					isolationUntilDate: null,
-					status: 'adopted',
-					hiddenComments: 'Auto-created during day trip import — not found in system'
-				});
-				if (!newDog) {
-					importLog = [...importLog, `⚠ Skipped "${row.name}" — could not create dog record`];
-					totalSkipped++;
-					continue;
-				}
-				dog = newDog;
-				totalNewDogs++;
-				importLog = [...importLog, `+ Created "${row.name}" as adopted (not in system)`];
-			}
-
-			const sortedDates = [...row.dates].sort();
-			if (sortedDates.length === 0) {
-				importLog = [...importLog, `⚠ Skipped "${row.name}" — no valid dates`];
-				totalSkipped++;
-				continue;
-			}
-
-			// Wipe existing logs — spreadsheet is source of truth
-			await clearDayTripLogs(dog.id);
-
-			for (const dateStr of sortedDates) {
-				const parts = dateStr.split('-').map(Number);
-				const tripDate = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0);
-				await importHistoricalDayTrip(dog.id, tripDate, $authProfile);
-				totalCreated++;
-			}
-
-			// Update lastDayTripDate to the most recent imported date
-			const lastDateStr = sortedDates[sortedDates.length - 1];
-			const lp = lastDateStr.split('-').map(Number);
-			const lastDate = new Date(lp[0], lp[1] - 1, lp[2], 0, 0, 0);
-			await updateDog(dog.id, {
-				lastDayTripDate: lastDate,
-				isOutOnDayTrip: false,
-				currentDayTripStartedAt: null
-			});
-
-			importLog = [...importLog, `✓ ${dog.name} — ${row.dates.length} trip${row.dates.length === 1 ? '' : 's'} imported (${sortedDates.join(', ')})`];
-		}
-
-		importLog = [...importLog, ``, `Done: ${totalCreated} trips created, ${totalNewDogs} new dogs added, ${totalSkipped} skipped.`];
-		importing = false;
-		importDone = true;
-		await refresh();
 	}
 
 	$: {
@@ -841,105 +647,7 @@
 
 		<!-- ───── IMPORT ───── -->
 		{:else if activeTab === 'import'}
-			<div class="dt-panel dt-import-panel">
-				<div class="dt-panel-head">
-					<div>
-						<p class="dt-panel-title">Import Day Trip Data</p>
-						<p class="dt-panel-sub typewriter">Load from the DT Numbers spreadsheet, then preview and import.</p>
-					</div>
-				</div>
-
-				<div class="dt-import-actions">
-					<button class="dt-import-btn" on:click={loadFromSheet} disabled={sheetLoading || importing}>
-						{sheetLoading ? 'Loading…' : 'Load from Sheet'}
-					</button>
-					{#if sheetError}
-						<span class="dt-import-error typewriter">{sheetError}</span>
-					{/if}
-					{#if sheetData.length > 0 && !sheetLoading}
-						<span class="dt-import-loaded typewriter">{sheetData.length} dogs loaded</span>
-						<button class="dt-import-btn" on:click={runDryRun} disabled={importing}>
-							Dry Run
-						</button>
-					{/if}
-					{#if importDryRunDone && !importDone}
-						<button class="dt-import-btn dt-import-btn-go" on:click={runImport} disabled={importing}>
-							{importing ? 'Importing…' : 'Import Now'}
-						</button>
-					{/if}
-					{#if importDone}
-						<span class="dt-import-done typewriter">Import complete!</span>
-					{/if}
-				</div>
-
-				{#if importDryRunDone}
-					<div class="dt-import-preview">
-						<p class="dt-import-section-label typewriter">Preview</p>
-						<div class="dt-table-wrap">
-							<table class="dt-table dt-import-table">
-								<thead>
-									<tr>
-										<th>Spreadsheet Name</th>
-										<th>Matched Dog</th>
-										<th class="th-center">Trips</th>
-										<th>Dates</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each importPreview as row, i}
-										{@const resolved = row.overrideId ? dogs.find(d => d.id === row.overrideId) : null}
-										{@const isResolved = row.matched || Boolean(resolved) || row.willCreate}
-										<tr class:dt-import-row-miss={!row.matched && !resolved && !row.willCreate} class:dt-import-row-new={row.willCreate && !resolved}>
-											<td class="typewriter">{row.sheetName}</td>
-											<td>
-												{#if row.matched}
-													<span class="dt-import-match">{row.dogName}</span>
-												{:else if row.willCreate && !row.overrideId}
-													<span class="dt-import-create typewriter">will create{row.asmStatus ? ` · ASM: ${row.asmStatus}` : ''}</span>
-													<select class="dt-import-override"
-														bind:value={importPreview[i].overrideId}
-														on:change={() => importPreview = [...importPreview]}>
-														<option value="">— create new —</option>
-														{#each dogs.slice().sort((a,b) => a.name.localeCompare(b.name)) as dog}
-															<option value={dog.id}>{dog.name}{dog.status !== 'active' ? ` (${dog.status})` : ''}</option>
-														{/each}
-													</select>
-												{:else if resolved}
-													<span class="dt-import-match">{resolved.name}</span>
-												{/if}
-											</td>
-											<td class="td-center typewriter">{isResolved ? row.tripCount : '—'}</td>
-											<td class="dt-import-dates typewriter">
-												{#if isResolved}
-													{row.dates.map(d => d.replace(/^\d{4}-0?/, '')).join(', ')}
-												{:else}
-													—
-												{/if}
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-								<tfoot>
-									<tr class="dt-table-foot">
-										<td class="td-foot-label typewriter">Total</td>
-										<td class="td-foot-label typewriter">{importPreview.filter(r => r.matched).length} matched</td>
-										<td class="td-center typewriter">{importPreview.filter(r => r.matched).reduce((s, r) => s + r.tripCount, 0)}</td>
-										<td></td>
-									</tr>
-								</tfoot>
-							</table>
-						</div>
-					</div>
-				{/if}
-
-				{#if importLog.length > 0}
-					<div class="dt-import-log">
-						<p class="dt-import-section-label typewriter">Import Log</p>
-						<pre class="dt-import-log-pre typewriter">{importLog.join('\n')}</pre>
-					</div>
-				{/if}
-
-			</div>
+			<ImportTab {dogs} {refresh} />
 		{/if}
 
 	</div>
@@ -1628,11 +1336,8 @@
 	}
 
 
-	.dt-import-table td, .dt-import-table th { white-space: nowrap; }
 
-	.dt-import-row-miss td { opacity: 0.5; }
 
-	.dt-import-row-new td { background: #fffbf0; }
 
 
 	.dt-import-create {
