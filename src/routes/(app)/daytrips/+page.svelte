@@ -10,6 +10,7 @@
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
 	import ImportTab from '$lib/components/daytrips/ImportTab.svelte';
+	import LogTab from '$lib/components/daytrips/LogTab.svelte';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 	import { getDayTripGapDays, isDayTripEligible, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { durationHours, formatDuration, formatTime, formatShortDate } from '$lib/utils/daytrips';
@@ -29,21 +30,6 @@
 	let boardColorFilter: 'green' | 'yellow' | null = null;
 
 	let volunteers: Volunteer[] = [];
-	let tripCopyText = '';
-	let showAllLogs = false;
-	let deletingTripId = '';
-	let formOpen = false;
-	let tripSaved = false;
-
-	async function copyToClipboard(text: string) {
-		try {
-			await navigator.clipboard.writeText(text);
-			toast.success('Copied!');
-		} catch {
-			toast.error('Copy failed — select and copy manually.');
-		}
-	}
-
 	async function autoImportFromHiddenNotes() {
 		const dogsWithNotes = dogs.filter(d => /day trip notes/i.test(d.hiddenComments ?? ''));
 		if (dogsWithNotes.length === 0) return;
@@ -212,31 +198,6 @@
 		const bDays = daysSince(b.lastDayTripDate) ?? 9999;
 		return bDays - aDays;
 	});
-
-	$: sortedMonthlyLogs = [...monthlyLogs]
-		.filter((log) => Boolean(log.endedAt))
-		.sort((a, b) => {
-			const aTime = toDate(a.startedAt)?.getTime() ?? 0;
-			const bTime = toDate(b.startedAt)?.getTime() ?? 0;
-			return bTime - aTime;
-		});
-
-	$: visibleLogs = showAllLogs
-		? [...logs].filter(l => Boolean(l.endedAt)).sort((a, b) => (toDate(b.startedAt)?.getTime() ?? 0) - (toDate(a.startedAt)?.getTime() ?? 0))
-		: sortedMonthlyLogs;
-
-	async function handleDeleteTrip(log: DayTripLog) {
-		if (!confirm(`Delete this trip for ${dogs.find(d => d.id === log.dogId)?.name ?? 'this dog'}? This cannot be undone.`)) return;
-		deletingTripId = log.id;
-		try {
-			await deleteDayTripLog(log.dogId, log.id);
-			await refresh();
-		} catch {
-			toast.error('Failed to delete trip.');
-		} finally {
-			deletingTripId = '';
-		}
-	}
 
 	$: yearLogs = logs.filter((log) => {
 		const d = toDate(log.startedAt);
@@ -461,118 +422,8 @@
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}
-			<!-- Collapsible log form (coordinators only) -->
-			{#if canEditDayTrips}
-			<div class="dt-panel dt-logform-panel">
-				<button class="dt-logform-toggle" on:click={() => { formOpen = !formOpen; tripSaved = false; tripCopyText = ''; }}>
-					<span class="dt-logform-toggle-label">Log a trip</span>
-					<span class="dt-logform-toggle-icon">{formOpen ? '▲' : '▼'}</span>
-				</button>
-
-				{#if formOpen}
-					{#if tripSaved && tripCopyText}
-						<div class="trip-copy-block">
-							<p class="trip-copy-label">Saved — copy for ASM:</p>
-							<pre class="trip-copy-pre">{tripCopyText}</pre>
-							<div class="trip-copy-actions">
-								<button class="dt-import-btn dt-import-btn-go" on:click={() => copyToClipboard(tripCopyText)}>Copy</button>
-								<button class="dt-import-btn" on:click={() => { tripSaved = false; tripCopyText = ''; }}>Log another</button>
-							</div>
-						</div>
-					{:else}
-						<div class="trip-form-wrap">
-							<TripLogForm
-								dogs={dogsEligible}
-								source="staff"
-								profile={$authProfile}
-								volunteerNames={dtvNames}
-								on:submitted={async (e) => {
-									tripCopyText = e.detail.copyText;
-									tripSaved = true;
-									await refresh();
-								}}
-							/>
-						</div>
-					{/if}
-				{/if}
-			</div>
-			{/if}
-
-			<div class="dt-panel">
-				<div class="dt-panel-head">
-					<div>
-						<p class="dt-panel-title">{showAllLogs ? 'All trips' : monthLabel}</p>
-						<p class="dt-panel-sub">{visibleLogs.length} completed trip{visibleLogs.length === 1 ? '' : 's'}{!showAllLogs ? ` · ${monthlyHourTotal.toFixed(1)} total hrs` : ''}
-						{outNowCount > 0 ? ` · ${outNowCount} in progress` : ''}</p>
-					</div>
-					<div class="dt-log-controls">
-						{#if !showAllLogs}
-							<input class="dt-month-input" type="month" bind:value={monthFilter} />
-						{/if}
-						<button class="dt-toggle-btn" class:active={showAllLogs} on:click={() => showAllLogs = !showAllLogs}>
-							{showAllLogs ? 'Show month' : 'All time'}
-						</button>
-					</div>
-				</div>
-
-				{#if visibleLogs.length === 0}
-					<p class="dt-panel-empty">No completed trips logged{showAllLogs ? '.' : ` for ${monthLabel}.`}</p>
-				{:else}
-					<div class="dt-table-wrap">
-						<table class="dt-table">
-							<thead>
-								<tr>
-									<th>Date</th>
-									<th>Dog</th>
-									<th>Volunteer</th>
-									<th>Time Out</th>
-									<th>Time In</th>
-									<th>Duration</th>
-									<th></th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each visibleLogs as log}
-									{@const startDate = toDate(log.startedAt)}
-									{@const endDate = toDate(log.endedAt)}
-									{@const dog = dogs.find(d => d.id === log.dogId)}
-									<tr class:deleting={deletingTripId === log.id}>
-										<td class="td-muted">{formatShortDate(startDate)}</td>
-										<td class="td-name">
-											{#if dog}
-												<a href="/dogs/{dog.id}" class="dt-name-link">{dog.name}</a>
-											{:else}
-												<span class="td-muted">Unknown</span>
-											{/if}
-										</td>
-										<td class="td-muted">{log.volunteerName || '—'}</td>
-										<td class="td-muted">{formatTime(startDate)}</td>
-										<td class="td-muted">{formatTime(endDate)}</td>
-										<td class="td-strong">{formatDuration(durationHours(log))}</td>
-										<td class="td-delete">
-											<button class="dt-delete-btn" on:click={() => handleDeleteTrip(log)} disabled={deletingTripId === log.id} title="Delete trip">✕</button>
-										</td>
-									</tr>
-									{#if log.tripNotes?.trim()}
-										<tr class="tr-notes" class:deleting={deletingTripId === log.id}>
-											<td colspan="7" class="td-notes">{log.tripNotes.trim()}</td>
-										</tr>
-									{/if}
-								{/each}
-							</tbody>
-							{#if !showAllLogs}
-							<tfoot>
-								<tr class="dt-table-foot">
-									<td colspan="5" class="td-foot-label">Total</td>
-									<td class="td-strong">{formatDuration(monthlyHourTotal)}</td>
-									<td></td>
-								</tr>
-							</tfoot>
-							{/if}
-						</table>
-					</div>
-				{/if}
-			</div>
+			<LogTab {dogs} {logs} {monthlyLogs} {monthLabel} {monthlyHourTotal} {outNowCount}
+				{dogsEligible} {dtvNames} {canEditDayTrips} bind:monthFilter {refresh} />
 
 		<!-- ───── DOGS ───── -->
 		{:else if activeTab === 'dogs'}
@@ -1128,7 +979,6 @@
 	.dt-delete-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 
-	tr.deleting { opacity: 0.4; pointer-events: none; }
 
 
 	.tr-notes { background: #fafbfc; }
@@ -1208,10 +1058,6 @@
 	.dt-name-link:hover { color: #1a73e8; text-decoration: underline; }
 
 
-	.dt-table-foot td {
-		border-top: 2px solid #dadce0;
-		background: #f8f9fa;
-	}
 
 
 	.td-foot-label {
