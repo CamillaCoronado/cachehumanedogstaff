@@ -118,7 +118,7 @@
 	}
 
 	$: activeDogs = dogs
-		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
+		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster && !dog.isIncoming)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: dtvNames = volunteers
