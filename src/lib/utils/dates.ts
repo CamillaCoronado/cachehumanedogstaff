@@ -256,14 +256,14 @@ export function dogStripeColor(
 	dog: Dog,
 	sheetColors?: Record<string, 'green' | 'yellow' | 'red'>
 ): 'green' | 'yellow' | 'red' {
-	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
-	if (dog.isolationStatus !== 'none') return 'red';
-	if (level === 'manager_only' || level === 'staff_only') return 'red';
 	if (sheetColors) {
 		const name = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
 		const sheetColor = sheetColors[name];
 		if (sheetColor) return sheetColor;
 	}
+	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
+	if (dog.isolationStatus !== 'none') return 'red';
+	if (level === 'manager_only' || level === 'staff_only') return 'red';
 	if (dog.awaitingEvaluation) return 'red';
 	if (dog.dayTripStatus === 'difficult') return 'yellow';
 	return 'green';

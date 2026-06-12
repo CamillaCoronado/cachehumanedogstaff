@@ -1,6 +1,18 @@
 import { startOfDay } from 'date-fns';
-import { bathEligible, daysSince, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
+import { bathEligible, checkDayTripEligibility, daysSince, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
 import type { Dog, PlaygroupSession } from '$lib/types';
+
+export function isDayTripEligible(dog: Dog, sheetColors: Record<string, string> = {}): boolean {
+	if (dog.isOutOnDayTrip) return false;
+	const key = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+	if (sheetColors[key] === 'red') return false;
+	return checkDayTripEligibility(
+		dog.intakeDate, dog.isVaccinated, dog.isFixed, dog.dayTripStatus,
+		dog.isolationStatus, dog.dayTripIneligibleReason, dog.dayTripManagerOnly,
+		dog.dayTripManagerOnlyReason, dog.dayTripNotes, dog.handlingLevel,
+		dog.surgeryDate, dog.surgeryRestDays, dog.awaitingEvaluation
+	).eligible;
+}
 
 // ─── Dogs to Test ────────────────────────────────────────────────────────────
 // Active shelter dogs marked unknown for dog compatibility with no playgroup
@@ -113,12 +125,20 @@ export function isBathDue(dog: Dog, today: Date): boolean {
 	return getBathStatus(dog, today).isDue;
 }
 
-function isSurgeryResting(dog: Dog, today: Date): boolean {
+export function isSurgeryResting(dog: Dog, today: Date): boolean {
 	const surgeryDateObj = toDate(dog.surgeryDate);
 	const surgeryDaysAgo = surgeryDateObj
 		? Math.round((today.getTime() - startOfDay(surgeryDateObj).getTime()) / 86_400_000)
 		: null;
-	return surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0);
+	if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) return true;
+	if (dog.dayTripStatus === 'ineligible' && dog.dayTripIneligibleReason === 'medical') return true;
+	return false;
+}
+
+export function dogAgeWeeks(dog: Dog, today: Date): number | null {
+	const dob = toDate(dog.dateOfBirth);
+	if (!dob) return null;
+	return Math.floor((today.getTime() - dob.getTime()) / (7 * 86_400_000));
 }
 
 export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
@@ -127,8 +147,7 @@ export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
 	if (dog.isolationStatus !== 'none') return false;
 	if (dog.awaitingEvaluation) return false;
 
-	const dob = toDate(dog.dateOfBirth);
-	const ageWeeks = dob ? Math.floor((today.getTime() - dob.getTime()) / (7 * 86_400_000)) : null;
+	const ageWeeks = dogAgeWeeks(dog, today);
 	if (ageWeeks !== null && ageWeeks < 26) return false;
 
 	if (isSurgeryResting(dog, today)) return false;

@@ -69,6 +69,12 @@
 	let overlayQueue: OverlayItem[] = [];
 	let currentOverlay: OverlayItem | null = null;
 
+	function incomingPhotoError(e: Event) {
+		const img = e.currentTarget as HTMLImageElement;
+		img.style.display = 'none';
+		img.nextElementSibling?.removeAttribute('hidden');
+	}
+
 	function advanceOverlay() {
 		if (overlayQueue.length > 0) {
 			currentOverlay = overlayQueue[0];
@@ -110,20 +116,14 @@
 		initAuthListener();
 		try {
 			const stored = localStorage.getItem(STORAGE_KEY);
-			console.log('[Layout] localStorage stored:', stored ? 'found' : 'empty');
 			if (stored) {
 				const parsed = JSON.parse(stored) as { changes: SyncChange[]; changedAt: string; overlayAcked?: boolean };
-				console.log('[Layout] stored changes:', parsed.changes.length, 'overlayAcked:', parsed.overlayAcked, 'changedAt:', parsed.changedAt);
-				console.log('[Layout] stored archived:', parsed.changes.filter(c => c.isArchived).map(c => c.name));
 				asmChanges = parsed.changes;
 				asmLastChangedAt = parsed.changedAt;
 				if (!parsed.overlayAcked && parsed.changes.some(
 					(c) => c.isArchived || c.isTransferredOut || c.isNew || c.fields.some((f) => f === 'Foster (yes)')
 				)) {
 					storedOverlayChanges = parsed.changes;
-					console.log('[Layout] storedOverlayChanges set — will fire overlay');
-				} else {
-					console.log('[Layout] stored overlay NOT firing — overlayAcked:', parsed.overlayAcked);
 				}
 			}
 		} catch { /* ignore */ }
@@ -166,14 +166,10 @@
 	}
 
 	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !asmAttempted) {
-		console.log('[Layout] ASM sync triggered, role:', $authProfile?.role);
 		asmAttempted = true;
 		asmSyncing = true;
 		void syncAnimalsFromASM()
 			.then((result) => {
-				console.log('[Layout] syncAnimalsFromASM complete, changes:', result.changes.length, 'isNew:', result.changes.filter(c => c.isNew).map(c => c.name));
-				console.log('[Layout] Archived changes:', result.changes.filter(c => c.isArchived).map(c => ({ id: c.id, name: c.name })));
-				console.log('[Layout] Transfer changes:', result.changes.filter(c => c.isTransferredOut).map(c => ({ id: c.id, name: c.name })));
 				asmSyncedAt = new Intl.DateTimeFormat('en-US', {
 					hour: 'numeric',
 					minute: '2-digit',
@@ -187,19 +183,14 @@
 						localStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: asmChanges, changedAt: asmLastChangedAt }));
 					} catch { /* ignore */ }
 					asmLogVisible = true;
-				} else {
-					console.log('[Layout] No sync changes');
 				}
 
 				const buildOverlay = async (ids: string[], type: OverlayItem['type']): Promise<OverlayItem | null> => {
-					console.log(`[Layout] buildOverlay(${type}) — ${ids.length} ids:`, ids);
 					if (ids.length === 0) return null;
 					try {
 						const dogs = (await Promise.all(ids.map((id) => getDog(id)))).filter((d): d is Dog => d !== null);
-						console.log(`[Layout] buildOverlay(${type}) — getDog results:`, dogs.map(d => ({ id: d.id, name: d.name, status: d.status })));
 						return dogs.length > 0 ? { type, dogs } : null;
-					} catch (err) {
-						console.error(`[Layout] buildOverlay(${type}) error:`, err);
+					} catch {
 						return null;
 					}
 				};
@@ -210,9 +201,7 @@
 					buildOverlay(result.changes.filter((c) => c.isTransferredOut).map(c => c.id), 'transfer'),
 					buildOverlay(result.changes.filter((c) => c.isNew).map(c => c.id), 'incoming'),
 				]).then((items) => {
-					console.log('[Layout] overlayQueue items:', items.filter(Boolean).map(i => i?.type));
 					overlayQueue = items.filter((item): item is OverlayItem => item !== null);
-					console.log('[Layout] advanceOverlay — queue length:', overlayQueue.length, 'currentOverlay:', currentOverlay?.type ?? 'none');
 					advanceOverlay();
 				});
 			})
@@ -577,16 +566,28 @@
 		<div class="incoming-moment">
 			<p class="incoming-heading">New arrival{currentOverlay.dogs.length > 1 ? 's' : ''} at the shelter 🐾</p>
 			<div class="incoming-dogs-row">
-				{#each currentOverlay.dogs as dog}
+				{#each currentOverlay.dogs.slice(0, 5) as dog}
 					<div class="incoming-dog-item">
 						{#if dog.photoUrl}
-							<img class="incoming-photo" src={dog.photoUrl} alt={dog.name} />
+							<img
+								class="incoming-photo"
+								src={dog.photoUrl}
+								alt={dog.name}
+								on:error={incomingPhotoError}
+							/>
+							<div class="incoming-photo incoming-photo-placeholder" hidden></div>
 						{:else}
 							<div class="incoming-photo incoming-photo-placeholder"></div>
 						{/if}
 						<p class="incoming-name">{dog.name}</p>
 					</div>
 				{/each}
+				{#if currentOverlay.dogs.length > 5}
+					<div class="incoming-dog-item">
+						<div class="incoming-photo incoming-more-circle">+{currentOverlay.dogs.length - 5}</div>
+						<p class="incoming-name">more</p>
+					</div>
+				{/if}
 			</div>
 			<button class="incoming-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
 		</div>
@@ -1661,6 +1662,16 @@
 
 .incoming-photo-placeholder {
 	background: rgba(1, 106, 165, 0.12);
+}
+
+.incoming-more-circle {
+	background: rgba(1, 106, 165, 0.18);
+	color: #014e7a;
+	font-size: clamp(1.1rem, 4vw, 1.6rem);
+	font-weight: 700;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .incoming-name {

@@ -14,7 +14,7 @@ function classifyColor(r: number, g: number, b: number): 'green' | 'yellow' | 'r
 	if (r > 0.95 && g > 0.95 && b > 0.95) return null;
 	if (g > r && g > b && g > 0.65) return 'green';
 	if (r > 0.8 && g > 0.75 && b < 0.55) return 'yellow';
-	if (r > 0.7 && b > g && g > 0.55) return 'red';
+	if (r > 0.7 && r > g && r > b && g < 0.6) return 'red';
 	return null; // orange (foster), purple (adopted), etc.
 }
 

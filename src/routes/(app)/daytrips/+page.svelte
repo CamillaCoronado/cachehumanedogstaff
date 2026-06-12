@@ -8,11 +8,14 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, mergeDayTripLogs, updateDog, createDog, deleteDog, fixImportedTripHours, logManualTrip } from '$lib/data/dogs';
+	import { listDogs, startDayTrip, endDayTrip, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog } from '$lib/data/dogs';
 	import { listVolunteers } from '$lib/data/volunteers';
-	import type { BehaviorRating, DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
+	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
+	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
-	import { getDayTripGapDays, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
+	import { getDayTripGapDays, isDayTripEligible, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
+	import { matchDogByName } from '$lib/utils/dogs';
+	import { parseDayTripNotes, stripDayTripNotes, type ParsedTrip } from '$lib/utils/tripNotesParser';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -26,89 +29,12 @@
 	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'import' = 'board';
 	let boardColorFilter: 'green' | 'yellow' | null = null;
 
-	// ── Volunteers (loaded for trip form dropdown) ──
 	let volunteers: Volunteer[] = [];
-
-	// ── Trip log form state ──
-	const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-	let tripDogId = '';
-	let tripVolunteerName = '';
-	let tripDate = todayStr;
-	let tripTimeOut = '';
-	let tripTimeBack = '';
-	let tripDogs: BehaviorRating | '' = '';
-	let tripStrangers: BehaviorRating | '' = '';
-	let tripCats: BehaviorRating | '' = '';
-	let tripKids: BehaviorRating | '' = '';
-	let tripNotes = '';
-	let tripSaving = false;
 	let tripCopyText = '';
+	let showAllLogs = false;
+	let deletingTripId = '';
+	let formOpen = false;
 	let tripSaved = false;
-
-	function buildTripDateTime(dateStr: string, timeStr: string): Date | null {
-		if (!dateStr) return null;
-		const [y, m, d] = dateStr.split('-').map(Number);
-		if (!timeStr) return new Date(y, m - 1, d, 0, 0, 0);
-		const [h, min] = timeStr.split(':').map(Number);
-		return new Date(y, m - 1, d, h, min, 0);
-	}
-
-	function buildCopyText(): string {
-		const dog = dogs.find((d) => d.id === tripDogId);
-		if (!dog) return '';
-		const dateObj = buildTripDateTime(tripDate, '');
-		const dateLabel = dateObj ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : tripDate;
-		const timeOutLabel = tripTimeOut || '—';
-		const timeBackLabel = tripTimeBack || '—';
-		const ratingLabel = (r: BehaviorRating | '') => r === 'good' ? 'Good' : r === 'neutral' ? 'Neutral' : r === 'reactive' ? 'Reactive' : r === 'na' ? 'N/A' : '—';
-		const lines = [
-			`Day Trip — ${dog.name} — ${dateLabel}`,
-			`Volunteer: ${tripVolunteerName || '—'}`,
-			`Time out: ${timeOutLabel} | Time back: ${timeBackLabel}`,
-			``,
-			`Behavior:`,
-			`• Around dogs: ${ratingLabel(tripDogs)}`,
-			`• Around strangers: ${ratingLabel(tripStrangers)}`,
-			`• Around cats: ${ratingLabel(tripCats)}`,
-			`• Around kids: ${ratingLabel(tripKids)}`,
-		];
-		if (tripNotes.trim()) lines.push(``, `Notes: ${tripNotes.trim()}`);
-		return lines.join('\n');
-	}
-
-	async function submitTripLog() {
-		if (!tripDogId) { toast.error('Select a dog.'); return; }
-		tripSaving = true;
-		try {
-			const startedAt = buildTripDateTime(tripDate, tripTimeOut) ?? new Date();
-			const endedAt = tripTimeBack ? buildTripDateTime(tripDate, tripTimeBack) : null;
-			await logManualTrip(tripDogId, {
-				startedAt,
-				endedAt,
-				volunteerName: tripVolunteerName,
-				reactionToDogs: (tripDogs as BehaviorRating) || null,
-				reactionToStrangers: (tripStrangers as BehaviorRating) || null,
-				reactionToCats: (tripCats as BehaviorRating) || null,
-				reactionToKids: (tripKids as BehaviorRating) || null,
-				tripNotes,
-				source: 'staff'
-			}, $authProfile);
-			tripCopyText = buildCopyText();
-			tripSaved = true;
-			await refresh();
-		} catch (e) {
-			toast.error('Failed to save trip.');
-			console.error(e);
-		} finally {
-			tripSaving = false;
-		}
-	}
-
-	function resetTripForm() {
-		tripDogId = ''; tripVolunteerName = ''; tripDate = todayStr;
-		tripTimeOut = ''; tripTimeBack = ''; tripDogs = ''; tripStrangers = '';
-		tripCats = ''; tripKids = ''; tripNotes = ''; tripCopyText = ''; tripSaved = false;
-	}
 
 	async function copyToClipboard(text: string) {
 		try {
@@ -117,22 +43,6 @@
 		} catch {
 			toast.error('Copy failed — select and copy manually.');
 		}
-	}
-
-	const tripRatingOptions: BehaviorRating[] = ['good', 'neutral', 'reactive', 'na'];
-
-	function setTripRating(key: string, r: BehaviorRating) {
-		if (key === 'tripDogs') tripDogs = tripDogs === r ? '' : r;
-		else if (key === 'tripStrangers') tripStrangers = tripStrangers === r ? '' : r;
-		else if (key === 'tripCats') tripCats = tripCats === r ? '' : r;
-		else tripKids = tripKids === r ? '' : r;
-	}
-
-	function getTripRating(key: string): BehaviorRating | '' {
-		if (key === 'tripDogs') return tripDogs;
-		if (key === 'tripStrangers') return tripStrangers;
-		if (key === 'tripCats') return tripCats;
-		return tripKids;
 	}
 
 	// ── Sheet stats state (2024/2025/2026 Day Trip Data Chart tabs) ──
@@ -169,8 +79,14 @@
 
 	let statsCanvas: HTMLCanvasElement | null = null;
 	let statsChart: Chart | null = null;
+	let cumulativeCanvas: HTMLCanvasElement | null = null;
+	let cumulativeChart: Chart | null = null;
+	let weekdayCanvas: HTMLCanvasElement | null = null;
+	let weekdayChart: Chart | null = null;
+	let topDogsCanvas: HTMLCanvasElement | null = null;
+	let topDogsChart: Chart | null = null;
 
-	function buildChart() {
+	function buildMonthlyChart() {
 		if (!statsCanvas || !selectedYearStat) return;
 		statsChart?.destroy();
 		const labels = selectedYearStat.months.map((m) => m.name.slice(0, 3));
@@ -201,10 +117,63 @@
 				interaction: { mode: 'index', intersect: false },
 				plugins: {
 					legend: { position: 'top', labels: { font: { size: 12 }, boxWidth: 14 } },
+					tooltip: {
+						callbacks: {
+							title: (items) => selectedYearStat.months[items[0]?.dataIndex ?? 0]?.name ?? '',
+							label: (ctx) => ctx.dataset.label === 'Hours'
+								? ` ${ctx.parsed.y}h`
+								: ` ${ctx.parsed.y} trips`
+						}
+					}
+				},
+				scales: {
+					y: { beginAtZero: true, ticks: { precision: 0 } }
+				}
+			}
+		});
+	}
+
+	function buildCumulativeChart() {
+		if (!cumulativeCanvas || !selectedYearStat) return;
+		cumulativeChart?.destroy();
+		const labels = selectedYearStat.months.map((m) => m.name.slice(0, 3));
+		let runningTrips = 0;
+		let runningHours = 0;
+		const cumulativeTrips = selectedYearStat.months.map((m) => runningTrips += m.trips);
+		const cumulativeHours = selectedYearStat.months.map((m) => Math.round(runningHours += m.hours));
+		cumulativeChart = new Chart(cumulativeCanvas, {
+			type: 'line',
+			data: {
+				labels,
+				datasets: [
+					{
+						label: 'Trips to date',
+						data: cumulativeTrips,
+						borderColor: 'rgba(1, 106, 165, 0.9)',
+						backgroundColor: 'rgba(1, 106, 165, 0.14)',
+						tension: 0.25,
+						fill: true
+					},
+					{
+						label: 'Hours to date',
+						data: cumulativeHours,
+						borderColor: 'rgba(58, 175, 42, 0.9)',
+						backgroundColor: 'rgba(58, 175, 42, 0.12)',
+						tension: 0.25,
+						fill: false
+					}
+				]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				interaction: { mode: 'index', intersect: false },
+				plugins: {
+					legend: { position: 'top', labels: { font: { size: 12 }, boxWidth: 14 } },
 					tooltip: { callbacks: {
 						label: (ctx) => ctx.dataset.label === 'Hours'
 							? ` ${ctx.parsed.y}h`
-							: ` ${ctx.parsed.y} trips`
+							: ` ${ctx.parsed.y}`
 					}}
 				},
 				scales: {
@@ -214,9 +183,83 @@
 		});
 	}
 
-	$: if (statsCanvas && selectedYearStat) buildChart();
+	function buildWeekdayChart() {
+		if (!weekdayCanvas) return;
+		weekdayChart?.destroy();
+		const labels = weekdayStats.map((d) => d.name);
+		const data = weekdayStats.map((d) => d.trips);
+		weekdayChart = new Chart(weekdayCanvas, {
+			type: 'bar',
+			data: {
+				labels,
+				datasets: [{
+					label: 'Trips',
+					data,
+					backgroundColor: 'rgba(249, 171, 0, 0.78)',
+					borderRadius: 4
+				}]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: { display: false },
+					tooltip: { callbacks: { label: (ctx) => ` ${ctx.parsed.y} trips` } }
+				},
+				scales: {
+					y: { beginAtZero: true, ticks: { precision: 0 } }
+				}
+			}
+		});
+	}
 
-	onDestroy(() => { statsChart?.destroy(); });
+	function buildTopDogsChart() {
+		if (!topDogsCanvas) return;
+		topDogsChart?.destroy();
+		const rows = topDogRows.slice(0, 8);
+		topDogsChart = new Chart(topDogsCanvas, {
+			type: 'bar',
+			data: {
+				labels: rows.map((r) => r.name),
+				datasets: [{
+					label: 'Trips',
+					data: rows.map((r) => r.trips),
+					backgroundColor: 'rgba(1, 106, 165, 0.8)',
+					borderRadius: 4
+				}]
+			},
+			options: {
+				indexAxis: 'y',
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: { display: false },
+					tooltip: { callbacks: { label: (ctx) => ` ${ctx.parsed.x} trips` } }
+				},
+				scales: {
+					x: { beginAtZero: true, ticks: { precision: 0 } }
+				}
+			}
+		});
+	}
+
+	$: if (statsCanvas && selectedYearStat) buildMonthlyChart();
+	$: if (cumulativeCanvas && selectedYearStat) buildCumulativeChart();
+	$: if (weekdayCanvas) {
+		weekdayStats;
+		buildWeekdayChart();
+	}
+	$: if (topDogsCanvas) {
+		topDogRows;
+		buildTopDogsChart();
+	}
+
+	onDestroy(() => {
+		statsChart?.destroy();
+		cumulativeChart?.destroy();
+		weekdayChart?.destroy();
+		topDogsChart?.destroy();
+	});
 
 	// ── Import state ──
 	let sheetData: { name: string; dates: string[] }[] = [];
@@ -259,184 +302,86 @@
 	let importDone = false;
 	let importLog: string[] = [];
 
-	let fixingHours = false;
-	let fixHoursResult = '';
-	let fixHoursDryRunRows: { dogName: string; date: string; currentEnd: string }[] = [];
-	let fixHoursDryRunDone = false;
+	async function autoImportFromHiddenNotes() {
+		const dogsWithNotes = dogs.filter(d => /day trip notes/i.test(d.hiddenComments ?? ''));
+		if (dogsWithNotes.length === 0) return;
 
-	async function handleFixHoursDryRun() {
-		fixingHours = true;
-		fixHoursResult = '';
-		fixHoursDryRunRows = [];
-		fixHoursDryRunDone = false;
+		let totalNew = 0;
+		let totalPatched = 0;
 		try {
-			const rows = await fixImportedTripHours(true);
-			fixHoursDryRunRows = rows as { dogName: string; date: string; currentEnd: string }[];
-			fixHoursDryRunDone = true;
+			for (const dog of dogsWithNotes) {
+				const parsed = parseDayTripNotes(dog.hiddenComments!);
+
+				for (const trip of parsed) {
+					const tripDay = trip.date.toDateString();
+					const existing = logs.find(
+						l => l.dogId === dog.id && toDate(l.startedAt)?.toDateString() === tripDay
+					);
+
+					if (existing) {
+						// Patch only if notes/ratings are still empty
+						const needsPatch =
+							!existing.tripNotes &&
+							!existing.reactionToDogs && !existing.reactionToStrangers &&
+							!existing.reactionToCats && !existing.reactionToKids &&
+							!existing.reactionToLeash && !existing.reactionToCarRides &&
+							!existing.reactionToToys;
+						if (!needsPatch) continue;
+						await patchDayTripLog(dog.id, existing.id, {
+							tripNotes: trip.tripNotes || null,
+							reactionToDogs: trip.reactionToDogs,
+							reactionToStrangers: trip.reactionToStrangers,
+							reactionToCats: trip.reactionToCats,
+							reactionToKids: trip.reactionToKids,
+							reactionToLeash: trip.reactionToLeash,
+							reactionToCarRides: trip.reactionToCarRides,
+							reactionToToys: trip.reactionToToys,
+						});
+						totalPatched++;
+					} else {
+						await logManualTrip(dog.id, {
+							startedAt: trip.date,
+							endedAt: trip.date,
+							volunteerName: null,
+							reactionToDogs: trip.reactionToDogs,
+							reactionToStrangers: trip.reactionToStrangers,
+							reactionToCats: trip.reactionToCats,
+							reactionToKids: trip.reactionToKids,
+							reactionToLeash: trip.reactionToLeash,
+							reactionToCarRides: trip.reactionToCarRides,
+							reactionToToys: trip.reactionToToys,
+							tripNotes: trip.tripNotes,
+							source: 'staff',
+						}, null);
+						totalNew++;
+					}
+				}
+
+				// Strip processed notes from hiddenComments
+				const stripped = stripDayTripNotes(dog.hiddenComments!);
+				if (stripped !== dog.hiddenComments) {
+					await updateDog(dog.id, { hiddenComments: stripped });
+				}
+			}
 		} catch (e) {
-			fixHoursResult = 'Error — check console.';
-			console.error(e);
-		} finally {
-			fixingHours = false;
-		}
-	}
-
-	async function handleFixHours() {
-		fixingHours = true;
-		fixHoursResult = '';
-		try {
-			const count = await fixImportedTripHours(false);
-			fixHoursResult = `Fixed ${count as number} trip${(count as number) === 1 ? '' : 's'}.`;
-			fixHoursDryRunDone = false;
-			fixHoursDryRunRows = [];
-			if ((count as number) > 0) await refresh();
-		} catch (e) {
-			fixHoursResult = 'Error — check console.';
-			console.error(e);
-		} finally {
-			fixingHours = false;
-		}
-	}
-
-	// ── Merge duplicates ──
-	let merging = false;
-	let mergeDryRunDone = false;
-	let mergeLog: string[] = [];
-
-	interface MergePreviewRow {
-		created: Dog;
-		match: Dog | null;
-		tripDates: string[];
-		datesMatch: boolean;
-	}
-	let mergePreview: MergePreviewRow[] = [];
-
-	// Strict name match: first word must be identical (case-insensitive), or base name matches exactly
-	function strictMatchName(candidate: string, target: string): boolean {
-		const a = candidate.toLowerCase().trim();
-		const b = target.toLowerCase().trim();
-		if (a === b) return true;
-		// Strip parentheticals from either side and compare
-		const aBase = a.replace(/\s*\(.*?\)\s*$/, '').trim();
-		const bBase = b.replace(/\s*\(.*?\)\s*$/, '').trim();
-		if (aBase === bBase) return true;
-		if (aBase === b || a === bBase) return true;
-		return false;
-	}
-
-	async function runMergeDryRun() {
-		mergeLog = [];
-		mergeDryRunDone = false;
-		mergePreview = [];
-
-		// Build trip date lookup from loaded logs
-		const tripDatesByDog: Record<string, string[]> = {};
-		for (const log of logs) {
-			const d = toDate(log.startedAt);
-			if (!d) continue;
-			const ds = `${d.getMonth() + 1}/${d.getDate()}`;
-			(tripDatesByDog[log.dogId] ??= []).push(ds);
-		}
-
-		const realDogs = dogs.filter((d) => d.status === 'active');
-
-		const candidates = dogs.filter((d) =>
-			d.status !== 'active' ||
-			(d.hiddenComments ?? '').includes('Auto-created during day trip import')
-		);
-
-		if (candidates.length === 0) {
-			mergeLog = ['No duplicate candidates found.'];
-			mergeDryRunDone = true;
+			console.error('[autoImport] error:', e);
+			toast.error('Failed to sync some trips from hidden notes.');
 			return;
 		}
 
-		mergePreview = candidates
-			.map((created) => {
-				const match = realDogs.find((r) => strictMatchName(created.name, r.name));
-				const tripDates = tripDatesByDog[created.id] ?? [];
-
-				let datesMatch = false;
-				if (match && tripDates.length > 0) {
-					const intakeMs = toDate(match.intakeDate ?? match.shelterSince)?.getTime() ?? 0;
-					const leftMs = toDate(match.leftShelterDate)?.getTime() ?? Date.now();
-					// At least one trip date falls within the real dog's shelter stay
-					datesMatch = tripDates.some((ds) => {
-						const [m, day] = ds.split('/').map(Number);
-						const year = new Date().getFullYear();
-						const t = new Date(year, m - 1, day).getTime();
-						return intakeMs === 0 || (t >= intakeMs && t <= leftMs + 86_400_000);
-					});
-				}
-
-				return { created, match: match ?? null, tripDates, datesMatch };
-			})
-			.filter((row) => row.match !== null);
-
-		if (mergePreview.length === 0) {
-			mergeLog = ['No matches found — nothing to merge.'];
+		const total = totalNew + totalPatched;
+		if (total > 0) {
+			await refresh();
+			const parts = [];
+			if (totalNew) parts.push(`${totalNew} new`);
+			if (totalPatched) parts.push(`${totalPatched} updated`);
+			toast.success(`Synced trips from hidden notes: ${parts.join(', ')}.`);
 		}
-		mergeDryRunDone = true;
-	}
-
-	async function runMerge() {
-		if (!mergeDryRunDone) return;
-		merging = true;
-		mergeLog = [];
-		for (const row of mergePreview) {
-			if (!row.match || !row.datesMatch) {
-				mergeLog = [...mergeLog, `⚠ Skipped "${row.created.name}" — ${!row.match ? 'no match' : 'dates do not align'}`];
-				continue;
-			}
-			const count = await mergeDayTripLogs(row.created.id, row.match.id);
-			await deleteDog(row.created.id);
-			mergeLog = [...mergeLog, `✓ "${row.created.name}" → "${row.match.name}" — ${count} trip${count === 1 ? '' : 's'} moved, record deleted`];
-		}
-		mergeLog = [...mergeLog, '', 'Merge complete.'];
-		merging = false;
-		mergeDryRunDone = false;
-		mergePreview = [];
-		await refresh();
-	}
-
-	function normalizeName(n: string): string {
-		return n.toLowerCase().replace(/[^a-z]/g, '');
-	}
-
-	function buildLookup(): { exact: Record<string, Dog>; fuzzy: Record<string, Dog> } {
-		const exact: Record<string, Dog> = {};
-		const fuzzy: Record<string, Dog> = {};
-		for (const dog of dogs) {
-			exact[dog.name.toLowerCase().trim()] = dog;
-			fuzzy[normalizeName(dog.name)] = dog;
-			// Also index by base name with any parenthetical stripped (e.g. "Sadie (Jazmine)" → "sadie")
-			const baseName = dog.name.replace(/\s*\(.*?\)\s*$/, '').toLowerCase().trim();
-			if (baseName !== dog.name.toLowerCase().trim()) {
-				exact[baseName] = dog;
-				fuzzy[normalizeName(baseName)] = dog;
-			}
-		}
-		return { exact, fuzzy };
-	}
-
-	function lookupDog(name: string, lookup: { exact: Record<string, Dog>; fuzzy: Record<string, Dog> }): Dog | undefined {
-		const exact = lookup.exact[name.toLowerCase().trim()];
-		if (exact) return exact;
-		const fuzzyKey = normalizeName(name);
-		const fuzzy = lookup.fuzzy[fuzzyKey];
-		if (fuzzy) return fuzzy;
-		// Partial: sheet name contained in dog name or vice versa (e.g. "Arcanine" matches "Arcanine (Jerry)")
-		return dogs.find((d) => {
-			const dn = normalizeName(d.name);
-			return dn.includes(fuzzyKey) || fuzzyKey.includes(dn);
-		});
 	}
 
 	async function runDryRun() {
-		const lookup = buildLookup();
-
 		importPreview = sheetData.map((row) => {
-			const matched = lookupDog(row.name, lookup);
+			const matched = matchDogByName(row.name, dogs);
 			return {
 				sheetName: row.name,
 				dogId: matched?.id ?? null,
@@ -459,9 +404,10 @@
 					const res = await fetch(`/api/asm/search?q=${encodeURIComponent(row.sheetName)}`);
 					if (!res.ok) return;
 					const results: { name: string; status: string }[] = await res.json();
+					const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
 					const hit = results.find((a) =>
-						normalizeName(a.name).includes(normalizeName(row.sheetName)) ||
-						normalizeName(row.sheetName).includes(normalizeName(a.name))
+						norm(a.name).includes(norm(row.sheetName)) ||
+						norm(row.sheetName).includes(norm(a.name))
 					);
 					if (hit) {
 						importPreview = importPreview.map((r) =>
@@ -480,8 +426,6 @@
 		importing = true;
 		importLog = [];
 
-		const lookup = buildLookup();
-
 		let totalCreated = 0;
 		let totalSkipped = 0;
 
@@ -491,7 +435,7 @@
 		for (const row of sheetData) {
 			const preview = previewMap[row.name];
 			const overrideDog = preview?.overrideId ? dogs.find((d) => d.id === preview.overrideId) : undefined;
-			let dog = overrideDog ?? lookupDog(row.name, lookup);
+			let dog = overrideDog ?? matchDogByName(row.name, dogs);
 
 			if (!dog) {
 				// Create a minimal record flagged as adopted (not in system)
@@ -601,9 +545,10 @@
 		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
-	$: establishedDTVs = volunteers
-		.filter((v) => (v.volunteerType ?? 'dtv') === 'dtv' && v.isEstablished)
-		.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+	$: dtvNames = volunteers
+		.filter((v) => (v.volunteerType ?? 'dtv') === 'dtv' && v.isEstablished && !v.isNonActive)
+		.sort((a, b) => a.name.localeCompare(b.name))
+		.map((v) => v.name);
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
 	$: canEditDayTrips = checkCanEditDayTrips($authProfile?.role);
@@ -663,8 +608,7 @@
 			return aStart - bStart;
 		});
 
-	$: dogsEligible = activeDogs
-		.filter((d) => !d.isOutOnDayTrip && getEligibility(d).eligible)
+	$: dogsEligible = activeDogs.filter((d) => isDayTripEligible(d, sheetColors))
 		.sort((a, b) => {
 			const aDays = daysSince(a.lastDayTripDate) ?? 999;
 			const bDays = daysSince(b.lastDayTripDate) ?? 999;
@@ -672,7 +616,7 @@
 		});
 
 	$: dogsIneligible = activeDogs
-		.filter((d) => !d.isOutOnDayTrip && !getEligibility(d).eligible)
+		.filter((d) => !d.isOutOnDayTrip && !isDayTripEligible(d, sheetColors))
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: dogStatsRows = activeDogs.slice().sort((a, b) => {
@@ -688,6 +632,23 @@
 			const bTime = toDate(b.startedAt)?.getTime() ?? 0;
 			return bTime - aTime;
 		});
+
+	$: visibleLogs = showAllLogs
+		? [...logs].filter(l => Boolean(l.endedAt)).sort((a, b) => (toDate(b.startedAt)?.getTime() ?? 0) - (toDate(a.startedAt)?.getTime() ?? 0))
+		: sortedMonthlyLogs;
+
+	async function handleDeleteTrip(log: DayTripLog) {
+		if (!confirm(`Delete this trip for ${dogs.find(d => d.id === log.dogId)?.name ?? 'this dog'}? This cannot be undone.`)) return;
+		deletingTripId = log.id;
+		try {
+			await deleteDayTripLog(log.dogId, log.id);
+			await refresh();
+		} catch {
+			toast.error('Failed to delete trip.');
+		} finally {
+			deletingTripId = '';
+		}
+	}
 
 	$: yearLogs = logs.filter((log) => {
 		const d = toDate(log.startedAt);
@@ -708,6 +669,117 @@
 
 	$: yearTripTotal = yearLogs.length;
 	$: yearHourTotal = yearLogs.reduce((sum, log) => sum + durationHours(log), 0);
+
+	$: statsYearLogs = logs.filter((log) => {
+		const d = toDate(log.startedAt);
+		return d ? d.getFullYear() === statsYearFilter && Boolean(log.endedAt) : false;
+	});
+
+	$: mostTripsInOneDay = (() => {
+		const byDate = new Map<string, number>();
+		for (const log of statsYearLogs) {
+			const d = toDate(log.startedAt);
+			if (!d) continue;
+			const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+			byDate.set(key, (byDate.get(key) ?? 0) + 1);
+		}
+		if (byDate.size === 0) return null;
+		let maxCount = 0;
+		let maxKey = '';
+		for (const [key, count] of byDate) {
+			if (count > maxCount) { maxCount = count; maxKey = key; }
+		}
+		const [y, m, day] = maxKey.split('-').map(Number);
+		const date = new Date(y, m, day);
+		return { count: maxCount, label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) };
+	})();
+
+	$: thisVsLastMonth = (() => {
+		const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+		const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+		const thisCount = logs.filter(l => { const d = toDate(l.startedAt); return d && l.endedAt && d >= thisMonthStart; }).length;
+		const lastCount = logs.filter(l => { const d = toDate(l.startedAt); return d && l.endedAt && d >= lastMonthStart && d < thisMonthStart; }).length;
+		return { thisCount, lastCount, diff: thisCount - lastCount };
+	})();
+
+	$: longestTrip = (() => {
+		let best: DayTripLog | null = null;
+		let bestHours = 0;
+		for (const log of statsYearLogs) {
+			const h = durationHours(log);
+			if (h > bestHours) { bestHours = h; best = log; }
+		}
+		if (!best) return null;
+		const dog = dogs.find(d => d.id === best!.dogId);
+		return { hours: bestHours, dogName: dog?.name ?? '?' };
+	})();
+
+	$: mostFrequentActiveDog = (() => {
+		const activeDogIds = new Set(activeDogs.map(d => d.id));
+		const counts = new Map<string, number>();
+		for (const log of statsYearLogs) {
+			if (!activeDogIds.has(log.dogId)) continue;
+			counts.set(log.dogId, (counts.get(log.dogId) ?? 0) + 1);
+		}
+		if (counts.size === 0) return null;
+		let maxId = '';
+		let maxCount = 0;
+		for (const [id, count] of counts) {
+			if (count > maxCount) { maxCount = count; maxId = id; }
+		}
+		const dog = dogs.find(d => d.id === maxId);
+		return { name: dog?.name ?? '?', trips: maxCount };
+	})();
+
+	$: busiestMonth = selectedYearStat?.months.reduce<MonthStat | null>((best, month) => {
+		if (!best || month.trips > best.trips) return month;
+		return best;
+	}, null) ?? null;
+
+	$: weekdayStats = (() => {
+		const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((name) => ({ name, trips: 0, hours: 0 }));
+		for (const log of statsYearLogs) {
+			const d = toDate(log.startedAt);
+			if (!d) continue;
+			days[d.getDay()].trips += 1;
+			days[d.getDay()].hours += durationHours(log);
+		}
+		return days;
+	})();
+
+	$: busiestWeekday = weekdayStats.reduce<{ name: string; trips: number; hours: number } | null>((best, day) => {
+		if (!best || day.trips > best.trips) return day;
+		return best;
+	}, null);
+
+	$: topDogRows = (() => {
+		const rows = new Map<string, { name: string; trips: number; hours: number }>();
+		for (const log of statsYearLogs) {
+			const dog = dogs.find((d) => d.id === log.dogId);
+			const name = dog?.name ?? 'Unknown';
+			const existing = rows.get(log.dogId) ?? { name, trips: 0, hours: 0 };
+			existing.trips += 1;
+			existing.hours += durationHours(log);
+			rows.set(log.dogId, existing);
+		}
+		return [...rows.values()]
+			.sort((a, b) => b.trips - a.trips || b.hours - a.hours || a.name.localeCompare(b.name))
+			.slice(0, 8);
+	})();
+
+	$: topVolunteerRows = (() => {
+		const rows = new Map<string, { name: string; trips: number; hours: number }>();
+		for (const log of statsYearLogs) {
+			const name = log.volunteerName?.trim() || 'Unassigned';
+			const existing = rows.get(name) ?? { name, trips: 0, hours: 0 };
+			existing.trips += 1;
+			existing.hours += durationHours(log);
+			rows.set(name, existing);
+		}
+		return [...rows.values()]
+			.sort((a, b) => b.trips - a.trips || b.hours - a.hours || a.name.localeCompare(b.name))
+			.slice(0, 8);
+	})();
 
 	function durationHours(log: DayTripLog) {
 		const startedAt = toDate(log.startedAt);
@@ -773,8 +845,7 @@
 			const evaluated = dogRows.filter((d) => {
 				if (!d.awaitingEvaluation) return false;
 				const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-				const color = colorsRes[key];
-				return color === 'green' || color === 'yellow';
+				return Boolean(colorsRes[key]);
 			});
 			if (evaluated.length > 0) {
 				await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false })));
@@ -786,6 +857,7 @@
 		} finally {
 			loading = false;
 		}
+		void autoImportFromHiddenNotes();
 	}
 
 	function statusPillClass(status: Dog['dayTripStatus']) {
@@ -810,6 +882,10 @@
 		await refresh();
 	}
 </script>
+
+<svelte:head>
+	<title>Day Trips | Cache Humane Society</title>
+</svelte:head>
 
 <section class="dt-page">
 {#if !canViewDayTrips}
@@ -935,107 +1011,62 @@
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}
-			<!-- Trip log form (coordinators only) -->
+			<!-- Collapsible log form (coordinators only) -->
 			{#if canEditDayTrips}
 			<div class="dt-panel dt-logform-panel">
-				<div class="dt-panel-head">
-					<div>
-						<p class="dt-panel-title">Log a Trip</p>
-						<p class="dt-panel-sub">Transcribe a paper form or enter a completed trip.</p>
-					</div>
-				</div>
+				<button class="dt-logform-toggle" on:click={() => { formOpen = !formOpen; tripSaved = false; tripCopyText = ''; }}>
+					<span class="dt-logform-toggle-label">Log a trip</span>
+					<span class="dt-logform-toggle-icon">{formOpen ? '▲' : '▼'}</span>
+				</button>
 
-				{#if tripSaved && tripCopyText}
-					<div class="trip-copy-block">
-						<p class="trip-copy-label">Saved — copy for ASM:</p>
-						<pre class="trip-copy-pre">{tripCopyText}</pre>
-						<div class="trip-copy-actions">
-							<button class="dt-import-btn dt-import-btn-go" on:click={() => copyToClipboard(tripCopyText)}>Copy</button>
-							<button class="dt-import-btn" on:click={resetTripForm}>Log another</button>
-						</div>
-					</div>
-				{:else}
-					<div class="trip-form-grid">
-						<div class="trip-field trip-field-wide">
-							<label class="trip-label" for="trip-dog">Dog</label>
-							<select id="trip-dog" class="trip-select" bind:value={tripDogId}>
-								<option value="">— select dog —</option>
-								{#each activeDogs as dog}
-									<option value={dog.id}>{dog.name}</option>
-								{/each}
-							</select>
-						</div>
-
-						<div class="trip-field trip-field-wide">
-							<label class="trip-label" for="trip-volunteer">Volunteer</label>
-							<select id="trip-volunteer" class="trip-select" bind:value={tripVolunteerName}>
-								<option value="">— select volunteer —</option>
-								{#each establishedDTVs as vol}
-									<option value={vol.name}>{vol.name}</option>
-								{/each}
-							</select>
-						</div>
-
-						<div class="trip-field">
-							<label class="trip-label" for="trip-date">Date</label>
-							<input id="trip-date" class="trip-input" type="date" bind:value={tripDate} />
-						</div>
-
-						<div class="trip-field">
-							<label class="trip-label" for="trip-time-out">Time out</label>
-							<input id="trip-time-out" class="trip-input" type="time" bind:value={tripTimeOut} />
-						</div>
-
-						<div class="trip-field">
-							<label class="trip-label" for="trip-time-back">Time back</label>
-							<input id="trip-time-back" class="trip-input" type="time" bind:value={tripTimeBack} />
-						</div>
-
-						<div class="trip-field trip-field-wide trip-ratings">
-							<p class="trip-label">Behavior ratings</p>
-							<div class="trip-ratings-grid">
-								{#each [['Dogs', 'tripDogs'], ['Strangers', 'tripStrangers'], ['Cats', 'tripCats'], ['Kids', 'tripKids']] as [label, key]}
-									<div class="trip-rating-row">
-										<span class="trip-rating-label">{label}</span>
-										<div class="trip-rating-btns">
-											{#each tripRatingOptions as r}
-												<button
-													type="button"
-													class="trip-rating-btn"
-													class:active={getTripRating(key) === r}
-													on:click={() => setTripRating(key, r)}
-												>{r === 'na' ? 'N/A' : r.charAt(0).toUpperCase() + r.slice(1)}</button>
-											{/each}
-										</div>
-									</div>
-								{/each}
+				{#if formOpen}
+					{#if tripSaved && tripCopyText}
+						<div class="trip-copy-block">
+							<p class="trip-copy-label">Saved — copy for ASM:</p>
+							<pre class="trip-copy-pre">{tripCopyText}</pre>
+							<div class="trip-copy-actions">
+								<button class="dt-import-btn dt-import-btn-go" on:click={() => copyToClipboard(tripCopyText)}>Copy</button>
+								<button class="dt-import-btn" on:click={() => { tripSaved = false; tripCopyText = ''; }}>Log another</button>
 							</div>
 						</div>
-
-						<div class="trip-field trip-field-wide">
-							<label class="trip-label" for="trip-notes">Notes</label>
-							<textarea id="trip-notes" class="trip-textarea" bind:value={tripNotes} rows="3" placeholder="Any notes from the trip..."></textarea>
+					{:else}
+						<div class="trip-form-wrap">
+							<TripLogForm
+								dogs={dogsEligible}
+								source="staff"
+								profile={$authProfile}
+								volunteerNames={dtvNames}
+								on:submitted={async (e) => {
+									tripCopyText = e.detail.copyText;
+									tripSaved = true;
+									await refresh();
+								}}
+							/>
 						</div>
-
-						<div class="trip-field trip-field-wide trip-actions">
-							<button class="dt-import-btn dt-import-btn-go" on:click={submitTripLog} disabled={tripSaving || !tripDogId}>
-								{tripSaving ? 'Saving…' : 'Save & Generate Copy Text'}
-							</button>
-						</div>
-					</div>
+					{/if}
 				{/if}
 			</div>
+			{/if}
 
 			<div class="dt-panel">
 				<div class="dt-panel-head">
 					<div>
-						<p class="dt-panel-title">{monthLabel}</p>
-						<p class="dt-panel-sub">{sortedMonthlyLogs.length} completed trip{sortedMonthlyLogs.length === 1 ? '' : 's'} · {monthlyHourTotal.toFixed(1)} total hrs{outNowCount > 0 ? ` · ${outNowCount} in progress` : ''}</p>
+						<p class="dt-panel-title">{showAllLogs ? 'All trips' : monthLabel}</p>
+						<p class="dt-panel-sub">{visibleLogs.length} completed trip{visibleLogs.length === 1 ? '' : 's'}{!showAllLogs ? ` · ${monthlyHourTotal.toFixed(1)} total hrs` : ''}
+						{outNowCount > 0 ? ` · ${outNowCount} in progress` : ''}</p>
+					</div>
+					<div class="dt-log-controls">
+						{#if !showAllLogs}
+							<input class="dt-month-input" type="month" bind:value={monthFilter} />
+						{/if}
+						<button class="dt-toggle-btn" class:active={showAllLogs} on:click={() => showAllLogs = !showAllLogs}>
+							{showAllLogs ? 'Show month' : 'All time'}
+						</button>
 					</div>
 				</div>
 
-				{#if sortedMonthlyLogs.length === 0}
-					<p class="dt-panel-empty">No completed trips logged for {monthLabel}.</p>
+				{#if visibleLogs.length === 0}
+					<p class="dt-panel-empty">No completed trips logged{showAllLogs ? '.' : ` for ${monthLabel}.`}</p>
 				{:else}
 					<div class="dt-table-wrap">
 						<table class="dt-table">
@@ -1043,17 +1074,19 @@
 								<tr>
 									<th>Date</th>
 									<th>Dog</th>
+									<th>Volunteer</th>
 									<th>Time Out</th>
 									<th>Time In</th>
 									<th>Duration</th>
+									<th></th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each sortedMonthlyLogs as log}
+								{#each visibleLogs as log}
 									{@const startDate = toDate(log.startedAt)}
 									{@const endDate = toDate(log.endedAt)}
 									{@const dog = dogs.find(d => d.id === log.dogId)}
-									<tr>
+									<tr class:deleting={deletingTripId === log.id}>
 										<td class="td-muted">{formatShortDate(startDate)}</td>
 										<td class="td-name">
 											{#if dog}
@@ -1062,23 +1095,34 @@
 												<span class="td-muted">Unknown</span>
 											{/if}
 										</td>
+										<td class="td-muted">{log.volunteerName || '—'}</td>
 										<td class="td-muted">{formatTime(startDate)}</td>
 										<td class="td-muted">{formatTime(endDate)}</td>
 										<td class="td-strong">{formatDuration(durationHours(log))}</td>
+										<td class="td-delete">
+											<button class="dt-delete-btn" on:click={() => handleDeleteTrip(log)} disabled={deletingTripId === log.id} title="Delete trip">✕</button>
+										</td>
 									</tr>
+									{#if log.tripNotes?.trim()}
+										<tr class="tr-notes" class:deleting={deletingTripId === log.id}>
+											<td colspan="7" class="td-notes">{log.tripNotes.trim()}</td>
+										</tr>
+									{/if}
 								{/each}
 							</tbody>
+							{#if !showAllLogs}
 							<tfoot>
 								<tr class="dt-table-foot">
-									<td colspan="4" class="td-foot-label">Total</td>
+									<td colspan="5" class="td-foot-label">Total</td>
 									<td class="td-strong">{formatDuration(monthlyHourTotal)}</td>
+									<td></td>
 								</tr>
 							</tfoot>
+							{/if}
 						</table>
 					</div>
 				{/if}
 			</div>
-			{/if}<!-- end canEditDayTrips log form -->
 
 		<!-- ───── DOGS ───── -->
 		{:else if activeTab === 'dogs'}
@@ -1175,10 +1219,155 @@
 					</div>
 				</div>
 
-				<!-- Chart -->
-				<div class="dt-panel dt-stats-chart-panel">
-					<div class="dt-stats-canvas-wrap">
-						<canvas bind:this={statsCanvas}></canvas>
+				<div class="dt-stats-kpi-grid">
+					<div class="dt-stats-kpi">
+						<span class="dt-stats-kpi-label">Busiest month</span>
+						<span class="dt-stats-kpi-value">{busiestMonth?.name ?? '—'}</span>
+						<span class="dt-stats-kpi-sub">{busiestMonth ? `${busiestMonth.trips} trips · ${Math.round(busiestMonth.hours)}h` : 'No trips'}</span>
+					</div>
+					<div class="dt-stats-kpi">
+						<span class="dt-stats-kpi-label">Busiest weekday</span>
+						<span class="dt-stats-kpi-value">{busiestWeekday?.name ?? '—'}</span>
+						<span class="dt-stats-kpi-sub">{busiestWeekday ? `${busiestWeekday.trips} logged trips` : 'No logged trips'}</span>
+					</div>
+					<div class="dt-stats-kpi">
+						<span class="dt-stats-kpi-label">Most trips in a day</span>
+						<span class="dt-stats-kpi-value">{mostTripsInOneDay?.count ?? '—'}</span>
+						<span class="dt-stats-kpi-sub">{mostTripsInOneDay ? mostTripsInOneDay.label : 'No trips logged'}</span>
+					</div>
+					<div class="dt-stats-kpi">
+						<span class="dt-stats-kpi-label">This month vs last</span>
+						<span class="dt-stats-kpi-value">{thisVsLastMonth.thisCount} <span class="dt-stats-kpi-trend" class:kpi-up={thisVsLastMonth.diff > 0} class:kpi-down={thisVsLastMonth.diff < 0}>{thisVsLastMonth.diff > 0 ? `+${thisVsLastMonth.diff}` : thisVsLastMonth.diff < 0 ? `${thisVsLastMonth.diff}` : '='}</span></span>
+						<span class="dt-stats-kpi-sub">{thisVsLastMonth.lastCount} trips last month</span>
+					</div>
+					<div class="dt-stats-kpi">
+						<span class="dt-stats-kpi-label">Longest trip {statsYearFilter}</span>
+						<span class="dt-stats-kpi-value">{longestTrip ? formatDuration(longestTrip.hours) : '—'}</span>
+						<span class="dt-stats-kpi-sub">{longestTrip ? longestTrip.dogName : 'No trips logged'}</span>
+					</div>
+					<div class="dt-stats-kpi">
+						<span class="dt-stats-kpi-label">Most frequent dog</span>
+						<span class="dt-stats-kpi-value">{mostFrequentActiveDog?.name ?? '—'}</span>
+						<span class="dt-stats-kpi-sub">{mostFrequentActiveDog ? `${mostFrequentActiveDog.trips} trips this year` : 'No active dog logs'}</span>
+					</div>
+				</div>
+
+				<div class="dt-stats-grid">
+					<div class="dt-panel dt-stats-chart-panel">
+						<div class="dt-stats-panel-head">
+							<p class="dt-panel-title">Monthly volume</p>
+							<p class="dt-panel-sub">Trips and hours from the spreadsheet</p>
+						</div>
+						<div class="dt-stats-canvas-wrap">
+							<canvas bind:this={statsCanvas}></canvas>
+						</div>
+					</div>
+
+					<div class="dt-panel dt-stats-chart-panel">
+						<div class="dt-stats-panel-head">
+							<p class="dt-panel-title">Year progress</p>
+							<p class="dt-panel-sub">Cumulative trips and hours</p>
+						</div>
+						<div class="dt-stats-canvas-wrap">
+							<canvas bind:this={cumulativeCanvas}></canvas>
+						</div>
+					</div>
+				</div>
+
+				<div class="dt-stats-grid">
+					<div class="dt-panel dt-stats-chart-panel">
+						<div class="dt-stats-panel-head">
+							<p class="dt-panel-title">Trips by weekday</p>
+							<p class="dt-panel-sub">Based on app trip logs for {statsYearFilter}</p>
+						</div>
+						<div class="dt-stats-canvas-wrap dt-stats-canvas-sm">
+							<canvas bind:this={weekdayCanvas}></canvas>
+						</div>
+					</div>
+
+					<div class="dt-panel dt-stats-chart-panel">
+						<div class="dt-stats-panel-head">
+							<p class="dt-panel-title">Most frequent dogs</p>
+							<p class="dt-panel-sub">Based on app trip logs for {statsYearFilter}</p>
+						</div>
+						{#if topDogRows.length > 0}
+							<div class="dt-stats-canvas-wrap dt-stats-canvas-sm">
+								<canvas bind:this={topDogsCanvas}></canvas>
+							</div>
+						{:else}
+							<p class="dt-panel-empty">No dog-level logs for {statsYearFilter}.</p>
+						{/if}
+					</div>
+				</div>
+
+				<div class="dt-stats-grid">
+					<div class="dt-panel dt-stats-list-panel">
+						<div class="dt-stats-panel-head">
+							<p class="dt-panel-title">Top dogs</p>
+							<p class="dt-panel-sub">Repeat trip volume for the selected year</p>
+						</div>
+						{#if topDogRows.length > 0}
+							<div class="dt-stats-rank-list">
+								{#each topDogRows as row, i}
+									<div class="dt-stats-rank-row">
+										<span class="dt-stats-rank-num">{i + 1}</span>
+										<span class="dt-stats-rank-name">{row.name}</span>
+										<span class="dt-stats-rank-value">{row.trips} trips · {formatDuration(row.hours)}</span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<p class="dt-panel-empty">No dog-level logs for {statsYearFilter}.</p>
+						{/if}
+					</div>
+
+					<div class="dt-panel dt-stats-list-panel">
+						<div class="dt-stats-panel-head">
+							<p class="dt-panel-title">Volunteer activity</p>
+							<p class="dt-panel-sub">Who logged completed trips this year</p>
+						</div>
+						{#if topVolunteerRows.length > 0}
+							<div class="dt-stats-rank-list">
+								{#each topVolunteerRows as row, i}
+									<div class="dt-stats-rank-row">
+										<span class="dt-stats-rank-num">{i + 1}</span>
+										<span class="dt-stats-rank-name">{row.name}</span>
+										<span class="dt-stats-rank-value">{row.trips} trips · {formatDuration(row.hours)}</span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<p class="dt-panel-empty">No volunteer logs for {statsYearFilter}.</p>
+						{/if}
+					</div>
+				</div>
+
+				<div class="dt-panel dt-stats-list-panel">
+					<div class="dt-stats-panel-head">
+						<p class="dt-panel-title">Monthly detail</p>
+						<p class="dt-panel-sub">Exact spreadsheet values by month</p>
+					</div>
+					<div class="dt-table-wrap">
+						<table class="dt-table">
+							<thead>
+								<tr>
+									<th>Month</th>
+									<th class="th-center">Trips</th>
+									<th class="th-center">Hours</th>
+									<th class="th-center">Avg</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each selectedYearStat.months as month}
+									<tr>
+										<td class="td-name">{month.name}</td>
+										<td class="td-center td-strong">{month.trips}</td>
+										<td class="td-center td-muted">{Math.round(month.hours)}</td>
+										<td class="td-center td-muted">{month.trips > 0 ? formatDuration(month.hours / month.trips) : '—'}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
 					</div>
 				</div>
 			{:else if sheetStatsLoaded}
@@ -1216,50 +1405,7 @@
 					{#if importDone}
 						<span class="dt-import-done typewriter">Import complete!</span>
 					{/if}
-					<button class="dt-import-btn" on:click={handleFixHoursDryRun} disabled={fixingHours || importing}>
-						{fixingHours && !fixHoursDryRunDone ? 'Checking…' : 'Preview Hour Fix'}
-					</button>
-					{#if fixHoursDryRunDone}
-						<button class="dt-import-btn dt-import-btn-go" on:click={handleFixHours} disabled={fixingHours}>
-							{fixingHours ? 'Fixing…' : `Fix ${fixHoursDryRunRows.length} Trip${fixHoursDryRunRows.length === 1 ? '' : 's'}`}
-						</button>
-					{/if}
-					{#if fixHoursResult}
-						<span class="dt-import-done typewriter">{fixHoursResult}</span>
-					{/if}
 				</div>
-
-				{#if fixHoursDryRunDone}
-					<div class="dt-import-preview">
-						<p class="dt-import-section-label typewriter">Hour Fix Preview — {fixHoursDryRunRows.length} trip{fixHoursDryRunRows.length === 1 ? '' : 's'} to fix</p>
-						{#if fixHoursDryRunRows.length === 0}
-							<p class="dt-panel-sub typewriter">No imported trips with incorrect hours found.</p>
-						{:else}
-							<div class="dt-table-wrap">
-								<table class="dt-table dt-import-table">
-									<thead>
-										<tr>
-											<th>Dog</th>
-											<th>Trip Date</th>
-											<th>Current End Time</th>
-											<th>Will Become</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each fixHoursDryRunRows as row}
-											<tr>
-												<td class="typewriter">{row.dogName}</td>
-												<td class="typewriter">{row.date}</td>
-												<td class="typewriter td-muted">{row.currentEnd}</td>
-												<td class="typewriter td-muted">same as start (0h)</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{/if}
-					</div>
-				{/if}
 
 				{#if importDryRunDone}
 					<div class="dt-import-preview">
@@ -1328,61 +1474,6 @@
 					</div>
 				{/if}
 
-				<div class="dt-import-note">
-					<p class="typewriter">After importing, use <strong>Merge Duplicates</strong> to consolidate any auto-created records back to the real dog.</p>
-				</div>
-
-				<div class="dt-merge-section">
-					<p class="dt-import-section-label typewriter">Merge Duplicates</p>
-					<p class="dt-merge-desc typewriter">Finds dogs auto-created during import, matches them to real shelter dogs by name, moves their trips over, and deletes the duplicates.</p>
-					<div class="dt-import-actions">
-						<button class="dt-import-btn" on:click={runMergeDryRun} disabled={merging}>Preview</button>
-						{#if mergeDryRunDone && mergePreview.length > 0}
-							<button class="dt-import-btn dt-import-btn-go" on:click={runMerge} disabled={merging}>
-								{merging ? 'Merging…' : 'Merge Now'}
-							</button>
-						{/if}
-					</div>
-					{#if mergeDryRunDone && mergePreview.length > 0}
-						<div class="dt-table-wrap">
-							<table class="dt-table dt-import-table">
-								<thead>
-									<tr>
-										<th>Duplicate Record</th>
-										<th>Will Merge Into</th>
-										<th>Trip Dates</th>
-										<th>Dates OK?</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each mergePreview as row}
-										<tr class:dt-import-row-miss={!row.datesMatch}>
-											<td class="typewriter">{row.created.name}</td>
-											<td>
-												{#if row.match}
-													<span class="dt-import-match">{row.match.name}</span>
-												{:else}
-													<span class="dt-import-miss">No match</span>
-												{/if}
-											</td>
-											<td class="typewriter dt-import-dates">{row.tripDates.join(', ') || '—'}</td>
-											<td class="typewriter">
-												{#if row.datesMatch}
-													<span style="color:#2a6e3a">✓</span>
-												{:else}
-													<span style="color:#b84a4a">✗</span>
-												{/if}
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					{/if}
-					{#if mergeLog.length > 0}
-						<pre class="dt-import-log-pre typewriter">{mergeLog.join('\n')}</pre>
-					{/if}
-				</div>
 			</div>
 		{/if}
 
@@ -1393,16 +1484,6 @@
 <style>
 	/* ── Shell ── */
 	.dt-page { width: 100%; max-width: 100%; overflow-x: hidden; }
-
-	.dt-construction-banner {
-		background: #fff8e1;
-		border: 1px solid #f9a825;
-		border-radius: 6px;
-		padding: 0.6rem 1rem;
-		font-size: 0.82rem;
-		color: #7a5100;
-		margin-bottom: 0.75rem;
-	}
 
 	.dt-restricted {
 		padding: 3rem 1.5rem;
@@ -1731,6 +1812,85 @@
 		margin: 0;
 	}
 
+	.dt-logform-panel { padding: 0; overflow: hidden; }
+
+	.dt-logform-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: 0.75rem 1rem;
+		background: none;
+		border: none;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	.dt-logform-toggle:hover { background: #f8f9fa; }
+
+	.dt-logform-toggle-label {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #016aa5;
+	}
+
+	.dt-logform-toggle-icon {
+		font-size: 0.65rem;
+		color: #9aa0a6;
+	}
+
+	.trip-form-wrap { padding: 0 20px 20px; }
+	.trip-copy-block { padding: 0 1rem 1rem; }
+
+	.dt-log-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-shrink: 0;
+	}
+
+	.dt-toggle-btn {
+		padding: 0.28rem 0.7rem;
+		border-radius: 4px;
+		font-size: 0.72rem;
+		font-weight: 500;
+		border: 1px solid #dadce0;
+		background: #fff;
+		color: #3c4043;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.dt-toggle-btn:hover { background: #f8f9fa; }
+	.dt-toggle-btn.active { background: #e8f0fe; border-color: #aecbfa; color: #1a73e8; }
+
+	.td-delete { width: 2rem; text-align: center; }
+
+	.dt-delete-btn {
+		background: none;
+		border: none;
+		color: #bdc1c6;
+		font-size: 0.75rem;
+		cursor: pointer;
+		padding: 0.2rem 0.4rem;
+		border-radius: 4px;
+		line-height: 1;
+	}
+
+	.dt-delete-btn:hover { color: #cf4b4b; background: #fce8e6; }
+	.dt-delete-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+	tr.deleting { opacity: 0.4; pointer-events: none; }
+
+	.tr-notes { background: #fafbfc; }
+	.td-notes {
+		padding: 0.3rem 0.75rem 0.55rem 0.75rem;
+		font-size: 0.78rem;
+		color: #5f6368;
+		font-style: italic;
+		border-top: none;
+	}
+
 	.dt-panel-empty {
 		font-size: 0.82rem;
 		color: #9aa0a6;
@@ -1796,7 +1956,6 @@
 	}
 
 	.tr-overdue td { background: #fffbf0; }
-	.tr-empty td { color: #bdc1c6; }
 
 	/* ── Badges / Tags ── */
 	.dt-out-badge {
@@ -1928,35 +2087,6 @@
 		line-height: 1.7;
 		color: #202124;
 		white-space: pre-wrap;
-	}
-
-	.dt-merge-section { display: grid; gap: 0.5rem; }
-	.dt-merge-desc { font-size: 0.74rem; color: #5f6368; margin: 0; }
-
-	.dt-import-note {
-		padding: 0.6rem 0.75rem;
-		background: #fffbf0;
-		border: 1px solid #fdd663;
-		border-radius: 6px;
-	}
-
-	.dt-import-note p { margin: 0; font-size: 0.74rem; color: #594300; line-height: 1.5; }
-
-	/* ── Tab count badge ── */
-	.dt-tab-count {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		margin-left: 0.3rem;
-		min-width: 1.2rem;
-		height: 1.2rem;
-		padding: 0 0.25rem;
-		border-radius: 999px;
-		font-size: 0.6rem;
-		font-weight: 700;
-		background: #e8f0fe;
-		color: #1a73e8;
-		vertical-align: middle;
 	}
 
 	/* ── Trip log form ── */
@@ -2698,11 +2828,122 @@
 	.dt-stats-total-label { font-size: 0.72rem; color: #5f6368; }
 	.dt-stats-total-sep { color: #bdc1c6; }
 
-	.dt-stats-chart-panel { padding: 1rem; }
+	.dt-stats-kpi-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.7rem;
+	}
+
+	.dt-stats-kpi {
+		display: grid;
+		gap: 0.2rem;
+		padding: 0.8rem 0.9rem;
+		border: 1px solid #dadce0;
+		border-radius: 8px;
+		background: #fff;
+		box-shadow: 0 1px 3px rgba(60,64,67,.08);
+		min-width: 0;
+	}
+
+	.dt-stats-kpi-label {
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		color: #5f6368;
+	}
+
+	.dt-stats-kpi-value {
+		font-size: 1.2rem;
+		font-weight: 800;
+		color: #202124;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dt-stats-kpi-sub {
+		font-size: 0.72rem;
+		color: #5f6368;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dt-stats-kpi-trend {
+		font-size: 0.85rem;
+		font-weight: 700;
+	}
+	.kpi-up { color: #1e7e34; }
+	.kpi-down { color: #cf4b4b; }
+
+	.dt-stats-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.8rem;
+	}
+
+	.dt-stats-chart-panel,
+	.dt-stats-list-panel {
+		padding: 1rem;
+		align-content: start;
+	}
+
+	.dt-stats-panel-head {
+		display: grid;
+		gap: 0.15rem;
+	}
 
 	.dt-stats-canvas-wrap {
 		position: relative;
 		height: 280px;
+	}
+
+	.dt-stats-canvas-sm { height: 240px; }
+
+	.dt-stats-rank-list {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.dt-stats-rank-row {
+		display: grid;
+		grid-template-columns: 1.8rem minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0.55rem;
+		padding: 0.45rem 0;
+		border-bottom: 1px solid #f1f3f4;
+	}
+
+	.dt-stats-rank-row:last-child { border-bottom: none; }
+
+	.dt-stats-rank-num {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.35rem;
+		height: 1.35rem;
+		border-radius: 999px;
+		background: #e8f0fe;
+		color: #1a73e8;
+		font-size: 0.68rem;
+		font-weight: 800;
+	}
+
+	.dt-stats-rank-name {
+		font-size: 0.82rem;
+		font-weight: 600;
+		color: #202124;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dt-stats-rank-value {
+		font-size: 0.74rem;
+		font-weight: 600;
+		color: #5f6368;
+		white-space: nowrap;
 	}
 
 	.dt-stats-year-pills {
@@ -2734,6 +2975,27 @@
 
 	/* ── Responsive ── */
 	@media (max-width: 640px) {
+		.dt-stats-header {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.dt-stats-totals { flex-wrap: wrap; }
+		.dt-stats-kpi-grid,
+		.dt-stats-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.dt-stats-canvas-wrap { height: 240px; }
+
+		.dt-stats-rank-row {
+			grid-template-columns: 1.8rem minmax(0, 1fr);
+		}
+
+		.dt-stats-rank-value {
+			grid-column: 2;
+		}
+
 		.vol-shell {
 			gap: 0.75rem;
 		}
@@ -2754,12 +3016,6 @@
 			align-items: center;
 			flex: 0 0 auto;
 			margin-left: auto;
-		}
-
-		.vol-header-right .dt-import-error {
-			flex-basis: 100%;
-			order: 2;
-			text-align: right;
 		}
 
 		.vol-sync-btn {
@@ -2830,9 +3086,7 @@
 		}
 
 		.vol-step-btn,
-		.vol-card-actions .dt-import-btn,
-		.vol-date-input,
-		.vol-notes-actions .dt-import-btn {
+		.vol-date-input {
 			width: 100%;
 		}
 

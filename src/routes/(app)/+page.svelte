@@ -555,6 +555,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Dashboard | Cache Humane Society</title>
+</svelte:head>
+
 <section class="planner-dashboard" aria-label="Operations dashboard">
 	<header class="planner-head">
 		<p class="planner-datestamp">

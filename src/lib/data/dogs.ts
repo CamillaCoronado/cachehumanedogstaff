@@ -157,6 +157,9 @@ interface StoredDayTripLog {
 	reactionToStrangers?: string | null;
 	reactionToCats?: string | null;
 	reactionToKids?: string | null;
+	reactionToLeash?: string | null;
+	reactionToCarRides?: string | null;
+	reactionToToys?: string | null;
 	tripNotes?: string | null;
 	source?: 'staff' | 'qr' | null;
 	createdAt: string;
@@ -595,6 +598,9 @@ function serializeDayTripLog(log: DayTripLog): StoredDayTripLog {
 		reactionToStrangers: log.reactionToStrangers ?? null,
 		reactionToCats: log.reactionToCats ?? null,
 		reactionToKids: log.reactionToKids ?? null,
+		reactionToLeash: log.reactionToLeash ?? null,
+		reactionToCarRides: log.reactionToCarRides ?? null,
+		reactionToToys: log.reactionToToys ?? null,
 		tripNotes: log.tripNotes ?? null,
 		source: log.source ?? null,
 		createdAt: toDateString(log.createdAt) ?? new Date().toISOString(),
@@ -619,6 +625,9 @@ function deserializeDayTripLog(log: StoredDayTripLog): DayTripLog {
 		reactionToStrangers: (log.reactionToStrangers as DayTripLog['reactionToStrangers']) ?? null,
 		reactionToCats: (log.reactionToCats as DayTripLog['reactionToCats']) ?? null,
 		reactionToKids: (log.reactionToKids as DayTripLog['reactionToKids']) ?? null,
+		reactionToLeash: (log.reactionToLeash as DayTripLog['reactionToLeash']) ?? null,
+		reactionToCarRides: (log.reactionToCarRides as DayTripLog['reactionToCarRides']) ?? null,
+		reactionToToys: (log.reactionToToys as DayTripLog['reactionToToys']) ?? null,
 		tripNotes: log.tripNotes ?? null,
 		source: log.source ?? null,
 		createdAt: toDate(log.createdAt) ?? new Date(),
@@ -1108,6 +1117,39 @@ export async function listAllDayTripLogs() {
 	return Object.values(stored).flat().map(deserializeDayTripLog);
 }
 
+export async function patchDayTripLog(
+	dogId: string,
+	tripId: string,
+	patch: Partial<Pick<DayTripLog,
+		'tripNotes' | 'reactionToDogs' | 'reactionToStrangers' | 'reactionToCats' |
+		'reactionToKids' | 'reactionToLeash' | 'reactionToCarRides' | 'reactionToToys'
+	>>
+) {
+	if (db) {
+		const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
+		if (ref) await setDoc(doc(ref, tripId), patch, { merge: true });
+		return;
+	}
+	const map = readDayTripMap();
+	if (map[dogId]) {
+		map[dogId] = map[dogId].map(l => l.id === tripId ? { ...l, ...patch } : l);
+		writeDayTripMap(map);
+	}
+}
+
+export async function deleteDayTripLog(dogId: string, tripId: string) {
+	if (db) {
+		const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
+		if (ref) await deleteDoc(doc(ref, tripId));
+		return;
+	}
+	const map = readDayTripMap();
+	if (map[dogId]) {
+		map[dogId] = map[dogId].filter((l) => l.id !== tripId);
+		writeDayTripMap(map);
+	}
+}
+
 export async function addFeedingLog(
 	dogId: string,
 	log: Omit<FeedingLog, 'id' | 'createdAt' | 'loggedBy' | 'loggedByName'>,
@@ -1404,31 +1446,6 @@ export async function clearDayTripLogs(dogId: string): Promise<void> {
 	await deleteDogSubcollection(dogId, 'dayTripLogs');
 }
 
-export async function mergeDayTripLogs(fromDogId: string, toDogId: string): Promise<number> {
-	const ref = dogSubcollectionRef(fromDogId, 'dayTripLogs');
-	if (!ref) return 0;
-	const snapshot = await getDocs(ref);
-	if (snapshot.empty) return 0;
-	const destRef = dogSubcollectionRef(toDogId, 'dayTripLogs');
-	if (!destRef) return 0;
-	for (const docSnap of snapshot.docs) {
-		const data = { ...docSnap.data(), dogId: toDogId } as StoredDayTripLog;
-		await setDoc(doc(destRef, docSnap.id), data);
-		await deleteDoc(docSnap.ref);
-	}
-	// Update lastDayTripDate on destination dog
-	const destLogs = await getDocs(destRef);
-	let latestMs = 0;
-	destLogs.forEach((d) => {
-		const t = toDate((d.data() as StoredDayTripLog).endedAt ?? (d.data() as StoredDayTripLog).startedAt)?.getTime() ?? 0;
-		if (t > latestMs) latestMs = t;
-	});
-	if (latestMs > 0) {
-		await updateDog(toDogId, { lastDayTripDate: new Date(latestMs) });
-	}
-	return snapshot.size;
-}
-
 export async function importHistoricalDayTrip(
 	dogId: string,
 	tripDate: Date,
@@ -1452,42 +1469,6 @@ export async function importHistoricalDayTrip(
 		updatedAt: new Date()
 	};
 	await setDoc(doc(ref, entry.id), serializeDayTripLog(entry));
-}
-
-export async function fixImportedTripHours(dryRun: boolean): Promise<number | { dogName: string; date: string; currentEnd: string }[]> {
-	if (!db) return dryRun ? [] : 0;
-	const [snapshot, dogsSnapshot] = await Promise.all([
-		getDocs(collectionGroup(db, 'dayTripLogs')),
-		getDocs(collection(db, 'dogs'))
-	]);
-	const dogNames = new Map(dogsSnapshot.docs.map((d) => [d.id, (d.data() as StoredDog).name]));
-	if (dryRun) {
-		const rows: { dogName: string; date: string; currentEnd: string }[] = [];
-		for (const snap of snapshot.docs) {
-			const data = snap.data() as StoredDayTripLog;
-			if (data.startNotes === 'Imported from spreadsheet' && data.endedAt !== data.startedAt) {
-				const dogId = snap.ref.parent.parent?.id ?? '';
-				rows.push({
-					dogName: dogNames.get(dogId) ?? dogId,
-					date: data.startedAt ? data.startedAt.split('T')[0] : '?',
-					currentEnd: data.endedAt ?? '—'
-				});
-			}
-		}
-		return rows;
-	}
-	let fixed = 0;
-	let batch = writeBatch(db);
-	for (const snap of snapshot.docs) {
-		const data = snap.data() as StoredDayTripLog;
-		if (data.startNotes === 'Imported from spreadsheet' && data.endedAt !== data.startedAt) {
-			batch.update(snap.ref, { endedAt: data.startedAt });
-			fixed++;
-			if (fixed % 450 === 0) { await batch.commit(); batch = writeBatch(db); }
-		}
-	}
-	if (fixed % 450 !== 0) await batch.commit();
-	return fixed;
 }
 
 // Returns the default end time for a day trip: 1 hour before closing on the given date.
@@ -1603,6 +1584,9 @@ export interface ManualTripData {
 	reactionToStrangers: DayTripLog['reactionToStrangers'];
 	reactionToCats: DayTripLog['reactionToCats'];
 	reactionToKids: DayTripLog['reactionToKids'];
+	reactionToLeash: DayTripLog['reactionToLeash'];
+	reactionToCarRides: DayTripLog['reactionToCarRides'];
+	reactionToToys: DayTripLog['reactionToToys'];
 	tripNotes: string;
 	source: 'staff' | 'qr';
 }
@@ -1631,6 +1615,9 @@ export async function logManualTrip(
 		reactionToStrangers: data.reactionToStrangers ?? null,
 		reactionToCats: data.reactionToCats ?? null,
 		reactionToKids: data.reactionToKids ?? null,
+		reactionToLeash: data.reactionToLeash ?? null,
+		reactionToCarRides: data.reactionToCarRides ?? null,
+		reactionToToys: data.reactionToToys ?? null,
 		tripNotes: data.tripNotes || null,
 		source: data.source,
 		createdAt: now,

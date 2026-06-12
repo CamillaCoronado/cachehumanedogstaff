@@ -531,6 +531,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Kennels | Cache Humane Society</title>
+</svelte:head>
+
 <section class="kennels-board">
 	<div class="kennels-grid-board">
 		<div class="kennel-hero">

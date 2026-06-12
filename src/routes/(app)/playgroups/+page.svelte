@@ -16,7 +16,8 @@
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import { daysSince, formatDateTime, toDate } from '$lib/utils/dates';
-	import { getCautionDogs } from '$lib/utils/attention';
+	import { getCautionDogs, isSurgeryResting, dogAgeWeeks } from '$lib/utils/attention';
+	import { matchDogByName } from '$lib/utils/dogs';
 	import { canAccessPlaygroups, canEditPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
@@ -126,15 +127,9 @@
 	$: history = [...sessions].sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
 
 
-	function ageWeeks(dog: Dog): number | null {
-		const dob = toDate(dog.dateOfBirth);
-		if (!dob) return null;
-		return Math.floor((Date.now() - dob.getTime()) / (7 * 86_400_000));
-	}
-
 	function isPuppy(dog: Dog): boolean {
-		const weeks = ageWeeks(dog);
-		return weeks !== null && weeks < 26; // under 6 months
+		const weeks = dogAgeWeeks(dog, new Date());
+		return weeks !== null && weeks < 26;
 	}
 
 	// 2+ vaccine rounds AND last shot at least 14 days ago
@@ -145,13 +140,6 @@
 		return Math.floor((Date.now() - vaccDate.getTime()) / 86_400_000) >= 14;
 	}
 
-	function isOnMedicalRest(dog: Dog): boolean {
-		const surgeryDaysAgo = daysSince(dog.surgeryDate);
-		if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) return true;
-		if (dog.dayTripStatus === 'ineligible' && dog.dayTripIneligibleReason === 'medical') return true;
-		return false;
-	}
-
 	function intactConflict(dogs: Dog[]): boolean {
 		const hasIntactMale = dogs.some((d) => !d.isFixed && d.sex === 'male');
 		const hasIntactFemale = dogs.some((d) => !d.isFixed && d.sex === 'female');
@@ -160,8 +148,8 @@
 
 	function getReadiness(dog: Dog): DogReadiness {
 		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no') return 'hold';
-		if (isOnMedicalRest(dog)) return 'hold';
-		const weeks = ageWeeks(dog);
+		if (isSurgeryResting(dog, new Date())) return 'hold';
+		const weeks = dogAgeWeeks(dog, new Date());
 		if (weeks !== null && weeks < 26) {
 			if (weeks < 12 || !isPuppyVaccinated(dog)) return 'hold';
 		}
@@ -188,7 +176,7 @@
 			if (dog.dayTripStatus === 'ineligible' && dog.dayTripIneligibleReason === 'medical') {
 				return dog.dayTripNotes?.trim() ? `Medical hold: ${dog.dayTripNotes.trim()}` : 'Medical hold: do not schedule.';
 			}
-			const weeks = ageWeeks(dog);
+			const weeks = dogAgeWeeks(dog, new Date());
 			if (weeks !== null && weeks < 12) return `Too young for playgroup (${weeks} wks — minimum 12 weeks).`;
 			if (isPuppy(dog) && !isPuppyVaccinated(dog)) {
 				if (dog.vaccineCount < 2) return `Needs 2 vaccine rounds before playgroup (${dog.vaccineCount} on record).`;
@@ -263,7 +251,7 @@
 		return allDogs.filter((dog) => {
 			if (dog.isolationStatus !== 'none') return false;
 			if (dog.goodWithDogs === 'no') return false;
-			const weeks = ageWeeks(dog);
+			const weeks = dogAgeWeeks(dog, new Date());
 			return weeks !== null && weeks >= 12 && weeks < 26 && dog.isVaccinated;
 		});
 	}
@@ -374,20 +362,8 @@
 	function matchImportDogs(names: string[]) {
 		const active = dogs.filter((d) => d.status === 'active' && !d.permanentFoster);
 		const all = dogs.filter((d) => !d.permanentFoster);
-		function findIn(list: Dog[], lower: string) {
-			return (
-				list.find((d) => d.name.toLowerCase() === lower) ??
-				list.find((d) => {
-					const dogLower = d.name.toLowerCase();
-					return dogLower.includes(lower) || lower.includes(dogLower);
-				}) ??
-				null
-			);
-		}
 		return names.map((name) => {
-			const lower = name.toLowerCase();
-			// Always prefer an active dog; fall back to inactive only if no active match
-			const dog = findIn(active, lower) ?? findIn(all, lower);
+			const dog = matchDogByName(name, active) ?? matchDogByName(name, all);
 			return { name, dog, isActive: dog ? dog.status === 'active' : false };
 		});
 	}
@@ -645,6 +621,10 @@
 		return 'outcome-cancelled';
 	}
 </script>
+
+<svelte:head>
+	<title>Playgroups | Cache Humane Society</title>
+</svelte:head>
 
 {#if !canViewPlaygroups}
 	<section class="playgroups-board" aria-label="Playgroups board">

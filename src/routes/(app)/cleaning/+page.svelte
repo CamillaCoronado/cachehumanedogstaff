@@ -279,6 +279,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Cleaning | Cache Humane Society</title>
+</svelte:head>
+
 <section class="cleaning-board">
 	<div class="cleaning-grid-board">
 		<div class="cleaning-hero">

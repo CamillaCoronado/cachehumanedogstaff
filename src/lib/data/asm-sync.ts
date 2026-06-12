@@ -293,16 +293,13 @@ function defaultStoredFields(now: string) {
  * Returns a SyncResult describing what was added, changed, or archived.
  */
 export async function syncAnimalsFromASM(): Promise<SyncResult> {
-	console.log('[ASM sync] Starting');
 	if (!db) throw new Error('Firestore not available');
 
 	// 1. Fetch from ASM via server-side proxy (avoids CORS)
 	const res = await fetch('/api/asm');
-	console.log('[ASM sync] API response status:', res.status);
 	if (!res.ok) {
 		// 503 = credentials not configured (local dev), 502 = ASM unreachable — skip silently
 		if (res.status === 502 || res.status === 503) {
-			console.log('[ASM sync] Silent skip — no credentials or ASM unreachable');
 			return { changes: [] };
 		}
 		let detail = '';
@@ -310,7 +307,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		throw new Error(`ASM proxy error ${res.status}${detail ? `: ${detail}` : ''}`);
 	}
 	const allAnimals: AsmAnimal[] = await res.json();
-	console.log('[ASM sync] Total animals from ASM:', allAnimals.length);
 
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
@@ -319,26 +315,10 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			(!a.ACTIVEMOVEMENTTYPE || a.ACTIVEMOVEMENTTYPE === 2) &&
 			!a.DECEASEDDATE
 	);
-	console.log('[ASM sync] Active/foster dogs:', dogs.length);
-
-	// Log any dogs named Bone specifically
-	const boneInAll = allAnimals.filter(a => (a.ANIMALNAME ?? '').toLowerCase().includes('bone'));
-	if (boneInAll.length) {
-		console.log('[ASM sync] Bone in allAnimals:', boneInAll.map(a => ({ id: a.ID, name: a.ANIMALNAME, ACTIVEMOVEMENTTYPE: a.ACTIVEMOVEMENTTYPE, SHELTERCODE: a.SHELTERCODE, DECEASEDDATE: a.DECEASEDDATE })));
-	}
 
 	// 3. Fetch existing docs to diff against
 	const snapshot = await getDocs(collection(db, 'dogs'));
 	const existingDocs = new Map(snapshot.docs.map((d) => [d.id, d.data()]));
-	console.log('[ASM sync] Firestore dogs loaded:', existingDocs.size);
-
-	// Log Bone's Firestore state
-	const boneFirestore = [...existingDocs.entries()].find(([, d]) => (d.name as string ?? '').toLowerCase().includes('bone'));
-	if (boneFirestore) {
-		console.log('[ASM sync] Bone in Firestore:', { id: boneFirestore[0], name: boneFirestore[1].name, status: boneFirestore[1].status, asmId: boneFirestore[1].asmId, asmShelterCode: boneFirestore[1].asmShelterCode });
-	} else {
-		console.log('[ASM sync] Bone NOT found in Firestore');
-	}
 
 	const now = new Date().toISOString();
 	const BATCH_SIZE = 499;
@@ -352,12 +332,9 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		const knownIds: string[] = JSON.parse(localStorage.getItem(KNOWN_DOG_IDS_KEY) ?? '[]');
 		const knownSet = new Set(knownIds);
 		newlyArrivedAnimals = dogs.filter(d => !knownSet.has(String(d.ID)));
-		console.log('[ASM sync] Known IDs:', knownSet.size, 'New arrivals:', newlyArrivedAnimals.map(d => d.ANIMALNAME));
 		// Update known IDs now — overlay persistence handled by overlayAcked in STORAGE_KEY
 		localStorage.setItem(KNOWN_DOG_IDS_KEY, JSON.stringify(dogs.map(d => String(d.ID))));
-	} catch (e) {
-		console.warn('[ASM sync] localStorage dog ID diff error:', e);
-	}
+	} catch { /* ignore */ }
 
 	// 4. Determine which dogs need writing (new or changed ASM fields)
 	type PendingWrite = { animal: AsmAnimal; isNew: boolean; changedFields: string[] };
@@ -435,7 +412,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	}
 
 	const currentAsmIds = new Set(dogs.map((a) => a.ID));
-	console.log('[ASM sync] Current ASM IDs (active/foster):', currentAsmIds.size);
 
 	// Fetch recent adoptions/transfers directly from ASM — this is the authoritative source
 	// since json_shelter_animals only returns currently active animals.
@@ -449,14 +425,12 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		const recentRes = await fetch('/api/asm/recent-adoptions?days=14');
 		if (recentRes.ok) {
 			const recentAdoptions: { id: string; shelterCode: string; adoptedAt: string }[] = await recentRes.json();
-			console.log('[ASM sync] Recent adoptions from ASM:', recentAdoptions.length, recentAdoptions.map(a => a.id));
 
 			// Compare to previously known adoption IDs to find NEW ones
 			let knownIds: string[] = [];
 			try { knownIds = JSON.parse(localStorage.getItem(KNOWN_ADOPTIONS_KEY) ?? '[]'); } catch { /* ignore */ }
 			const knownSet = new Set(knownIds);
 			newAdoptionIds = recentAdoptions.map(a => a.id).filter(id => !knownSet.has(id));
-			console.log('[ASM sync] New adoption IDs (not previously seen):', newAdoptionIds);
 
 			// Update stored known IDs
 			const allCurrentIds = recentAdoptions.map(a => a.id);
@@ -469,22 +443,9 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 					if (a.adoptedAt) movementDateByShelterCode.set(a.shelterCode, a.adoptedAt);
 				}
 			}
-		} else {
-			console.warn('[ASM sync] recent-adoptions fetch failed:', recentRes.status);
 		}
-	} catch (e) {
-		console.warn('[ASM sync] recent-adoptions error:', e);
-	}
-	console.log('[ASM sync] shelterCodeOutcomes size (new adoptions only):', shelterCodeOutcomes.size);
-
-	if (boneFirestore) {
-		const boneCode = boneFirestore[1].asmShelterCode as string | undefined;
-		console.log(`[ASM sync] Bone Firestore shelterCode ${boneCode} → outcome:`, boneCode ? (shelterCodeOutcomes.get(boneCode) ?? 'NOT in outcomes map') : 'no shelterCode on doc');
-		console.log('[ASM sync] Bone Firestore asmId in currentAsmIds:', boneFirestore[1].asmId !== undefined ? currentAsmIds.has(boneFirestore[1].asmId as number) : 'no asmId');
-	}
-
+	} catch { /* ignore */ }
 	const archived = await markStaleAsmDogsArchived(currentAsmIds, shelterCodeOutcomes, movementDateByShelterCode);
-	console.log('[ASM sync] Archived dogs:', archived.map(a => ({ id: a.id, name: a.name, outcome: a.outcome })));
 
 	const archivedChanges: SyncChange[] = archived.map(({ id, name, outcome }) => ({
 		id,
@@ -506,10 +467,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		fields: changedFields
 	}));
 
-	console.log('[ASM sync] pendingChanges (new/updated):', pendingChanges.length, pendingChanges.map(c => ({ id: c.id, name: c.name, isNew: c.isNew, fields: c.fields })));
-	console.log('[ASM sync] archivedChanges:', archivedChanges.length, archivedChanges.map(c => ({ id: c.id, name: c.name, isArchived: c.isArchived, isTransferredOut: c.isTransferredOut })));
-	console.log('[ASM sync] Total changes returned:', pendingChanges.length + archivedChanges.length);
-
 	const newArrivalChanges: SyncChange[] = newlyArrivedAnimals.map(a => ({
 		id: String(a.ID),
 		name: a.ANIMALNAME ?? `Dog ${a.ID}`,
@@ -519,8 +476,6 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		isEuthanized: false,
 		fields: []
 	}));
-
-	console.log('[ASM sync] newArrivalChanges:', newArrivalChanges.map(c => c.name));
 
 	return { changes: [...pendingChanges, ...archivedChanges, ...newArrivalChanges] };
 }
@@ -540,25 +495,15 @@ export async function markStaleAsmDogsArchived(
 	const snapshot = await getDocs(collection(db, 'dogs'));
 	const staleDocs = snapshot.docs.filter((d) => {
 		const data = d.data();
-		const isBone = (data.name as string ?? '').toLowerCase().includes('bone');
-		if (data.status === 'adopted' || data.status === 'transferred' || data.status === 'euthanized') {
-			if (isBone) console.log('[ASM stale] Bone SKIPPED — already archived, status:', data.status);
-			return false;
-		}
+		if (data.status === 'adopted' || data.status === 'transferred' || data.status === 'euthanized') return false;
 		const asmId = data.asmId as number | undefined;
 		const idAsNum = /^\d+$/.test(d.id) ? Number(d.id) : undefined;
 		const effectiveAsmId = asmId ?? idAsNum;
 		const shelterCode = data.asmShelterCode as string | undefined;
 		const missedByAsmId = effectiveAsmId !== undefined && !currentAsmIds.has(effectiveAsmId);
 		const caughtByShelterCode = Boolean(shelterCode && shelterCodeOutcomes.has(shelterCode));
-		if (isBone) {
-			console.log('[ASM stale] Bone check:', { docId: d.id, effectiveAsmId, shelterCode, missedByAsmId, caughtByShelterCode });
-		}
-		if (missedByAsmId) return true;
-		if (caughtByShelterCode) return true;
-		return false;
+		return missedByAsmId || caughtByShelterCode;
 	});
-	console.log('[ASM stale] Stale docs found:', staleDocs.length);
 
 	if (staleDocs.length === 0) return [];
 

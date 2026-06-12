@@ -201,13 +201,11 @@ const today = new Date();
 		lastPlaygroupByDogId = buildLastPlaygroupMap(playgroupRows);
 		loading = false;
 
-		// Auto-clear awaitingEvaluation for dogs that have been color-coded
-		// in the DT Numbers spreadsheet (green or yellow = already evaluated).
+		// Auto-clear awaitingEvaluation for dogs that appear on the DT Numbers sheet (any color).
 		const evaluated = dogRows.filter((d) => {
 			if (!d.awaitingEvaluation) return false;
 			const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-			const color = (colorsRes as Record<string, string>)[key];
-			return color === 'green' || color === 'yellow';
+			return Boolean((colorsRes as Record<string, string>)[key]);
 		});
 		if (evaluated.length > 0) {
 			await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false })));
@@ -559,6 +557,10 @@ function missingEvaluations(dog: Dog) {
 		dismissedItems = { ...dismissedItems, [dogId]: current };
 	}
 </script>
+
+<svelte:head>
+	<title>Dogs | Cache Humane Society</title>
+</svelte:head>
 
 <section class="marker-dogs" aria-label="Dogs board">
 	<div class="dogs-grid-board">

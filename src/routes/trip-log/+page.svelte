@@ -1,36 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { db } from '$lib/firebase/config';
-	import { collection, doc, setDoc } from 'firebase/firestore';
-	import { listDogs, logManualTrip } from '$lib/data/dogs';
-	import type { BehaviorRating, Dog } from '$lib/types';
+	import { listDogs } from '$lib/data/dogs';
+	import { isDayTripEligible } from '$lib/utils/attention';
+	import type { Dog } from '$lib/types';
+	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
 
 	let dogs: Dog[] = [];
 	let loading = true;
 	let submitted = false;
-	let submitting = false;
-	let error = '';
 	let copyText = '';
-
-	const now = new Date();
-	const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-	let dogId = '';
-	let volunteerName = '';
-	let date = todayStr;
-	let timeOut = '';
-	let timeBack = '';
-	let dogs_rating: BehaviorRating | '' = '';
-	let strangers_rating: BehaviorRating | '' = '';
-	let cats_rating: BehaviorRating | '' = '';
-	let kids_rating: BehaviorRating | '' = '';
-	let notes = '';
 
 	onMount(async () => {
 		try {
-			const all = await listDogs();
+			const [all, colorsRes] = await Promise.all([
+				listDogs(),
+				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+			]);
+			const sheetColors = colorsRes as Record<string, string>;
 			dogs = all
-				.filter((d) => d.status === 'active' && !d.inFoster && d.isolationStatus === 'none')
+				.filter((d) => d.status === 'active' && !d.inFoster && isDayTripEligible(d, sheetColors))
 				.sort((a, b) => a.name.localeCompare(b.name));
 		} catch (e) {
 			console.error(e);
@@ -39,81 +27,9 @@
 		}
 	});
 
-	function buildDateTime(dateStr: string, timeStr: string): Date | null {
-		if (!dateStr) return null;
-		const [y, m, d] = dateStr.split('-').map(Number);
-		if (!timeStr) return new Date(y, m - 1, d, 0, 0, 0);
-		const [h, min] = timeStr.split(':').map(Number);
-		return new Date(y, m - 1, d, h, min, 0);
-	}
-
-	function buildCopy(): string {
-		const dog = dogs.find((d) => d.id === dogId);
-		if (!dog) return '';
-		const dateObj = buildDateTime(date, '');
-		const dateLabel = dateObj
-			? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-			: date;
-		const r = (v: BehaviorRating | '') =>
-			v === 'good' ? 'Good' : v === 'neutral' ? 'Neutral' : v === 'reactive' ? 'Reactive' : v === 'na' ? 'N/A' : '—';
-		const lines = [
-			`Day Trip — ${dog.name} — ${dateLabel}`,
-			`Volunteer: ${volunteerName || '—'}`,
-			`Time out: ${timeOut || '—'} | Time back: ${timeBack || '—'}`,
-			``,
-			`Behavior:`,
-			`• Around dogs: ${r(dogs_rating)}`,
-			`• Around strangers: ${r(strangers_rating)}`,
-			`• Around cats: ${r(cats_rating)}`,
-			`• Around kids: ${r(kids_rating)}`,
-		];
-		if (notes.trim()) lines.push(``, `Notes: ${notes.trim()}`);
-		return lines.join('\n');
-	}
-
-	async function submit() {
-		if (!dogId) { error = 'Please select a dog.'; return; }
-		if (!volunteerName.trim()) { error = 'Please enter your name.'; return; }
-		error = '';
-		submitting = true;
-		try {
-			const startedAt = buildDateTime(date, timeOut) ?? new Date();
-			const endedAt = timeBack ? buildDateTime(date, timeBack) : null;
-			await logManualTrip(dogId, {
-				startedAt,
-				endedAt,
-				volunteerName: volunteerName.trim(),
-				reactionToDogs: (dogs_rating as BehaviorRating) || null,
-				reactionToStrangers: (strangers_rating as BehaviorRating) || null,
-				reactionToCats: (cats_rating as BehaviorRating) || null,
-				reactionToKids: (kids_rating as BehaviorRating) || null,
-				tripNotes: notes,
-				source: 'qr'
-			});
-			copyText = buildCopy();
-			submitted = true;
-		} catch (e) {
-			error = 'Something went wrong — please try again.';
-			console.error(e);
-		} finally {
-			submitting = false;
-		}
-	}
-
 	async function copyToClipboard() {
-		try {
-			await navigator.clipboard.writeText(copyText);
-		} catch {
-			// ignore
-		}
+		try { await navigator.clipboard.writeText(copyText); } catch { /* ignore */ }
 	}
-
-	const ratings: { value: BehaviorRating; label: string }[] = [
-		{ value: 'good', label: 'Good' },
-		{ value: 'neutral', label: 'Neutral' },
-		{ value: 'reactive', label: 'Reactive' },
-		{ value: 'na', label: 'N/A' }
-	];
 </script>
 
 <svelte:head>
@@ -122,94 +38,41 @@
 
 <div class="tl-page">
 	<div class="tl-card">
+
 		<div class="tl-header">
-			<p class="tl-title">Day Trip Log</p>
+			<div class="tl-header-icon">
+			<svg xmlns="http://www.w3.org/2000/svg" viewBox="110 180 420 340" width="74" height="60" fill="#3aaf2a">
+				<g transform="translate(410,330) rotate(-12) scale(0.35) translate(-256,-256)">
+					<path d="M226.5 92.9c14.3 42.9-.3 86.2-32.6 96.8s-70.1-15.6-84.4-58.5s.3-86.2 32.6-96.8s70.1 15.6 84.4 58.5zM100.4 198.6c18.9 32.4 14.3 70.1-10.2 84.1s-59.7-.9-78.5-33.3S-2.7 179.3 21.8 165.3s59.7 .9 78.5 33.3zM69.2 401.2C121.6 259.9 214.7 224 256 224s134.4 35.9 186.8 177.2c3.6 9.7 5.2 20.1 5.2 30.5l0 1.6c0 25.8-20.9 46.7-46.7 46.7c-11.5 0-22.9-1.4-34-4.2l-88-22c-15.3-3.8-31.3-3.8-46.6 0l-88 22c-11.1 2.8-22.5 4.2-34 4.2C84.9 480 64 459.1 64 433.3l0-1.6c0-10.4 1.6-20.8 5.2-30.5zM421.8 282.7c-24.5-14-29.1-51.7-10.2-84.1s54-47.3 78.5-33.3s29.1 51.7 10.2 84.1s-54 47.3-78.5 33.3zM310.1 189.7c-32.3-10.6-46.9-53.9-32.6-96.8s52.1-69.1 84.4-58.5s46.9 53.9 32.6 96.8s-52.1 69.1-84.4 58.5z"/>
+				</g>
+				<g transform="translate(215,370) rotate(12) scale(0.35) translate(-256,-256)">
+					<path d="M226.5 92.9c14.3 42.9-.3 86.2-32.6 96.8s-70.1-15.6-84.4-58.5s.3-86.2 32.6-96.8s70.1 15.6 84.4 58.5zM100.4 198.6c18.9 32.4 14.3 70.1-10.2 84.1s-59.7-.9-78.5-33.3S-2.7 179.3 21.8 165.3s59.7 .9 78.5 33.3zM69.2 401.2C121.6 259.9 214.7 224 256 224s134.4 35.9 186.8 177.2c3.6 9.7 5.2 20.1 5.2 30.5l0 1.6c0 25.8-20.9 46.7-46.7 46.7c-11.5 0-22.9-1.4-34-4.2l-88-22c-15.3-3.8-31.3-3.8-46.6 0l-88 22c-11.1 2.8-22.5 4.2-34 4.2C84.9 480 64 459.1 64 433.3l0-1.6c0-10.4 1.6-20.8 5.2-30.5zM421.8 282.7c-24.5-14-29.1-51.7-10.2-84.1s54-47.3 78.5-33.3s29.1 51.7 10.2 84.1s-54 47.3-78.5 33.3zM310.1 189.7c-32.3-10.6-46.9-53.9-32.6-96.8s52.1-69.1 84.4-58.5s46.9 53.9 32.6 96.8s-52.1 69.1-84.4 58.5z"/>
+				</g>
+			</svg>
+		</div>
+			<h1 class="tl-title">Day Trip Log</h1>
 			<p class="tl-sub">Cache Humane Society</p>
 		</div>
 
 		{#if submitted}
 			<div class="tl-success">
+				<div class="tl-success-icon">🎉</div>
 				<p class="tl-success-title">Trip logged — thank you!</p>
-				{#if copyText}
-					<pre class="tl-copy-pre">{copyText}</pre>
-					<button class="tl-btn tl-btn-copy" on:click={copyToClipboard}>Copy to clipboard</button>
-				{/if}
+				<p class="tl-success-sub">You're making a difference for shelter dogs.</p>
+				<button class="tl-btn tl-btn-new" on:click={() => { submitted = false; copyText = ''; }}>
+					Log another trip
+				</button>
 			</div>
 		{:else if loading}
-			<p class="tl-loading">Loading…</p>
+			<p class="tl-loading">Loading dogs…</p>
 		{:else}
-			<form class="tl-form" on:submit|preventDefault={submit}>
-
-				<div class="tl-field">
-					<label class="tl-label" for="tl-name">Your name</label>
-					<input id="tl-name" class="tl-input" type="text" bind:value={volunteerName} placeholder="First and last name" required />
-				</div>
-
-				<div class="tl-field">
-					<label class="tl-label" for="tl-dog">Dog taken out</label>
-					<select id="tl-dog" class="tl-input" bind:value={dogId} required>
-						<option value="">— select a dog —</option>
-						{#each dogs as dog}
-							<option value={dog.id}>{dog.name}</option>
-						{/each}
-					</select>
-				</div>
-
-				<div class="tl-row">
-					<div class="tl-field">
-						<label class="tl-label" for="tl-date">Date</label>
-						<input id="tl-date" class="tl-input" type="date" bind:value={date} required />
-					</div>
-					<div class="tl-field">
-						<label class="tl-label" for="tl-out">Time out</label>
-						<input id="tl-out" class="tl-input" type="time" bind:value={timeOut} />
-					</div>
-					<div class="tl-field">
-						<label class="tl-label" for="tl-back">Time back</label>
-						<input id="tl-back" class="tl-input" type="time" bind:value={timeBack} />
-					</div>
-				</div>
-
-				<div class="tl-field">
-					<p class="tl-label">How did the dog react?</p>
-					{#each [['Around other dogs', 'dogs_rating'], ['Around strangers', 'strangers_rating'], ['Around cats', 'cats_rating'], ['Around kids', 'kids_rating']] as [label, key]}
-						<div class="tl-rating-row">
-							<span class="tl-rating-label">{label}</span>
-							<div class="tl-rating-btns">
-								{#each ratings as r}
-									<button
-										type="button"
-										class="tl-rating-btn"
-										class:active={
-											key === 'dogs_rating' ? dogs_rating === r.value :
-											key === 'strangers_rating' ? strangers_rating === r.value :
-											key === 'cats_rating' ? cats_rating === r.value :
-											kids_rating === r.value
-										}
-										on:click={() => {
-											if (key === 'dogs_rating') dogs_rating = dogs_rating === r.value ? '' : r.value;
-											else if (key === 'strangers_rating') strangers_rating = strangers_rating === r.value ? '' : r.value;
-											else if (key === 'cats_rating') cats_rating = cats_rating === r.value ? '' : r.value;
-											else kids_rating = kids_rating === r.value ? '' : r.value;
-										}}
-									>{r.label}</button>
-								{/each}
-							</div>
-						</div>
-					{/each}
-				</div>
-
-				<div class="tl-field">
-					<label class="tl-label" for="tl-notes">Notes</label>
-					<textarea id="tl-notes" class="tl-textarea" bind:value={notes} rows="4" placeholder="Anything noteworthy from the trip…"></textarea>
-				</div>
-
-				{#if error}<p class="tl-error">{error}</p>{/if}
-
-				<button class="tl-btn tl-btn-submit" type="submit" disabled={submitting}>
-					{submitting ? 'Submitting…' : 'Submit'}
-				</button>
-			</form>
+			<div class="tl-form-wrap">
+				<TripLogForm
+					{dogs}
+					source="qr"
+					on:submitted={(e) => { copyText = e.detail.copyText; submitted = true; }}
+				/>
+			</div>
 		{/if}
 	</div>
 </div>
@@ -217,175 +80,126 @@
 <style>
 	.tl-page {
 		min-height: 100vh;
-		background: #f1f3f4;
+		background: #f0f4f8;
 		display: flex;
 		align-items: flex-start;
 		justify-content: center;
-		padding: 1.5rem 1rem 3rem;
+		padding: 24px 16px 64px;
 	}
 
 	.tl-card {
 		width: 100%;
-		max-width: 480px;
+		max-width: 780px;
 		background: #fff;
-		border-radius: 10px;
-		box-shadow: 0 2px 8px rgba(60,64,67,.12);
+		border-radius: 20px;
+		box-shadow: 0 4px 0 #d0d8e0, 0 8px 32px rgba(0,0,0,.08);
 		overflow: hidden;
 	}
 
+	/* ── Header ── */
 	.tl-header {
-		padding: 1.2rem 1.4rem 0.9rem;
-		border-bottom: 1px solid #f1f3f4;
+		padding: 20px 28px 16px;
+		background: #016aa5;
+		text-align: center;
+	}
+
+	.tl-header-icon {
+		display: flex;
+		justify-content: center;
+		margin-bottom: 6px;
 	}
 
 	.tl-title {
-		font-size: 1.1rem;
-		font-weight: 700;
-		color: #202124;
-		margin: 0 0 0.15rem;
+		font-size: 1.3rem;
+		font-weight: 800;
+		color: #fff;
+		margin: 0 0 2px;
+		letter-spacing: -0.01em;
 	}
 
 	.tl-sub {
 		font-size: 0.78rem;
-		color: #5f6368;
-		margin: 0;
-	}
-
-	.tl-form { padding: 1.2rem 1.4rem; display: grid; gap: 1rem; }
-
-	.tl-field { display: flex; flex-direction: column; gap: 0.35rem; }
-
-	.tl-row {
-		display: grid;
-		grid-template-columns: 1fr 1fr 1fr;
-		gap: 0.6rem;
-	}
-
-	.tl-label {
-		font-size: 0.72rem;
 		font-weight: 600;
-		letter-spacing: 0.05em;
+		color: rgba(255,255,255,0.8);
+		margin: 0;
 		text-transform: uppercase;
-		color: #5f6368;
+		letter-spacing: 0.06em;
 	}
 
-	.tl-input {
-		height: 2.4rem;
-		border: 1px solid #dadce0;
-		border-radius: 6px;
-		padding: 0 0.75rem;
-		font-size: 0.9rem;
-		color: #202124;
-		background: #fff;
-		width: 100%;
-	}
+	/* ── Form ── */
+	.tl-form-wrap { padding: 28px 28px 32px; }
 
-	.tl-textarea {
-		border: 1px solid #dadce0;
-		border-radius: 6px;
-		padding: 0.5rem 0.75rem;
-		font-size: 0.88rem;
-		color: #202124;
-		font-family: inherit;
-		resize: vertical;
-		width: 100%;
-	}
-
-	.tl-rating-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.3rem 0;
-		border-bottom: 1px solid #f1f3f4;
-	}
-
-	.tl-rating-row:last-child { border-bottom: none; }
-
-	.tl-rating-label {
-		font-size: 0.82rem;
-		color: #3c4043;
-		min-width: 9rem;
-	}
-
-	.tl-rating-btns { display: flex; gap: 0.3rem; flex-wrap: wrap; }
-
-	.tl-rating-btn {
-		padding: 0.25rem 0.65rem;
-		border-radius: 4px;
-		border: 1px solid #dadce0;
-		background: #fff;
-		font-size: 0.78rem;
-		color: #5f6368;
-		cursor: pointer;
-	}
-
-	.tl-rating-btn.active {
-		border-color: #016aa5;
-		background: #e8f0fe;
-		color: #016aa5;
+	/* ── Loading ── */
+	.tl-loading {
+		padding: 40px 28px;
+		font-size: 15px;
 		font-weight: 600;
+		color: #afafaf;
+		text-align: center;
 	}
 
-	.tl-btn {
-		width: 100%;
-		padding: 0.75rem;
-		border-radius: 6px;
-		font-size: 0.95rem;
-		font-weight: 600;
-		border: none;
-		cursor: pointer;
-	}
-
-	.tl-btn-submit {
-		background: #016aa5;
-		color: #fff;
-		margin-top: 0.3rem;
-	}
-
-	.tl-btn-submit:hover:not(:disabled) { background: #015a8c; }
-	.tl-btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
-
-	.tl-btn-copy {
-		background: #e6f4ea;
-		color: #1e7e34;
-		border: 1px solid #a8d5a2;
-		margin-top: 0.5rem;
-	}
-
-	.tl-error {
-		font-size: 0.8rem;
-		color: #d93025;
-		margin: 0;
-	}
-
+	/* ── Success ── */
 	.tl-success {
-		padding: 1.4rem;
-		display: grid;
-		gap: 0.75rem;
+		padding: 40px 28px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 12px;
+		text-align: center;
 	}
+
+	.tl-success-icon { font-size: 3rem; line-height: 1; }
 
 	.tl-success-title {
-		font-size: 1rem;
-		font-weight: 600;
-		color: #1e7e34;
+		font-size: 1.25rem;
+		font-weight: 800;
+		color: #3aaf2a;
+		margin: 0;
+	}
+
+	.tl-success-sub {
+		font-size: 0.9rem;
+		color: #777777;
 		margin: 0;
 	}
 
 	.tl-copy-pre {
-		margin: 0;
-		padding: 0.75rem 1rem;
-		background: #f8f9fa;
-		border: 1px solid #dadce0;
-		border-radius: 6px;
+		width: 100%;
+		margin: 8px 0 0;
+		padding: 16px;
+		background: #fafafa;
+		border: 2px solid #e5e5e5;
+		border-radius: 12px;
 		font-size: 0.8rem;
 		line-height: 1.6;
 		white-space: pre-wrap;
-		color: #202124;
+		color: #4b4b4b;
+		text-align: left;
+		box-sizing: border-box;
 	}
 
-	.tl-loading {
-		padding: 2rem 1.4rem;
-		font-size: 0.88rem;
-		color: #5f6368;
+	.tl-btn {
+		width: 100%;
+		height: 52px;
+		border-radius: 12px;
+		font-size: 15px;
+		font-weight: 800;
+		border: none;
+		cursor: pointer;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.tl-btn-new {
+		background: #933980;
+		color: #fff;
+		box-shadow: 0 4px 0 #6b2a5e;
+		transition: transform 0.1s, box-shadow 0.1s;
+		margin-top: 8px;
+	}
+
+	.tl-btn-new:active {
+		transform: translateY(4px);
+		box-shadow: none;
 	}
 </style>

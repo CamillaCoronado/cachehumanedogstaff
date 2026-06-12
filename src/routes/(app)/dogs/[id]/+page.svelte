@@ -552,6 +552,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{dog ? `${dog.name} | Cache Humane Society` : 'Dog | Cache Humane Society'}</title>
+</svelte:head>
+
 {#if loading}
 	<p class="dog-detail-status whiteboard-hand">Loading dog record...</p>
 {:else if !dog}
@@ -1026,6 +1030,42 @@
 											</td>
 											<td class="py-2">{log.notes || '—'}</td>
 											<td class="py-2">{log.loggedByName}</td>
+										</tr>
+									{/each}
+								{/if}
+							</tbody>
+						</table>
+					</div>
+				</div>
+				<div class="rounded-3xl bg-white p-6 shadow-card">
+					<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Day Trip Logs</h3>
+					<div class="mt-4 overflow-x-auto">
+						<table class="min-w-full text-left text-xs">
+							<thead class="text-[11px] uppercase tracking-[0.2em] text-ink-400">
+								<tr>
+									<th class="py-2">Date</th>
+									<th class="py-2">Volunteer</th>
+									<th class="py-2">Time Out</th>
+									<th class="py-2">Time Back</th>
+									<th class="py-2">Duration</th>
+									<th class="py-2">Notes</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-ink-100">
+								{#if dayTripLogs.filter(l => l.endedAt).length === 0}
+									<tr><td colspan="6" class="py-3 text-xs text-ink-500">No completed day trips yet.</td></tr>
+								{:else}
+									{#each dayTripLogs.filter(l => l.endedAt).sort((a,b) => (toDate(b.startedAt)?.getTime() ?? 0) - (toDate(a.startedAt)?.getTime() ?? 0)) as log}
+										{@const start = toDate(log.startedAt)}
+										{@const end = toDate(log.endedAt)}
+										{@const hrs = dayTripHours(log)}
+										<tr>
+											<td class="py-2">{formatDate(log.startedAt)}</td>
+											<td class="py-2">{log.volunteerName || '—'}</td>
+											<td class="py-2">{start ? start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</td>
+											<td class="py-2">{end ? end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'}</td>
+											<td class="py-2">{hrs > 0 ? `${Math.floor(hrs)}h ${Math.round((hrs % 1) * 60)}m` : '—'}</td>
+											<td class="py-2 text-ink-400">{log.tripNotes?.trim() || '—'}</td>
 										</tr>
 									{/each}
 								{/if}

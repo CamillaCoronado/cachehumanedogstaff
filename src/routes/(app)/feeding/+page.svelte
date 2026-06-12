@@ -649,6 +649,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Feeding | Cache Humane Society</title>
+</svelte:head>
+
 <section class="feeding-board">
 		<div class="feeding-grid-board">
 			<div class="feeding-header">

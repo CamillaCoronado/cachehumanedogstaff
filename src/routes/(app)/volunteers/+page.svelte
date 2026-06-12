@@ -334,6 +334,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Volunteers | Cache Humane Society</title>
+</svelte:head>
+
 <div class="vp">
 {#if !canView}
 	<div class="vp-restricted">

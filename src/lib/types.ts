@@ -121,7 +121,7 @@ export interface BehavioralNote {
 	loggedByName: string;
 }
 
-export type BehaviorRating = 'good' | 'neutral' | 'reactive' | 'na';
+export type BehaviorRating = 'friendly' | 'neutral' | 'nervous' | 'excited' | 'reactive' | 'na';
 export type VolunteerOrientationStatus = 'pending' | 'emailed' | 'scheduled' | 'signed_waiver' | 'answered_no' | 'no_showed';
 
 export interface DayTripLog {
@@ -140,6 +140,9 @@ export interface DayTripLog {
 	reactionToStrangers?: BehaviorRating | null;
 	reactionToCats?: BehaviorRating | null;
 	reactionToKids?: BehaviorRating | null;
+	reactionToLeash?: BehaviorRating | null;
+	reactionToCarRides?: BehaviorRating | null;
+	reactionToToys?: BehaviorRating | null;
 	tripNotes?: string | null;
 	source?: 'staff' | 'qr' | null;
 	createdAt: DateValue;
