@@ -6,7 +6,20 @@
 	import { formatDate, isSameCalendarDay, isSurgeryToday } from '$lib/utils/dates';
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import { isOwnFood, foodTypeTone, foodTypeInstruction, foodTypeLabel, estimateFoodAmountPerMeal } from '$lib/utils/feeding';
+	import {
+		foodTypeTone,
+		foodTypeInstruction,
+		foodTypeLabel,
+		foodAmountLabel,
+		secondMealAmountLabel,
+		feedingFlags,
+		specialFeedingReasons,
+		isSpecialFeeding,
+		foodSummary,
+		getFedMap,
+		getFeedingHistoryEntries,
+		getAbnormalCount
+	} from '$lib/utils/feeding';
 	import { syncVersion } from '$lib/stores/sync';
 	import {
 		MAX_DOGS_PER_RUN,
@@ -21,7 +34,6 @@
 	} from '$lib/utils/kennelLayout';
 	import type { WalkPathId } from '$lib/utils/kennelLayout';
 
-	const abnormalTypes = new Set([1, 2, 5, 6, 7]);
 	const amounts: AmountEaten[] = ['all', 'most', 'half', 'little', 'none'];
 	const HISTORY_LIMIT = 200;
 
@@ -77,17 +89,6 @@
 	$: specialFeedDogs = displayDogs.filter((dog) => isSpecialFeeding(dog));
 	$: feedingHistoryEntries = getFeedingHistoryEntries(shelterDogs, feedingLogs).slice(0, HISTORY_LIMIT);
 
-	function foodAmountLabel(dog: Dog) {
-		const value = dog.foodAmount?.trim();
-		if (value) return value;
-		const estimated = estimateFoodAmountPerMeal({ weightLbs: dog.weightLbs, dateOfBirth: dog.dateOfBirth, foodType: dog.foodType });
-		return estimated || '—';
-	}
-
-	function secondMealAmountLabel(dog: Dog) {
-		return dog.secondMealAmount?.trim() || foodAmountLabel(dog);
-	}
-
 	function activeFoodAmountLabel(dog: Dog) {
 		return mealTime === 'second' ? secondMealAmountLabel(dog) : foodAmountLabel(dog);
 	}
@@ -139,104 +140,6 @@
 		} finally {
 			savingFeed = false;
 		}
-	}
-
-	function feedingFlags(dog: Dog) {
-		const flags: string[] = [];
-		if ((dog.allergyTypes ?? []).length > 0) flags.push('Allergy');
-		if (dog.hasSupplements) flags.push('Supplements');
-		return flags;
-	}
-
-	function specialFeedingReasons(dog: Dog, meal?: MealTime) {
-		const reasons: string[] = [];
-		const allergies = dog.allergyTypes ?? [];
-		if (allergies.length > 0) reasons.push(`Allergy: ${allergies.join(', ')}`);
-		if (isOwnFood(dog)) reasons.push('Own Food');
-		if (dog.hasOwnFood && dog.transitionToHills === true) reasons.push('→ Transition to Hills');
-		if (dog.hasOwnFood && dog.transitionToHills === false) reasons.push('No Hills Transition');
-		if (dog.foodType === 'No Fish') reasons.push('No Fish');
-		if (dog.foodType === 'No Chicken') reasons.push('No Chicken');
-		if (dog.satinBalls) reasons.push('Satin Balls');
-		if (dog.hasSupplements) reasons.push('Supplements');
-		if (dog.fortifloraDate && meal !== 'second') {
-			const ft = dog.fortifloraTime ?? 'both';
-			const forThisMeal = !meal || ft === 'both' || ft === meal;
-			if (forThisMeal) reasons.push(ft === 'both' ? 'FortiFlora' : `FortiFlora (${ft.toUpperCase()})`);
-		}
-		return reasons;
-	}
-
-	function isSpecialFeeding(dog: Dog) {
-		return specialFeedingReasons(dog).length > 0;
-	}
-
-	function foodSummary(dog: Dog) {
-		return `${foodAmountLabel(dog)} • ${foodTypeLabel(dog)}`;
-	}
-
-	function getFedMap(list: Dog[], logs: Record<string, FeedingLog[]>, day: Date, meal: MealTime) {
-		const map: Record<string, FeedingLog | null> = {};
-		for (const dog of list) {
-			const entries = logs[dog.id] ?? [];
-			map[dog.id] = entries.find((log) => log.mealTime === meal && isSameCalendarDay(log.date, day)) ?? null;
-		}
-		return map;
-	}
-
-	type FeedingHistoryEntry = {
-		id: string;
-		dogName: string;
-		date: FeedingLog['date'];
-		mealTime: FeedingLog['mealTime'];
-		amountEaten: FeedingLog['amountEaten'];
-		notes: FeedingLog['notes'];
-		loggedByName: FeedingLog['loggedByName'];
-		sortTime: number;
-	};
-
-	function toMillis(value: unknown) {
-		if (value instanceof Date) return value.getTime();
-		if (value && typeof value === 'object' && 'toDate' in value) {
-			const candidate = (value as { toDate?: () => Date }).toDate;
-			if (typeof candidate === 'function') {
-				const asDate = candidate();
-				return asDate instanceof Date ? asDate.getTime() : 0;
-			}
-		}
-		return 0;
-	}
-
-	function getFeedingHistoryEntries(list: Dog[], logs: Record<string, FeedingLog[]>) {
-		const entries: FeedingHistoryEntry[] = [];
-		for (const dog of list) {
-			for (const log of logs[dog.id] ?? []) {
-				entries.push({
-					id: log.id,
-					dogName: dog.name,
-					date: log.date,
-					mealTime: log.mealTime,
-					amountEaten: log.amountEaten,
-					notes: log.notes,
-					loggedByName: log.loggedByName,
-					sortTime: toMillis(log.createdAt) || toMillis(log.date)
-				});
-			}
-		}
-		return entries.sort((a, b) => b.sortTime - a.sortTime);
-	}
-
-	function getAbnormalCount(list: Dog[], logs: Record<string, StoolLog[]>, day: Date) {
-		let count = 0;
-		for (const dog of list) {
-			const entries = logs[dog.id] ?? [];
-			for (const log of entries) {
-				if (isSameCalendarDay(log.timestamp, day) && abnormalTypes.has(log.stoolType)) {
-					count += 1;
-				}
-			}
-		}
-		return count;
 	}
 
 	$: if ($syncVersion > 0) void refreshDogs();
