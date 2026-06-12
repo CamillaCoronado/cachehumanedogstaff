@@ -22,6 +22,12 @@ commit, `npm run check` against baseline.
 | `roleLabel`, `canHandleDog`, `handlingRequirementLabel` | `utils/permissions.ts` | no callers |
 | `markStaleAsmDogsArchived` | `data/asm-sync.ts` | exported but unreferenced; was this meant to be wired into the sync flow? **ask before touching** |
 
+## Dead page-level reactives (found during Phase 2, 2026-06-12)
+
+- `daytrips/+page.svelte`: `yearLogs`, `yearlyStats`, `yearTripTotal`, `yearHourTotal` —
+  computed on every change but rendered nowhere (likely superseded by the sheet-based
+  StatsTab). Also `adoptionRequirementAction` in `utils/dogCard.ts` has no callers.
+
 ## Internal-only (used within their own file; exported unnecessarily or for tests)
 
 Not dead code — just exports that could become module-private. Low priority.
