@@ -71,6 +71,22 @@ Suggested order (most self-contained seams first):
 Conventions: props down / events up (Svelte 4 `createEventDispatcher`), styles move with
 their markup, no logic changes during extraction.
 
+### Bundle audit findings (2026-06-12)
+
+Production build measured: ~1.65 MB total client JS, PWA precaches all of it so repeat
+loads are served from cache. Per-page code splitting already works. Two notes:
+
+- Firebase chunk (579 kB raw / 143 kB gz) dominates first paint on every page. Already
+  modular imports + persistent local cache; accepted cost, do not fight it.
+- chart.js (85 kB gz) is confined to the daytrips chunk but loads even if the Stats tab
+  is never opened. **When extracting `StatsTab.svelte` (step 1 above), load it with a
+  dynamic `import()` on tab activation.**
+- Optional: pin `@sveltejs/adapter-vercel` in `svelte.config.js` instead of
+  `adapter-auto` (already installed, silences local build warning).
+
+Conclusion: load speed is a data-fetching problem (full dog-collection refetch per
+page), not a bundle problem — Phase 3 is the fix.
+
 ## Phase 3 — Shared dog store
 
 Today every page calls `listDogs()` independently on mount and re-fetches via
