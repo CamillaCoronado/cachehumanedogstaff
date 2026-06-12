@@ -16,6 +16,10 @@ refactor phases, each as its own verified fix.
   (e.g. 20 lb -> 3/4 c instead of 1 c). Adult chart and the other two puppy columns
   matched exactly.
 - All chart values are now pinned by unit tests in `src/lib/utils/feeding.test.ts`.
+- **Decision (Camilla, 2026-06-12): the wall chart stays authoritative.** It is the
+  staff's own per-meal conversion of Hill's per-day recommendations (halved, rounded
+  to quarter-cup scoops) — within 1/8 cup of exact-half-Hill's on every row. Do not
+  "correct" the app to Hill's raw daily tables.
 - Open question for staff: dogs *with* an explicit `foodAmount` in their profile
   bypass the chart entirely — if amounts still feel wrong for specific dogs, check
   their stored `foodAmount` values.
