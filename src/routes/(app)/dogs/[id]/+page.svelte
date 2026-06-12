@@ -37,6 +37,7 @@
 		checkDayTripEligibility
 	} from '$lib/utils/dates';
 	import { getDayTripGapDays } from '$lib/utils/attention';
+	import { durationHours as dayTripHours } from '$lib/utils/daytrips';
 	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -456,13 +457,6 @@
 			toast.success('Dog marked as out on day trip.');
 		}
 		await loadAll();
-	}
-
-	function dayTripHours(log: DayTripLog) {
-		const startedAt = toDate(log.startedAt);
-		const endedAt = toDate(log.endedAt) ?? new Date();
-		if (!startedAt) return 0;
-		return Math.max(0, (endedAt.getTime() - startedAt.getTime()) / 3_600_000);
 	}
 
 	async function handleSaveBath() {
