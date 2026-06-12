@@ -103,6 +103,9 @@ This removes duplicated `refreshDogs()` plumbing from ~8 pages and cuts Firestor
 
 ## Phase 4 — Cleanups
 
+- [ ] Review `docs/unused-code.md` (inventory of unreferenced exports, generated
+      2026-06-12) and delete confirmed-dead code, one commit per module.
+
 - [ ] `admin/+page.svelte` is the only page importing Firestore directly — move those
       operations into `src/lib/data/` (e.g. `users.ts`).
 - [ ] Unify date/duration formatters on `utils/dates.ts`; delete page-local duplicates.
