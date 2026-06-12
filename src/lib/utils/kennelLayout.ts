@@ -203,6 +203,8 @@ export function getRunLabel(dog: Dog) {
 	return `Run ${run}`;
 }
 
+export function runIdToKey(run: RunId): string;
+export function runIdToKey(run: RunId | null): string | null;
 export function runIdToKey(run: RunId | null) {
 	if (!run) return null;
 	return typeof run === 'number' ? String(run) : run;
