@@ -35,3 +35,18 @@ refactor phases, each as its own verified fix.
 - Note: playgroups and dog-detail pages define a local `portal()` action for this —
   candidates to standardize on one shared modal/portal during Phase 2 component
   extraction, which would fix centering everywhere at once.
+
+## 4. Feature: copy daily updates as Slack-formatted text
+
+- Many daily statuses get re-typed into Slack by hand: baths, playgroups, who didn't
+  eat, etc. Wanted: a "copy as Slack update" action that formats the relevant list as a
+  ready-to-paste Slack message (e.g. copy the didn't-eat list from the feeding page).
+- Candidate spots: feeding page (didn't-eat list, per-meal summary), playgroups page
+  (sessions logged today), bath logs, possibly day trips out/returned.
+- Existing pieces to build on: the daytrips page already has a `copyToClipboard`
+  helper; there is an inbound Slack webhook (`src/routes/api/slack/events/+server.ts`)
+  that imports playgroup messages — this feature is the outbound counterpart
+  (clipboard first; true Slack API posting could come later).
+- Suggested shape: a shared `$lib/utils/slackFormat.ts` with one formatter per update
+  type + small copy buttons on each page. Slot in after the relevant Phase 2 page
+  decompositions so the buttons land in clean components.
