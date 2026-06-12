@@ -4,14 +4,21 @@ Reported by Camilla 2026-06-12 while reviewing the feeding page. These are behav
 checks/changes, **not** part of the refactor — handle separately, after or alongside
 refactor phases, each as its own verified fix.
 
-## 1. Feeding amount calculations feel wrong (verify correctness)
+## 1. Feeding amount calculations feel wrong — RESOLVED 2026-06-12
 
 - The computed food amounts "often feel wrong."
-- Where to look: `estimateFoodAmountPerMeal` in `src/lib/utils/feeding.ts` (used by
-  `foodAmountLabel` on the feeding page when a dog has no explicit `foodAmount`).
-- Plan: walk through the formula (weight/age/food-type based) with real examples and
-  confirm against the chart the shelter actually feeds from; add unit tests pinning the
-  expected amounts once confirmed.
+- Verified `estimateFoodAmountPerMeal` (`src/lib/utils/feeding.ts`) against a photo of
+  the shelter's laminated "Serving Sizes" wall chart (the authoritative source; it is
+  the shelter's own per-meal conversion and intentionally differs from Hill's
+  published per-day tables).
+- **Found and fixed a transcription error**: the puppy 10-12 months column was shifted
+  one row down for 20-35 lbs, showing 1/4 cup less per meal than the wall chart
+  (e.g. 20 lb -> 3/4 c instead of 1 c). Adult chart and the other two puppy columns
+  matched exactly.
+- All chart values are now pinned by unit tests in `src/lib/utils/feeding.test.ts`.
+- Open question for staff: dogs *with* an explicit `foodAmount` in their profile
+  bypass the chart entirely — if amounts still feel wrong for specific dogs, check
+  their stored `foodAmount` values.
 
 ## 2. Snake route doesn't snake correctly
 

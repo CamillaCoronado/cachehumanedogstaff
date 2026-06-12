@@ -3,6 +3,10 @@ import { isSameCalendarDay, toDate } from '$lib/utils/dates';
 
 type PuppyBand = 'lt4' | 'm4to9' | 'm10to12';
 
+// Source: the shelter's laminated "Serving Sizes" wall chart (per-meal amounts,
+// based on the dog's ideal weight). Verified against a photo of the chart
+// 2026-06-12. Note these are the shelter's own per-meal conversions and do not
+// match Hill's published per-day tables exactly — the wall chart is authoritative.
 const ADULT_CHART: Array<{ maxWeight: number; cups: number }> = [
 	{ maxWeight: 5, cups: 0.25 },
 	{ maxWeight: 10, cups: 0.5 },
@@ -26,10 +30,10 @@ const PUPPY_CHART: Array<{
 	{ maxWeight: 5, lt4: 0.5, m4to9: 0.5, m10to12: 1 / 3 },
 	{ maxWeight: 10, lt4: 1, m4to9: 0.75, m10to12: 0.5 },
 	{ maxWeight: 15, lt4: 1.25, m4to9: 1, m10to12: 0.75 },
-	{ maxWeight: 20, lt4: 1.5, m4to9: 1.25, m10to12: 0.75 },
-	{ maxWeight: 25, lt4: 1.75, m4to9: 1.5, m10to12: 1 },
-	{ maxWeight: 30, lt4: 2, m4to9: 1.75, m10to12: 1.25 },
-	{ maxWeight: 35, lt4: 2.25, m4to9: 2, m10to12: 1.5 },
+	{ maxWeight: 20, lt4: 1.5, m4to9: 1.25, m10to12: 1 },
+	{ maxWeight: 25, lt4: 1.75, m4to9: 1.5, m10to12: 1.25 },
+	{ maxWeight: 30, lt4: 2, m4to9: 1.75, m10to12: 1.5 },
+	{ maxWeight: 35, lt4: 2.25, m4to9: 2, m10to12: 1.75 },
 	{ maxWeight: 40, lt4: 2.5, m4to9: 2, m10to12: 1.75 }
 ];
 
