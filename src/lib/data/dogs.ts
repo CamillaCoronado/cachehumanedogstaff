@@ -1353,12 +1353,15 @@ export async function logDayTrip(dogId: string, profile?: UserProfile | null, no
 }
 
 // Visual-only toggle — updates the dog's status without creating a trip log entry.
+// Purely visual whiteboard state: only toggles the "out now" flag and its
+// timestamp. Never touches lastDayTripDate or trip logs — completed trips are
+// recorded via the trip log form (logManualTrip), which owns the overdue clock.
 export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<void> {
 	const now = new Date();
 	if (isOut) {
 		await updateDog(dogId, { isOutOnDayTrip: true, currentDayTripStartedAt: now });
 	} else {
-		await updateDog(dogId, { isOutOnDayTrip: false, currentDayTripStartedAt: null, lastDayTripDate: now });
+		await updateDog(dogId, { isOutOnDayTrip: false, currentDayTripStartedAt: null });
 	}
 }
 

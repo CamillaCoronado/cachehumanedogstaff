@@ -20,8 +20,7 @@
 		listStoolLogs,
 		logBath,
 		listDayTripLogs,
-		startDayTrip,
-		endDayTrip
+		setDogTripStatus
 	} from '$lib/data/dogs';
 	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, FeedingLog, MealTime, StoolLog, UserRole } from '$lib/types';
 	import {
@@ -447,14 +446,14 @@
 	async function handleTripToggle() {
 		if (!dog) return;
 		if (dog.isOutOnDayTrip) {
-			await endDayTrip(dog.id, $authProfile);
+			await setDogTripStatus(dog.id, false);
 			toast.success('Dog marked as returned.');
 		} else {
 			if (!dayTripEligibility.eligible) {
 				toast.error(dayTripEligibility.reasons[0] ?? 'Dog is not eligible for day trips.');
 				return;
 			}
-			await startDayTrip(dog.id, $authProfile);
+			await setDogTripStatus(dog.id, true);
 			toast.success('Dog marked as out on day trip.');
 		}
 		await loadAll();

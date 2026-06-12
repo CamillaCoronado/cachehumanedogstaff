@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { format, startOfDay } from 'date-fns';
-	import { addFeedingLog, endDayTrip, listAllDayTripLogs, listAllFeedingLogsForToday, listDogs, updateDog } from '$lib/data/dogs';
+	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, listDogs, updateDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import { canEditDogs } from '$lib/utils/permissions';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
@@ -434,7 +434,7 @@
 
 	async function markAllDogsBackIn() {
 		const targets = [...dogsOut];
-		await Promise.all(targets.map((dog) => endDayTrip(dog.id, $authProfile, 'Returned from dashboard')));
+		await Promise.all(targets.map((dog) => setDogTripStatus(dog.id, false)));
 	}
 
 	async function handleMarkBackIn(dog: Dog) {
@@ -442,7 +442,7 @@
 		setDogReturning(dog.id, true);
 		errorMessage = '';
 		try {
-			await endDayTrip(dog.id, $authProfile, 'Returned from dashboard');
+			await setDogTripStatus(dog.id, false);
 			await loadBoard();
 		} catch (error) {
 			console.error(error);

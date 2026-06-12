@@ -13,7 +13,8 @@ commit, `npm run check` against baseline.
 |---|---|---|
 | `eligiblePuppies` | `utils/playgroupRecommendations.ts` | never called; likely leftover from earlier puppy-group feature |
 | `priorityLabel` | `utils/playgroupRecommendations.ts` | never called; all recommendations are `priority: 'high'` |
-| `logDayTrip` | `data/dogs.ts` | superseded by `startDayTrip`/`endDayTrip`/`logManualTrip`? verify |
+| `logDayTrip` | `data/dogs.ts` | superseded by `logManualTrip`? verify |
+| `startDayTrip`, `endDayTrip` | `data/dogs.ts` | orphaned 2026-06-12 when all out/return toggles became visual-only (`setDogTripStatus`); trips are logged via `logManualTrip` only. Keep until the visual-only model is confirmed in daily use. |
 | `hasAnyUserProfiles` | `firebase/firestore.ts` | possibly from old admin-bootstrap flow (see security-hardening-notes.md) |
 | `getEffectiveAdoptionDate`, `missingAdoptionMedicalRequirements` | `utils/adoption.ts` | check git history for when they lost their callers |
 | `normalizeDay`, `ageInYears` | `utils/dates.ts` | no callers |

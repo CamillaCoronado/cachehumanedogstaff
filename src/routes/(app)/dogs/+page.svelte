@@ -5,7 +5,7 @@
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
-	import { listDogs, updateDog, createDog, logBath, startDayTrip, endDayTrip, returnDog } from '$lib/data/dogs';
+	import { listDogs, updateDog, createDog, logBath, setDogTripStatus, returnDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
@@ -272,14 +272,14 @@ const today = new Date();
 	async function handleTripToggle(dog: Dog) {
 		const eligibility = getTripEligibility(dog);
 		if (dog.isOutOnDayTrip) {
-			await endDayTrip(dog.id, $authProfile);
+			await setDogTripStatus(dog.id, false);
 			toast.success(`${dog.name} marked as returned.`);
 		} else {
 			if (!eligibility.eligible) {
 				toast.error(eligibility.reasons[0] ?? `${dog.name} is not eligible for day trips.`);
 				return;
 			}
-			await startDayTrip(dog.id, $authProfile);
+			await setDogTripStatus(dog.id, true);
 			toast.success(`${dog.name} marked as out on day trip.`);
 		}
 		await refreshDogs();
