@@ -53,7 +53,6 @@
 
 	let dog: Dog | null = null;
 	let photoLoadFailed = false;
-	function handlePhotoLoad(e: Event) { if ((e.currentTarget as HTMLImageElement).naturalWidth === 0) photoLoadFailed = true; }
 	let loading = true;
 	let editMode = false;
 	let formValid = true;
@@ -586,15 +585,14 @@
 					<div class="kennel-sheet-inner">
 						<p class="kennel-name kennel-name-top">{dog.name}</p>
 						<div class="kennel-photo">
-							<div
-								class="kennel-photo-frame"
-								style={dog.photoUrl && !photoLoadFailed ? `background-image:url('${dog.photoUrl}')` : ''}
-							>
+							<div class="kennel-photo-frame">
 								<div class={`photo-corner-stripe ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
 								{#if dog.photoUrl && !photoLoadFailed}
-									<img src={dog.photoUrl} alt="" style="display:none"
+									<img
+										class="kennel-photo-img"
+										src={dog.photoUrl}
+										alt=""
 										on:error={() => { photoLoadFailed = true; }}
-										on:load={handlePhotoLoad}
 									/>
 								{:else}
 									<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
@@ -1376,9 +1374,6 @@
 		border: 1px solid #d4deeb;
 		border-radius: 0.7rem;
 		background-color: #eef3fb;
-		background-size: cover;
-		background-position: center;
-		background-repeat: no-repeat;
 		color: #7e8fa3;
 		font-family: var(--font-ui);
 		font-size: 2.4rem;
@@ -1386,6 +1381,15 @@
 		align-items: center;
 		justify-content: center;
 		overflow: hidden;
+	}
+
+	.kennel-photo-img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		object-position: center;
 	}
 
 	.photo-corner-stripe {
