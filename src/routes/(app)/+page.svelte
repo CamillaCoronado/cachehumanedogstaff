@@ -350,7 +350,7 @@
 	}
 
 	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
-		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none');
+		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none' && !d.isIncoming);
 		const items: AttentionItem[] = [];
 
 		for (const { dog, days, isNewIntake } of getBathAttentionDogs(shelterDogs, today)) {

@@ -96,7 +96,7 @@
 	}
 
 	$: activeDogs = dogs
-		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster)
+		.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster && !dog.isIncoming)
 		.sort((a, b) => a.name.localeCompare(b.name));
 	$: filteredDogs = activeDogs.filter((dog) => dog.name.toLowerCase().includes(search.toLowerCase()));
 	$: dogIdsWithHistory = new Set(sessions.flatMap((s) => s.dogIds));
@@ -150,8 +150,8 @@
 	}
 
 	function matchImportDogs(names: string[]) {
-		const active = dogs.filter((d) => d.status === 'active' && !d.permanentFoster);
-		const all = dogs.filter((d) => !d.permanentFoster);
+		const active = dogs.filter((d) => d.status === 'active' && !d.permanentFoster && !d.isIncoming);
+		const all = dogs.filter((d) => !d.permanentFoster && !d.isIncoming);
 		return names.map((name) => {
 			const dog = matchDogByName(name, active) ?? matchDogByName(name, all);
 			return { name, dog, isActive: dog ? dog.status === 'active' : false };
@@ -161,7 +161,7 @@
 	function parseImport() {
 		if (!importText.trim()) return;
 		const allDogNames = dogs
-			.filter((d) => !d.permanentFoster)
+			.filter((d) => !d.permanentFoster && !d.isIncoming)
 			.map((d) => d.name);
 		importParsed = parsePlaygroupMessage(importText, allDogNames);
 		importOutcome = importParsed.outcome;

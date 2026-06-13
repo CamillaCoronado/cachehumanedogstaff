@@ -45,6 +45,7 @@ const today = new Date();
 	let viewMode: 'active' | 'all' | 'archived' = 'active';
 	let fosterOnly = false;
 	let incomingOnly = false;
+	let hideIncoming = false;
 	let filterGoodWithDogs = false;
 	let filterGoodWithCats = false;
 	let filterGoodWithKids = false;
@@ -84,6 +85,7 @@ const today = new Date();
 		)
 		.filter((dog) => fosterOnly ? dog.inFoster : true)
 		.filter((dog) => incomingOnly ? dog.isIncoming : true)
+		.filter((dog) => hideIncoming ? !dog.isIncoming : true)
 		.filter((dog) => filterGoodWithDogs ? dog.goodWithDogs === 'yes' : true)
 		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
 		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
@@ -455,6 +457,12 @@ const today = new Date();
 						on:click={() => (incomingOnly = !incomingOnly)}
 					>
 						incoming only
+					</button>
+					<button
+						class={`sort-chip ${hideIncoming ? 'sort-chip-active' : ''}`}
+						on:click={() => (hideIncoming = !hideIncoming)}
+					>
+						hide incoming
 					</button>
 				</div>
 				<div class="archived-filter-group" role="group" aria-label="Filter by compatibility">
