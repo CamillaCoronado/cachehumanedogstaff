@@ -38,7 +38,6 @@ const today = new Date();
 	let dogs: Dog[] = [];
 	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	let failedPhotos = new Set<string>();
-	function markPhotoFailed(dogId: string) { return (e: Event) => { if ((e.currentTarget as HTMLImageElement).naturalWidth === 0) failedPhotos = new Set([...failedPhotos, dogId]); }; }
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
 	let loading = true;
 	let search = '';
@@ -534,15 +533,14 @@ const today = new Date();
 							<div class="dog-card-body">
 								<header class="dog-card-header">
 									<div class="card-photo-wrap">
-										<div
-											class="card-photo-frame"
-											style={dog.photoUrl && !failedPhotos.has(dog.id) ? `background-image:url('${dog.photoUrl}')` : ''}
-										>
+										<div class="card-photo-frame">
 											<div class={`card-photo-stripe card-stripe-${dogStripeColor(dog, sheetColors)}`} aria-hidden="true"></div>
 											{#if dog.photoUrl && !failedPhotos.has(dog.id)}
-												<img src={dog.photoUrl} alt="" style="display:none"
+												<img
+													class="card-photo-img"
+													src={dog.photoUrl}
+													alt=""
 													on:error={() => { failedPhotos = new Set([...failedPhotos, dog.id]); }}
-													on:load={markPhotoFailed(dog.id)}
 												/>
 											{:else}
 												<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>
@@ -1147,13 +1145,19 @@ const today = new Date();
 		border: 1px solid #d4deeb;
 		border-radius: 0.5rem;
 		background-color: #eef3fb;
-		background-size: cover;
-		background-position: center;
-		background-repeat: no-repeat;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		overflow: hidden;
+	}
+
+	.card-photo-img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		object-position: center;
 	}
 
 	.card-photo-initial {
