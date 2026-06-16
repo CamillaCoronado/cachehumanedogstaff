@@ -59,7 +59,6 @@
 					{:else}
 						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
-							{@const displayDays = daysSince(dog.lastDayTripDate)}
 							{@const sinceReturnDays = getDayTripGapDays(dog, now)}
 							{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
 							{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS}
@@ -67,7 +66,7 @@
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
-								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'} · {displayDays !== null ? `${displayDays}d ago` : 'No trips yet'}</p>
+								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'} · {sinceReturnDays !== null ? `${sinceReturnDays}d ago` : 'No trips yet'}</p>
 								<div class="cal-event-tags">
 									{#if eligibility.status === 'difficult'}<span class="cal-tag cal-tag-yellow">Adults only</span>{/if}
 									{#if overdue}<span class="cal-tag cal-tag-red">Overdue</span>{/if}

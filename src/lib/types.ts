@@ -12,6 +12,14 @@ export interface UserProfile {
 	updatedAt: DateValue;
 }
 
+export interface Treatment {
+	id: string;
+	name: string;
+	notes?: string | null;
+	startDate?: DateValue | null;
+	endDate?: DateValue | null;
+}
+
 export type DogStatus = 'active' | 'adopted' | 'transferred' | 'euthanized';
 export type DayTripStatus = 'ineligible' | 'difficult' | 'eligible';
 export type DayTripIneligibleReason = 'behavior' | 'medical' | 'other';
@@ -91,6 +99,7 @@ export interface Dog {
 	dayTripNotes: string | null;
 	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;
+	inFosterSince?: DateValue | null;
 	shelterSince?: DateValue | null;
 	playgroupReadyDate?: DateValue | null;
 	awaitingEvaluation?: boolean;
@@ -104,6 +113,8 @@ export interface Dog {
 	isolationStatus: IsolationStatus;
 	isolationReason: IsolationReason | null;
 	isolationUntilDate: DateValue | null;
+	treatments?: Treatment[];
+	// Deprecated single-treatment fields — kept for migration into `treatments`.
 	treatmentName?: string | null;
 	treatmentNotes?: string | null;
 	treatmentStartDate?: DateValue | null;

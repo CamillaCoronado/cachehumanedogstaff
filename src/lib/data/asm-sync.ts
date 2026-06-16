@@ -228,6 +228,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 			return animal.ENTRYTYPENAME || 'Unknown';
 		})(),
 		inFoster,
+		inFosterSince: (inFoster || isPermanentFoster) ? normalizeDateStr(animal.ACTIVEMOVEMENTDATE) : null,
 		isIncoming,
 		isolationStatus,
 		permanentFoster: isPermanentFoster,

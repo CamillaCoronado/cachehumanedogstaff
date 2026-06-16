@@ -5,7 +5,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog } from '$lib/data/dogs';
+	import { listDogs, startDayTrip, endDayTrip, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog, importedTripId } from '$lib/data/dogs';
 	import { listVolunteers } from '$lib/data/volunteers';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
@@ -33,7 +33,7 @@
 
 	let volunteers: Volunteer[] = [];
 	async function autoImportFromHiddenNotes() {
-		const dogsWithNotes = dogs.filter(d => /day trip notes/i.test(d.hiddenComments ?? ''));
+		const dogsWithNotes = dogs.filter(d => !d.permanentFoster && /day trip notes/i.test(d.hiddenComments ?? ''));
 		if (dogsWithNotes.length === 0) return;
 
 		let totalNew = 0;
@@ -70,6 +70,7 @@
 						totalPatched++;
 					} else {
 						await logManualTrip(dog.id, {
+							logId: importedTripId(trip.date),
 							startedAt: trip.date,
 							endedAt: trip.date,
 							volunteerName: null,
@@ -186,8 +187,8 @@
 
 	$: dogsEligible = activeDogs.filter((d) => isDayTripEligible(d, sheetColors))
 		.sort((a, b) => {
-			const aDays = daysSince(a.lastDayTripDate) ?? 999;
-			const bDays = daysSince(b.lastDayTripDate) ?? 999;
+			const aDays = getDayTripGapDays(a, now) ?? 999;
+			const bDays = getDayTripGapDays(b, now) ?? 999;
 			return bDays - aDays;
 		});
 
@@ -196,8 +197,8 @@
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: dogStatsRows = activeDogs.slice().sort((a, b) => {
-		const aDays = daysSince(a.lastDayTripDate) ?? 9999;
-		const bDays = daysSince(b.lastDayTripDate) ?? 9999;
+		const aDays = getDayTripGapDays(a, now) ?? 9999;
+		const bDays = getDayTripGapDays(b, now) ?? 9999;
 		return bDays - aDays;
 	});
 

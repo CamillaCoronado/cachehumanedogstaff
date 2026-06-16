@@ -7,6 +7,7 @@ import type {
 	Dog,
 	FeedingLog,
 	StoolLog,
+	Treatment,
 	UserProfile
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
@@ -20,6 +21,14 @@ const BATH_KEY = 'shelter.bathLogs';
 const FEEDING_KEY = 'shelter.feedingLogs';
 const STOOL_KEY = 'shelter.stoolLogs';
 const DAY_TRIP_KEY = 'shelter.dayTripLogs';
+
+interface StoredTreatment {
+	id: string;
+	name: string;
+	notes?: string | null;
+	startDate?: string | null;
+	endDate?: string | null;
+}
 
 interface StoredDog {
 	id: string;
@@ -88,6 +97,7 @@ interface StoredDog {
 	dayTripNotes: string | null;
 	handlingLevel?: DogHandlingLevel;
 	inFoster: boolean;
+	inFosterSince?: string | null;
 	shelterSince?: string | null;
 	playgroupReadyDate?: string | null;
 	awaitingEvaluation?: boolean;
@@ -97,6 +107,8 @@ interface StoredDog {
 	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
 	isolationReason?: 'sick' | 'bite_quarantine' | null;
 	isolationUntilDate?: string | null;
+	treatments?: StoredTreatment[];
+	// Deprecated single-treatment fields — migrated into `treatments` on read.
 	treatmentName?: string | null;
 	treatmentNotes?: string | null;
 	treatmentStartDate?: string | null;
@@ -352,6 +364,7 @@ function serializeDog(dog: Dog): StoredDog {
 		dayTripNotes: dog.dayTripNotes,
 		handlingLevel: dog.handlingLevel ?? 'volunteer',
 		inFoster: dog.inFoster ?? false,
+		inFosterSince: toDateString(dog.inFosterSince) ?? null,
 		shelterSince: toDateString(dog.shelterSince) ?? null,
 		playgroupReadyDate: toDateString(dog.playgroupReadyDate) ?? null,
 		awaitingEvaluation: dog.awaitingEvaluation ?? false,
@@ -360,14 +373,47 @@ function serializeDog(dog: Dog): StoredDog {
 		isolationStatus: dog.isolationStatus,
 		isolationReason: dog.isolationReason ?? null,
 		isolationUntilDate: toDateString(dog.isolationUntilDate),
-		treatmentName: dog.treatmentName ?? null,
-		treatmentNotes: dog.treatmentNotes ?? null,
-		treatmentStartDate: toDateString(dog.treatmentStartDate),
-		treatmentEndDate: toDateString(dog.treatmentEndDate),
+		treatments: (dog.treatments ?? []).map((t) => ({
+			id: t.id,
+			name: t.name,
+			notes: t.notes ?? null,
+			startDate: toDateString(t.startDate),
+			endDate: toDateString(t.endDate)
+		})),
+		// Deprecated flat fields are no longer written — null them out as data migrates.
+		treatmentName: null,
+		treatmentNotes: null,
+		treatmentStartDate: null,
+		treatmentEndDate: null,
 		status: dog.status,
 		createdAt: toDateString(dog.createdAt) ?? new Date().toISOString(),
 		updatedAt: toDateString(dog.updatedAt) ?? new Date().toISOString()
 	};
+}
+
+// Reads the treatments array, migrating the deprecated single-treatment flat fields
+// into a one-element array when no array is present yet. An existing array (even an
+// empty one) is authoritative — that's how "all treatments removed" is preserved.
+function deserializeTreatments(stored: StoredDog): Treatment[] {
+	if (Array.isArray(stored.treatments)) {
+		return stored.treatments.map((t) => ({
+			id: t.id,
+			name: t.name,
+			notes: t.notes ?? null,
+			startDate: t.startDate ? toDate(t.startDate) : null,
+			endDate: t.endDate ? toDate(t.endDate) : null
+		}));
+	}
+	if (stored.treatmentName) {
+		return [{
+			id: createId('tx'),
+			name: stored.treatmentName,
+			notes: stored.treatmentNotes ?? null,
+			startDate: stored.treatmentStartDate ? toDate(stored.treatmentStartDate) : null,
+			endDate: stored.treatmentEndDate ? toDate(stored.treatmentEndDate) : null
+		}];
+	}
+	return [];
 }
 
 function deserializeDog(stored: StoredDog): Dog {
@@ -461,6 +507,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
 		handlingLevel: normalizedHandlingLevel,
 		inFoster: stored.inFoster ?? false,
+		inFosterSince: stored.inFosterSince ? toDate(stored.inFosterSince) : null,
 		shelterSince: stored.shelterSince ? toDate(stored.shelterSince) : null,
 		playgroupReadyDate: stored.playgroupReadyDate ? toDate(stored.playgroupReadyDate) : null,
 		awaitingEvaluation: stored.awaitingEvaluation ?? false,
@@ -470,10 +517,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
 		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
 		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,
-		treatmentName: stored.treatmentName ?? null,
-		treatmentNotes: stored.treatmentNotes ?? null,
-		treatmentStartDate: stored.treatmentStartDate ? toDate(stored.treatmentStartDate) : null,
-		treatmentEndDate: stored.treatmentEndDate ? toDate(stored.treatmentEndDate) : null,
+		treatments: deserializeTreatments(stored),
 		status: stored.status,
 		createdAt: toDate(stored.createdAt) ?? new Date(),
 		updatedAt: toDate(stored.updatedAt) ?? new Date()
@@ -1074,6 +1118,80 @@ export async function backfillBathLogsFromDogs() {
 	return writes;
 }
 
+// One-time repair: re-derive every dog's lastDayTripDate from its trip logs (the
+// single source of truth) so the cached field matches what the logs actually show.
+// Fixes dogs whose date drifted because a log was created without updating the cache.
+export async function backfillLastDayTripFromLogs() {
+	if (db) {
+		try {
+			const [dogsSnapshot, tripLogsSnapshot] = await Promise.all([
+				getDocs(collection(db, 'dogs')),
+				getDocs(collectionGroup(db, 'dayTripLogs'))
+			]);
+
+			const latestByDog = new Map<string, Date>();
+			for (const docSnap of tripLogsSnapshot.docs) {
+				const dogId = docSnap.ref.parent.parent?.id;
+				if (!dogId) continue;
+				const data = docSnap.data() as StoredDayTripLog;
+				const d = toDate(data.endedAt) ?? toDate(data.startedAt);
+				if (!d) continue;
+				const existing = latestByDog.get(dogId);
+				if (!existing || d > existing) latestByDog.set(dogId, d);
+			}
+
+			let writes = 0;
+			let batch = writeBatch(db);
+			for (const dogDoc of dogsSnapshot.docs) {
+				const data = dogDoc.data() as StoredDog;
+				const latest = latestByDog.get(dogDoc.id) ?? null;
+				const latestStr = latest ? toDateString(latest) : null;
+				const currentStr = data.lastDayTripDate ? toDateString(data.lastDayTripDate) : null;
+				if (latestStr === currentStr) continue;
+				batch.set(doc(db, 'dogs', dogDoc.id), { lastDayTripDate: latestStr }, { merge: true });
+				writes += 1;
+				if (writes % 450 === 0) {
+					await batch.commit();
+					batch = writeBatch(db);
+				}
+			}
+
+			if (writes % 450 !== 0) {
+				await batch.commit();
+			}
+
+			return writes;
+		} catch (error) {
+			if (isPermissionDenied(error)) return 0;
+			throw error;
+		}
+	}
+
+	const dogs = readJson<StoredDog[]>(DOGS_KEY, []);
+	const stored = readDayTripMap();
+	let writes = 0;
+
+	for (const dog of dogs) {
+		const logs = stored[dog.id] ?? [];
+		let latest: Date | null = null;
+		for (const log of logs) {
+			const d = toDate(log.endedAt) ?? toDate(log.startedAt);
+			if (d && (!latest || d > latest)) latest = d;
+		}
+		const latestStr = latest ? toDateString(latest) : null;
+		const currentStr = dog.lastDayTripDate ? toDateString(dog.lastDayTripDate) : null;
+		if (latestStr === currentStr) continue;
+		dog.lastDayTripDate = latestStr;
+		writes += 1;
+	}
+
+	if (writes > 0) {
+		writeJson(DOGS_KEY, dogs);
+	}
+
+	return writes;
+}
+
 export async function listStoolLogs(dogId: string) {
 	const ref = dogSubcollectionRef(dogId, 'stoolLogs');
 	if (ref) {
@@ -1137,17 +1255,63 @@ export async function patchDayTripLog(
 	}
 }
 
+// lastDayTripDate is derived purely from the dog's trip logs — the single source of
+// truth. It is the most recent trip date (endedAt preferred, else startedAt for an
+// in-progress trip), or null when the dog has no logs. Call after any change to a
+// dog's trip logs.
+export async function recomputeLastDayTripDate(dogId: string): Promise<void> {
+	const logs = await listDayTripLogs(dogId);
+	let latest: Date | null = null;
+	for (const log of logs) {
+		const d = toDate(log.endedAt) ?? toDate(log.startedAt);
+		if (d && (!latest || d > latest)) latest = d;
+	}
+	await updateDog(dogId, { lastDayTripDate: latest });
+}
+
 export async function deleteDayTripLog(dogId: string, tripId: string) {
 	if (db) {
 		const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
 		if (ref) await deleteDoc(doc(ref, tripId));
-		return;
+	} else {
+		const map = readDayTripMap();
+		if (map[dogId]) {
+			map[dogId] = map[dogId].filter((l) => l.id !== tripId);
+			writeDayTripMap(map);
+		}
 	}
-	const map = readDayTripMap();
-	if (map[dogId]) {
-		map[dogId] = map[dogId].filter((l) => l.id !== tripId);
-		writeDayTripMap(map);
+	await recomputeLastDayTripDate(dogId);
+}
+
+export async function repairTripYear(
+	dogId: string,
+	tripId: string,
+	correctedStartedAt: Date,
+	correctedEndedAt: Date | null
+) {
+	if (db) {
+		const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
+		if (ref) {
+			await setDoc(doc(ref, tripId), {
+				startedAt: toDateString(correctedStartedAt),
+				endedAt: correctedEndedAt ? toDateString(correctedEndedAt) : null,
+			}, { merge: true });
+		}
+	} else {
+		const map = readDayTripMap();
+		if (map[dogId]) {
+			map[dogId] = map[dogId].map((l) => {
+				if (l.id !== tripId) return l;
+				return {
+					...l,
+					startedAt: toDateString(correctedStartedAt) ?? l.startedAt,
+					endedAt: correctedEndedAt ? (toDateString(correctedEndedAt) ?? l.endedAt) : l.endedAt,
+				};
+			});
+			writeDayTripMap(map);
+		}
 	}
+	await recomputeLastDayTripDate(dogId);
 }
 
 export async function addFeedingLog(
@@ -1458,7 +1622,7 @@ export async function importHistoricalDayTrip(
 	const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
 	if (!ref) return; // Firebase not available — skip silently for imports
 	const entry: DayTripLog = {
-		id: createId('trip'),
+		id: importedTripId(tripDate),
 		dogId,
 		startedAt: tripDate,
 		endedAt: tripDate,
@@ -1472,6 +1636,7 @@ export async function importHistoricalDayTrip(
 		updatedAt: new Date()
 	};
 	await setDoc(doc(ref, entry.id), serializeDayTripLog(entry));
+	await recomputeLastDayTripDate(dogId);
 }
 
 // Returns the default end time for a day trip: 1 hour before closing on the given date.
@@ -1579,7 +1744,15 @@ export async function endDayTrip(dogId: string, profile?: UserProfile | null, no
 	});
 }
 
+// Deterministic id for a trip imported from notes/spreadsheet, keyed on the trip day.
+// Re-importing the same day overwrites the same row instead of creating a duplicate,
+// so concurrent imports across devices can never double up.
+export function importedTripId(date: Date): string {
+	return `imp-${toDateString(date)?.slice(0, 10) ?? 'unknown'}`;
+}
+
 export interface ManualTripData {
+	logId?: string;
 	startedAt: Date;
 	endedAt: Date | null;
 	volunteerName: string;
@@ -1603,7 +1776,7 @@ export async function logManualTrip(
 	const now = new Date();
 	const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
 	const entry: DayTripLog = {
-		id: createId('trip'),
+		id: data.logId ?? createId('trip'),
 		dogId,
 		startedAt: data.startedAt,
 		endedAt: data.endedAt,
@@ -1630,14 +1803,18 @@ export async function logManualTrip(
 		await setDoc(doc(ref, entry.id), serializeDayTripLog(entry));
 	} else {
 		const stored = readDayTripMap();
-		(stored[dogId] ??= []).unshift(serializeDayTripLog(entry));
+		const list = (stored[dogId] ??= []);
+		// Overwrite an existing row with the same id (deterministic imports), else add.
+		const existingIndex = list.findIndex((l) => l.id === entry.id);
+		if (existingIndex >= 0) list[existingIndex] = serializeDayTripLog(entry);
+		else list.unshift(serializeDayTripLog(entry));
 		writeDayTripMap(stored);
 	}
 	if (data.endedAt) {
 		await updateDog(dogId, {
-			lastDayTripDate: data.endedAt,
 			isOutOnDayTrip: false,
 			currentDayTripStartedAt: null
 		});
 	}
+	await recomputeLastDayTripDate(dogId);
 }

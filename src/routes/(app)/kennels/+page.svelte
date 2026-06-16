@@ -7,6 +7,7 @@
 	import { listDogs, updateDog } from '$lib/data/dogs';
 	import type { Dog, UserRole } from '$lib/types';
 	import { syncVersion } from '$lib/stores/sync';
+	import { dogAgeWeeks } from '$lib/utils/attention';
 
 	import {
 		kennelCells,
@@ -64,6 +65,13 @@
 	$: kennelEligibleDogs = activeDogs.filter((dog) => !dog.inFoster);
 	$: assignments = getAssignments(kennelEligibleDogs);
 	$: unassigned = kennelEligibleDogs.filter((dog) => !getDogRun(dog));
+	// Run keys where an intact dog shares the kennel with an intact dog of the
+	// opposite sex (puppies under 6 months exempt) — these cells are flagged red.
+	$: conflictRunKeys = new Set(
+		Object.entries(assignments)
+			.filter(([, slotDogs]) => kennelHasIntactConflict(slotDogs))
+			.map(([key]) => key)
+	);
 	$: selectedDog = selectedDogId
 		? kennelEligibleDogs.find((dog) => dog.id === selectedDogId) ?? null
 		: null;
@@ -165,7 +173,16 @@
 		selectedDogId = selectedDogId === dog.id ? null : dog.id;
 	}
 
+	const PUPPY_MAX_WEEKS = 26; // under ~6 months — the intact-sex kennel rule doesn't apply to puppies
 	function isIntact(d: Dog) { return !d.isFixed; }
+	function isPuppy(d: Dog) {
+		const weeks = dogAgeWeeks(d, new Date());
+		return weeks !== null && weeks < PUPPY_MAX_WEEKS;
+	}
+	function kennelHasIntactConflict(slotDogs: Dog[]): boolean {
+		const mature = slotDogs.filter((d) => isIntact(d) && !isPuppy(d) && d.sex !== 'unknown');
+		return mature.some((a) => mature.some((b) => b.sex !== a.sex));
+	}
 
 	async function assignDog(dog: Dog, runId: RunId | null) {
 		if (!canEdit) return;
@@ -176,15 +193,18 @@
 		const currentRun = getDogRun(dog);
 		if (currentRun === runId) return;
 
-		if (runId !== null && isIntact(dog)) {
+		if (runId !== null && isIntact(dog) && !isPuppy(dog)) {
 			const key = runIdToKey(runId);
 			const roommates = (assignments[key] ?? []).filter((d) => d.id !== dog.id);
 			const conflict = roommates.some(
-				(r) => isIntact(r) && r.sex !== dog.sex && r.sex !== 'unknown' && dog.sex !== 'unknown'
+				(r) => isIntact(r) && !isPuppy(r) && r.sex !== dog.sex && r.sex !== 'unknown' && dog.sex !== 'unknown'
 			);
 			if (conflict) {
-				toast.error(`Cannot place ${dog.name} here — intact male and intact female cannot share a kennel.`);
-				return;
+				// Warn but allow — staff may have a reason to place them together.
+				toast(`Heads up: ${dog.name} is sharing a kennel with an intact dog of the opposite sex.`, {
+					icon: '⚠️',
+					duration: 6000
+				});
 			}
 		}
 
@@ -263,7 +283,7 @@
 							<div
 								class={`kennel-cell ${cell.isSpecial ? 'kennel-special' : ''} ${
 									hoveredRun === cell.runId ? 'kennel-cell-active' : ''
-								}`}
+								} ${cell.runKey && conflictRunKeys.has(cell.runKey) ? 'kennel-cell-conflict' : ''}`}
 								data-drop-run={cell.runId !== null ? runIdToKey(cell.runId) : undefined}
 								style={`grid-column: ${cell.col}${cell.colSpan ? ` / span ${cell.colSpan}` : ''}; grid-row: ${cell.row}; --m-col: ${cell.mobileCol}; --m-row: ${cell.mobileRow}; --m-row-span: ${cell.mobileRowSpan ?? 1};`}
 								on:dragover|preventDefault={() => cell.runId !== null && (hoveredRun = cell.runId)}
@@ -276,6 +296,9 @@
 										<div class="kennel-label">
 											<span>{cell.label}</span>
 										</div>
+										{#if cell.runKey && conflictRunKeys.has(cell.runKey)}
+											<span class="kennel-conflict-note">Intact male + female</span>
+										{/if}
 										{@const slotDogs = assignments[cell.runKey ?? ''] ?? []}
 										{#if slotDogs.length > 0}
 											<div class="kennel-dog-stack">
@@ -521,6 +544,27 @@
 		border-color: #6e9fc8;
 		box-shadow: 0 0 0 2px rgba(110, 159, 200, 0.24);
 		transform: translateY(-1px);
+	}
+
+	.kennel-cell-conflict {
+		border-color: #cf4b4b;
+		box-shadow: 0 0 0 2px rgba(207, 75, 75, 0.28);
+		background: rgba(207, 75, 75, 0.07);
+	}
+
+	.kennel-conflict-note {
+		display: inline-block;
+		align-self: flex-start;
+		margin-top: 0.14rem;
+		padding: 0.08rem 0.34rem;
+		border-radius: 0.22rem;
+		background: #cf4b4b;
+		color: #ffffff;
+		font-size: 0.54rem;
+		font-weight: 800;
+		line-height: 1.15;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
 	}
 
 	.kennel-special {

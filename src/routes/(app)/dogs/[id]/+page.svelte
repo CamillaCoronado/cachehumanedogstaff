@@ -93,6 +93,9 @@
 	$: canEdit = canEditDogs(role);
 	$: bathIsEligible = dog ? bathEligible(dog.surgeryDate, today) : true;
 	$: feedToday = dog ? !isSurgeryToday(dog.surgeryDate, today) : true;
+	$: treatmentSummary = (dog?.treatments ?? []).map((t) =>
+		t.endDate ? `${t.name} (until ${formatDate(t.endDate)})` : t.name
+	);
 	$: dayTripEligibility = dog
 		? checkDayTripEligibility(
 				dog.intakeDate,
@@ -747,6 +750,10 @@
 						<dd>{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : 'ISO'}</dd>
 					</div>
 					<div>
+						<dt>Treatments</dt>
+						<dd>{treatmentSummary.length ? treatmentSummary.join(', ') : 'None'}</dd>
+					</div>
+					<div>
 						<dt>Vaccinated</dt>
 						<dd>{dog.isVaccinated ? `Yes (${formatDate(dog.vaccinatedDate)})` : 'No'}</dd>
 					</div>
@@ -1385,7 +1392,10 @@
 
 	.kennel-photo-img {
 		position: absolute;
-		inset: 0;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
@@ -1719,6 +1729,7 @@
 
 	.whiteboard-icon-btn-active .whiteboard-pill-icon {
 		border-color: currentColor;
+		box-shadow: 0 0 0 1px currentColor;
 		box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 24%, #ffffff);
 	}
 
@@ -1892,7 +1903,10 @@
 
 .adoption-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(0, 0, 0, 0.72);
 	z-index: 500;
 	display: flex;

@@ -820,7 +820,6 @@
 									{/if}
 									<span class="planner-row-text">{item.name}</span>
 								</span>
-								<span class="planner-checkbox"></span>
 							</div>
 						{/if}
 					{/each}

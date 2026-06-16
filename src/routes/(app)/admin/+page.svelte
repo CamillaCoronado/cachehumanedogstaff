@@ -4,9 +4,9 @@
 	import { migrateFoodTypes } from '$lib/data/migrate-food-types';
 	import { listUserProfiles, updateUserProfile } from '$lib/firebase/firestore';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
-	import type { Dog, UserProfile, UserRole } from '$lib/types';
-	import { formatDateTime } from '$lib/utils/dates';
-	import { getDog, listDogs, mergeDogs } from '$lib/data/dogs';
+	import type { DayTripLog, Dog, UserProfile, UserRole } from '$lib/types';
+	import { formatDateTime, toDate, toDateString } from '$lib/utils/dates';
+	import { getDog, listDogs, listAllDayTripLogs, mergeDogs, repairTripYear, deleteDayTripLog } from '$lib/data/dogs';
 	import { confetti } from '@neoconfetti/svelte';
 
 	function portal(node: HTMLElement) {
@@ -51,6 +51,20 @@
 
 	let showTransferTest = false;
 	let transferTestDog: Dog | null = null;
+
+	// Trip year repair
+	type TripYearSuspect = { dogId: string; dogName: string; log: DayTripLog };
+	let scanningTrips = false;
+	let tripScanRan = false;
+	let tripYearSuspects: TripYearSuspect[] = [];
+	let fixingTripId: string | null = null;
+
+	// Duplicate trip cleanup
+	type DuplicateGroup = { dogId: string; dogName: string; logs: DayTripLog[]; likelyDuplicate: boolean };
+	let scanningDupes = false;
+	let dupeScanRan = false;
+	let duplicateGroups: DuplicateGroup[] = [];
+	let deletingDupeId: string | null = null;
 
 	async function testFosterMoment() {
 		const all = await listDogs();
@@ -241,6 +255,202 @@
 		}
 	}
 
+	async function scanForBadTripYears() {
+		scanningTrips = true;
+		tripScanRan = false;
+		tripYearSuspects = [];
+		try {
+			const today = new Date();
+			const currentYear = today.getFullYear();
+			const [dogs, allLogs] = await Promise.all([listDogs(), listAllDayTripLogs()]);
+			const dogMap = new Map(dogs.map((d) => [d.id, d]));
+
+			const logsByDog = new Map<string, DayTripLog[]>();
+			for (const log of allLogs) {
+				const list = logsByDog.get(log.dogId) ?? [];
+				list.push(log);
+				logsByDog.set(log.dogId, list);
+			}
+
+			const suspects: TripYearSuspect[] = [];
+			for (const [dogId, logs] of logsByDog) {
+				const dog = dogMap.get(dogId);
+				if (!dog) continue;
+
+				const currentYearLogs = logs.filter((l) => toDate(l.startedAt)?.getFullYear() === currentYear);
+				const prevYearLogs = logs.filter((l) => toDate(l.startedAt)?.getFullYear() === currentYear - 1);
+				if (prevYearLogs.length === 0) continue;
+
+				const fosterDate = toDate(dog.inFosterSince);
+
+				for (const log of currentYearLogs) {
+					// Imported trips from parseDayTripNotes have startedAt === endedAt (same midnight timestamp)
+					const startStr = toDateString(log.startedAt);
+					const endStr = toDateString(log.endedAt);
+					if (!startStr || !endStr || startStr !== endStr) continue;
+
+					const start = toDate(log.startedAt);
+					if (!start) continue;
+
+					let isSuspect = false;
+
+					if (fosterDate) {
+						// Definitive: trip is after the dog went into foster → wrong year
+						isSuspect = start > fosterDate;
+					} else {
+						// Fallback heuristic: prev-year entry with later month/day than suspect
+						const suspectMD = (start.getMonth() + 1) * 100 + start.getDate();
+						isSuspect = prevYearLogs.some((l) => {
+							const d = toDate(l.startedAt);
+							if (!d) return false;
+							return (d.getMonth() + 1) * 100 + d.getDate() > suspectMD;
+						});
+					}
+
+					if (isSuspect) suspects.push({ dogId, dogName: dog.name, log });
+				}
+			}
+
+			suspects.sort((a, b) => a.dogName.localeCompare(b.dogName));
+			tripYearSuspects = suspects;
+			tripScanRan = true;
+			if (suspects.length === 0) {
+				toast.success('No suspicious trip entries found.');
+			}
+		} catch (e) {
+			toast.error('Scan failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			scanningTrips = false;
+		}
+	}
+
+	async function fixTripYear(suspect: TripYearSuspect) {
+		fixingTripId = suspect.log.id;
+		try {
+			const start = toDate(suspect.log.startedAt)!;
+			const correctedStart = new Date(start);
+			correctedStart.setFullYear(correctedStart.getFullYear() - 1);
+
+			const end = toDate(suspect.log.endedAt);
+			const correctedEnd = end ? new Date(end) : null;
+			if (correctedEnd) correctedEnd.setFullYear(correctedEnd.getFullYear() - 1);
+
+			await repairTripYear(suspect.dogId, suspect.log.id, correctedStart, correctedEnd);
+			tripYearSuspects = tripYearSuspects.filter((s) => s.log.id !== suspect.log.id);
+			toast.success(`Fixed trip for ${suspect.dogName}.`);
+		} catch (e) {
+			toast.error('Fix failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			fixingTripId = null;
+		}
+	}
+
+	async function deleteSuspectTrip(suspect: TripYearSuspect) {
+		fixingTripId = suspect.log.id;
+		try {
+			await deleteDayTripLog(suspect.dogId, suspect.log.id);
+			tripYearSuspects = tripYearSuspects.filter((s) => s.log.id !== suspect.log.id);
+			toast.success(`Deleted trip for ${suspect.dogName}.`);
+		} catch (e) {
+			toast.error('Delete failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			fixingTripId = null;
+		}
+	}
+
+	// Minute-of-day for a log's start, or null if it has no real clock time (e.g.
+	// midnight-imported trips). Used to tell a true duplicate from a real 2nd trip.
+	function startMinute(log: DayTripLog): number | null {
+		const d = toDate(log.startedAt);
+		if (!d) return null;
+		const m = d.getHours() * 60 + d.getMinutes();
+		return m === 0 ? null : m; // midnight = imported, no real time
+	}
+
+	async function scanForDuplicateTrips() {
+		scanningDupes = true;
+		dupeScanRan = false;
+		duplicateGroups = [];
+		try {
+			const [dogs, allLogs] = await Promise.all([listDogs(), listAllDayTripLogs()]);
+			const dogMap = new Map(dogs.map((d) => [d.id, d]));
+
+			// Group every log by dog + calendar day. A dog can legitimately go out twice
+			// in a day, so same-day isn't enough — we classify each group below.
+			const groups = new Map<string, DayTripLog[]>();
+			for (const log of allLogs) {
+				const day = toDateString(log.startedAt)?.slice(0, 10) ?? 'no-date';
+				const key = `${log.dogId}|${day}`;
+				const list = groups.get(key) ?? [];
+				list.push(log);
+				groups.set(key, list);
+			}
+
+			const dupes: DuplicateGroup[] = [];
+			for (const logs of groups.values()) {
+				if (logs.length < 2) continue;
+				const dog = dogMap.get(logs[0].dogId);
+				if (!dog) continue;
+				logs.sort((a, b) => (toDate(a.createdAt)?.getTime() ?? 0) - (toDate(b.createdAt)?.getTime() ?? 0));
+
+				// Likely a true duplicate when two logs share the same start time (or both
+				// lack one) AND the same notes — i.e. there's no sign of a separate outing.
+				let likelyDuplicate = false;
+				for (let i = 0; i < logs.length && !likelyDuplicate; i++) {
+					for (let j = i + 1; j < logs.length; j++) {
+						const sameTime = startMinute(logs[i]) === startMinute(logs[j]);
+						const sameNotes =
+							(logs[i].tripNotes ?? '').trim().toLowerCase() ===
+							(logs[j].tripNotes ?? '').trim().toLowerCase();
+						if (sameTime && sameNotes) { likelyDuplicate = true; break; }
+					}
+				}
+
+				dupes.push({ dogId: dog.id, dogName: dog.name, logs, likelyDuplicate });
+			}
+
+			// Likely duplicates first, then alphabetical
+			dupes.sort((a, b) =>
+				a.likelyDuplicate !== b.likelyDuplicate
+					? (a.likelyDuplicate ? -1 : 1)
+					: a.dogName.localeCompare(b.dogName)
+			);
+			duplicateGroups = dupes;
+			dupeScanRan = true;
+			if (dupes.length === 0) toast.success('No same-day trips found.');
+		} catch (e) {
+			toast.error('Scan failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			scanningDupes = false;
+		}
+	}
+
+	function tripTimeLabel(log: DayTripLog): string {
+		const s = toDate(log.startedAt);
+		if (!s) return '';
+		const fmt = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+		if (s.getHours() === 0 && s.getMinutes() === 0) return 'imported (no time)';
+		const e = toDate(log.endedAt);
+		return e && !(e.getHours() === 0 && e.getMinutes() === 0) ? `${fmt(s)}–${fmt(e)}` : fmt(s);
+	}
+
+	async function deleteDuplicateTrip(group: DuplicateGroup, log: DayTripLog) {
+		deletingDupeId = log.id;
+		try {
+			await deleteDayTripLog(group.dogId, log.id);
+			duplicateGroups = duplicateGroups
+				.map((g) =>
+					g === group ? { ...g, logs: g.logs.filter((l) => l.id !== log.id) } : g
+				)
+				.filter((g) => g.logs.length > 1);
+			toast.success(`Deleted duplicate for ${group.dogName}.`);
+		} catch (e) {
+			toast.error('Delete failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			deletingDupeId = null;
+		}
+	}
+
 	async function runFullChangeCheck() {
 		auditRunning = true;
 		auditError = '';
@@ -392,6 +602,103 @@
 								{:else}
 									<span class="change-tag change-tag-updated">Updated</span>
 								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Fix misattributed trip years</h3>
+						<p class="section-copy">Finds imported day trip entries where the year was incorrectly assigned. Suspects have the same start and end timestamp and exist in the current year alongside older trips for the same dog.</p>
+					</div>
+					<button class="action-btn" type="button" on:click={scanForBadTripYears} disabled={scanningTrips}>
+						{scanningTrips ? 'Scanning…' : 'Scan'}
+					</button>
+				</div>
+				{#if tripScanRan && tripYearSuspects.length === 0}
+					<p class="empty-note">No suspicious entries found.</p>
+				{/if}
+				{#if tripYearSuspects.length > 0}
+					<ul class="change-list">
+						{#each tripYearSuspects as suspect}
+							{@const d = toDate(suspect.log.startedAt)}
+							<li class="change-item">
+								<div class="change-main">
+									<p class="change-name">{suspect.dogName}</p>
+									<p class="change-detail">
+										{d ? d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : '?'}
+										{suspect.log.tripNotes ? `· "${suspect.log.tripNotes.slice(0, 60)}…"` : ''}
+									</p>
+								</div>
+								<div class="repair-actions">
+									<button
+										class="action-btn action-btn-small"
+										type="button"
+										disabled={fixingTripId === suspect.log.id}
+										on:click={() => fixTripYear(suspect)}
+									>Shift to {(d?.getFullYear() ?? 0) - 1}</button>
+									<button
+										class="action-btn action-btn-small action-btn-danger"
+										type="button"
+										disabled={fixingTripId === suspect.log.id}
+										on:click={() => deleteSuspectTrip(suspect)}
+									>Delete</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Find duplicate day trips</h3>
+						<p class="section-copy">Lists every dog with two or more trips on the same day. Sets where the times and notes match are flagged as <strong>likely duplicate</strong>; sets with different start times are probably real separate outings. Check the times before deleting.</p>
+					</div>
+					<button class="action-btn" type="button" on:click={scanForDuplicateTrips} disabled={scanningDupes}>
+						{scanningDupes ? 'Scanning…' : 'Scan'}
+					</button>
+				</div>
+				{#if dupeScanRan && duplicateGroups.length === 0}
+					<p class="empty-note">No same-day trips found.</p>
+				{/if}
+				{#if duplicateGroups.length > 0}
+					<ul class="change-list">
+						{#each duplicateGroups as group}
+							{@const d = toDate(group.logs[0].startedAt)}
+							<li class="dupe-group">
+								<p class="change-name">
+									{group.dogName}
+									<span class="dupe-day">{d ? d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : '?'}</span>
+									{#if group.likelyDuplicate}
+										<span class="dupe-flag dupe-flag-dup">likely duplicate</span>
+									{:else}
+										<span class="dupe-flag dupe-flag-sep">separate times</span>
+									{/if}
+								</p>
+								{#each group.logs as log}
+									<div class="dupe-row">
+										<div class="change-main">
+											<p class="change-detail">
+												<span class="dupe-time">{tripTimeLabel(log)}</span>
+												{#if log.volunteerName}· {log.volunteerName}{/if}
+												{log.tripNotes ? `· "${log.tripNotes.slice(0, 44)}…"` : '· (no notes)'}
+											</p>
+										</div>
+										<button
+											class="action-btn action-btn-small action-btn-danger"
+											type="button"
+											disabled={deletingDupeId === log.id}
+											on:click={() => deleteDuplicateTrip(group, log)}
+										>Delete</button>
+									</div>
+								{/each}
 							</li>
 						{/each}
 					</ul>
@@ -740,6 +1047,72 @@
 		box-shadow: none;
 	}
 
+	.action-btn-small {
+		min-height: 1.8rem;
+		padding: 0.28rem 0.6rem;
+		font-size: 0.72rem;
+		border-radius: 0.5rem;
+	}
+
+	.action-btn-danger {
+		border-color: #9e2929;
+		background: linear-gradient(180deg, #d95050 0%, #b83232 100%);
+		box-shadow: 0 6px 12px rgba(180, 40, 40, 0.18);
+	}
+
+	.repair-actions {
+		display: flex;
+		gap: 0.4rem;
+		flex-shrink: 0;
+	}
+
+	.dupe-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		padding: 0.5rem 0;
+	}
+
+	.dupe-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.6rem;
+		padding-left: 0.6rem;
+	}
+
+	.dupe-day {
+		margin-left: 0.4rem;
+		font-weight: 600;
+		color: #55708a;
+	}
+
+	.dupe-flag {
+		display: inline-block;
+		margin-left: 0.4rem;
+		padding: 0.04rem 0.4rem;
+		border-radius: 999px;
+		font-size: 0.6rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.dupe-flag-dup {
+		background: rgba(207, 75, 75, 0.14);
+		color: #b83232;
+	}
+
+	.dupe-flag-sep {
+		background: rgba(1, 107, 165, 0.12);
+		color: #016aa5;
+	}
+
+	.dupe-time {
+		font-weight: 700;
+		color: #2e3845;
+	}
+
 	.danger-btn {
 		min-height: 2.5rem;
 		padding: 0.6rem 0.9rem;
@@ -1004,8 +1377,12 @@
 
 .transfer-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(220, 245, 225, 0.9);
+	-webkit-backdrop-filter: blur(4px);
 	backdrop-filter: blur(4px);
 	z-index: 500;
 	display: flex;
@@ -1095,8 +1472,12 @@
 
 .foster-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(255, 245, 220, 0.88);
+	-webkit-backdrop-filter: blur(4px);
 	backdrop-filter: blur(4px);
 	z-index: 500;
 	display: flex;
@@ -1183,7 +1564,10 @@
 
 .adoption-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(0, 0, 0, 0.72);
 	z-index: 500;
 	display: flex;

@@ -12,7 +12,7 @@
 	import { normalizeText } from '$lib/utils/labels';
 	import { canAccessVolunteers, canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
-	import { backfillBathLogsFromDogs } from '$lib/data/dogs';
+	import { backfillBathLogsFromDogs, backfillLastDayTripFromLogs } from '$lib/data/dogs';
 	import { syncVersion } from '$lib/stores/sync';
 
 	type TabItem = {
@@ -53,6 +53,7 @@
 	let mobileNavOpen = false;
 	let asmAttempted = false;
 	let bathBackfillAttempted = false;
+	let lastTripBackfillAttempted = false;
 	let storedOverlayChanges: SyncChange[] | null = null;
 	let storedOverlayAttempted = false;
 	let asmSyncing = false;
@@ -218,6 +219,13 @@
 		bathBackfillAttempted = true;
 		void backfillBathLogsFromDogs().catch((err: unknown) => {
 			console.error('[Bath log backfill]', err instanceof Error ? err.message : err);
+		});
+	}
+
+	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !lastTripBackfillAttempted) {
+		lastTripBackfillAttempted = true;
+		void backfillLastDayTripFromLogs().catch((err: unknown) => {
+			console.error('[Last day trip backfill]', err instanceof Error ? err.message : err);
 		});
 	}
 
@@ -760,7 +768,10 @@
 
 	.sync-log-dismiss {
 		position: fixed;
-		inset: 0;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
 		z-index: 29;
 		cursor: default;
 	}
@@ -1069,7 +1080,9 @@
 	}
 
 	.tab-active {
+		border-color: rgba(1, 107, 165, 0.42);
 		border-color: color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 42%, #ffffff);
+		box-shadow: 0 0 0 2px rgba(1, 107, 165, 0.18);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 18%, transparent);
 	}
 
@@ -1080,9 +1093,12 @@
 		width: 1.5rem;
 		height: 1.5rem;
 		flex-shrink: 0;
+		border: 1px solid rgba(1, 107, 165, 0.22);
 		border: 1px solid color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 22%, #d2dfed);
 		border-radius: 0.48rem;
+		background: rgba(1, 107, 165, 0.08);
 		background: color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 8%, #ffffff);
+		color: var(--tab-accent, var(--layout-primary));
 		color: color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 76%, #274763);
 	}
 
@@ -1096,8 +1112,11 @@
 	}
 
 	.tab-active .tab-icon-shell {
+		border-color: rgba(1, 107, 165, 0.38);
 		border-color: color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 38%, #d2dfed);
+		background: rgba(1, 107, 165, 0.16);
 		background: color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 16%, #ffffff);
+		color: var(--tab-accent, var(--layout-primary));
 		color: color-mix(in srgb, var(--tab-accent, var(--layout-primary)) 90%, #274763);
 	}
 
@@ -1207,6 +1226,7 @@
 		width: 100%;
 		max-width: 100vw;
 		min-width: 0;
+		overflow-x: hidden;
 		overflow-x: clip;
 	}
 
@@ -1412,8 +1432,12 @@
 
 .transfer-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(220, 245, 225, 0.9);
+	-webkit-backdrop-filter: blur(4px);
 	backdrop-filter: blur(4px);
 	z-index: 500;
 	display: flex;
@@ -1510,8 +1534,12 @@
 
 .foster-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(255, 245, 220, 0.88);
+	-webkit-backdrop-filter: blur(4px);
 	backdrop-filter: blur(4px);
 	z-index: 500;
 	display: flex;
@@ -1605,8 +1633,12 @@
 
 .incoming-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(220, 240, 255, 0.88);
+	-webkit-backdrop-filter: blur(4px);
 	backdrop-filter: blur(4px);
 	z-index: 500;
 	display: flex;
@@ -1705,7 +1737,10 @@
 
 .adoption-overlay {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(0, 0, 0, 0.72);
 	z-index: 500;
 	display: flex;

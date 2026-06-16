@@ -70,30 +70,41 @@ export function stripDayTripNotes(text: string): string {
 
 export function parseDayTripNotes(text: string): ParsedTrip[] {
 	const entryPattern = /Day Trip Notes\s+(\d{1,2})\/(\d{1,2})\s*:/gi;
-	const entries: ParsedTrip[] = [];
 	const today = new Date();
 	const currentYear = today.getFullYear();
 
-	const matches = [...text.matchAll(entryPattern)];
-	for (let i = 0; i < matches.length; i++) {
-		const match = matches[i];
+	const rawMatches = [...text.matchAll(entryPattern)].map((match, i, arr) => {
 		const month = parseInt(match[1], 10);
 		const day = parseInt(match[2], 10);
 		const start = match.index! + match[0].length;
-		const end = matches[i + 1]?.index ?? text.length;
-		const body = text.slice(start, end).trim();
+		const end = arr[i + 1]?.index ?? text.length;
+		return { month, day, body: text.slice(start, end).trim() };
+	});
 
-		// Use last year if the date would otherwise be in the future
-		let year = currentYear;
-		const candidate = new Date(currentYear, month - 1, day);
-		if (candidate > today) year = currentYear - 1;
+	// Assign years by walking backwards from the last (most recent) entry.
+	// Start with the current year for the last entry, or last year if that date
+	// is still in the future. Then for each earlier entry, if its month/day is
+	// greater than the one after it we've crossed a year boundary — decrement.
+	const years: number[] = new Array(rawMatches.length).fill(currentYear);
+	if (rawMatches.length > 0) {
+		const last = rawMatches[rawMatches.length - 1];
+		const lastCandidate = new Date(currentYear, last.month - 1, last.day);
+		years[rawMatches.length - 1] = lastCandidate > today ? currentYear - 1 : currentYear;
+		for (let i = rawMatches.length - 2; i >= 0; i--) {
+			const cur = rawMatches[i].month * 100 + rawMatches[i].day;
+			const next = rawMatches[i + 1].month * 100 + rawMatches[i + 1].day;
+			years[i] = cur > next ? years[i + 1] - 1 : years[i + 1];
+		}
+	}
 
+	return rawMatches.map(({ month, day, body }, i) => {
+		const year = years[i];
 		const quoteMatch = body.match(/"([^"]+)"/);
 		const tripNotes = quoteMatch ? quoteMatch[1].trim() : '';
 		const behaviorText = quoteMatch ? body.slice(0, body.indexOf('"')) : body;
 		const ratings = parseBehaviorText(behaviorText);
 
-		entries.push({
+		return {
 			date: new Date(year, month - 1, day),
 			tripNotes,
 			reactionToKids: null,
@@ -104,8 +115,6 @@ export function parseDayTripNotes(text: string): ParsedTrip[] {
 			reactionToCarRides: null,
 			reactionToToys: null,
 			...ratings,
-		});
-	}
-
-	return entries;
+		};
+	});
 }

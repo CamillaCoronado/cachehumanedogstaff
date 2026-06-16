@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { listDogs, updateDog } from '$lib/data/dogs';
-	import type { Dog, IsolationReason } from '$lib/types';
+	import { createId } from '$lib/utils/storage';
+	import type { Dog, IsolationReason, Treatment } from '$lib/types';
 	import { formatDate, toDate } from '$lib/utils/dates';
 	import { differenceInDays, startOfDay } from 'date-fns';
 	import toast from 'svelte-french-toast';
@@ -62,8 +63,9 @@
 		.filter((d) => d.status === 'active' && d.isolationStatus === 'none')
 		.sort((a, b) => a.name.localeCompare(b.name));
 
+	// A dog can hold multiple treatments, so any active dog can have one added.
 	$: eligibleForTx = dogs
-		.filter((d) => d.status === 'active' && !d.treatmentName)
+		.filter((d) => d.status === 'active')
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: surgeryDogs = dogs
@@ -118,12 +120,15 @@
 		});
 
 	$: treatmentDogs = dogs
-		.filter((d) => d.status === 'active' && d.treatmentName)
-		.map((d) => {
-			const endDate = toDate(d.treatmentEndDate ?? null);
-			const daysLeft = endDate ? differenceInDays(startOfDay(endDate), startOfDay(today)) : null;
-			return { dog: d, endDate, daysLeft };
-		})
+		.filter((d) => d.status === 'active' && (d.treatments?.length ?? 0) > 0)
+		.map((d) => ({
+			dog: d,
+			treatments: (d.treatments ?? []).map((t) => {
+				const endDate = toDate(t.endDate ?? null);
+				const daysLeft = endDate ? differenceInDays(startOfDay(endDate), startOfDay(today)) : null;
+				return { t, daysLeft };
+			})
+		}))
 		.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
 
 	async function addToSurgery() {
@@ -244,11 +249,16 @@
 		if (!txDogId || !txName) return;
 		addingTx = true;
 		try {
+			const dog = dogs.find((d) => d.id === txDogId);
+			const newTreatment: Treatment = {
+				id: createId('tx'),
+				name: txName.trim(),
+				notes: txNotes.trim() || null,
+				startDate: new Date(txStartDate + 'T12:00:00'),
+				endDate: txEndDate ? new Date(txEndDate + 'T12:00:00') : null
+			};
 			await updateDog(txDogId, {
-				treatmentName: txName.trim(),
-				treatmentNotes: txNotes.trim() || null,
-				treatmentStartDate: new Date(txStartDate + 'T12:00:00'),
-				treatmentEndDate: txEndDate ? new Date(txEndDate + 'T12:00:00') : null
+				treatments: [...(dog?.treatments ?? []), newTreatment]
 			});
 			dogs = await listDogs();
 			txDogId = '';
@@ -265,18 +275,15 @@
 		}
 	}
 
-	async function clearTreatment(dog: Dog) {
+	async function removeTreatment(dog: Dog, treatmentId: string) {
 		try {
 			await updateDog(dog.id, {
-				treatmentName: null,
-				treatmentNotes: null,
-				treatmentStartDate: null,
-				treatmentEndDate: null
+				treatments: (dog.treatments ?? []).filter((t) => t.id !== treatmentId)
 			});
 			dogs = await listDogs();
-			toast.success(`${dog.name} cleared from treatment list.`);
+			toast.success(`Treatment removed for ${dog.name}.`);
 		} catch {
-			toast.error('Could not clear treatment.');
+			toast.error('Could not remove treatment.');
 		}
 	}
 
@@ -296,25 +303,25 @@
 	}
 
 	async function autoClearExpiredTreatments() {
-		const expired = dogs.filter((d) => {
-			if (d.status !== 'active' || !d.treatmentName) return false;
-			const end = toDate(d.treatmentEndDate ?? null);
-			if (!end) return false;
-			return differenceInDays(startOfDay(today), startOfDay(end)) > 0;
-		});
-		if (expired.length === 0) return;
-		await Promise.all(
-			expired.map((d) =>
-				updateDog(d.id, {
-					treatmentName: null,
-					treatmentNotes: null,
-					treatmentStartDate: null,
-					treatmentEndDate: null
-				})
-			)
-		);
+		const isExpired = (t: Treatment) => {
+			const end = toDate(t.endDate ?? null);
+			return end ? differenceInDays(startOfDay(today), startOfDay(end)) > 0 : false;
+		};
+		const updates = dogs
+			.filter((d) => d.status === 'active' && (d.treatments?.length ?? 0) > 0)
+			.map((d) => {
+				const kept = (d.treatments ?? []).filter((t) => !isExpired(t));
+				const removed = (d.treatments ?? []).filter((t) => isExpired(t));
+				return { dog: d, kept, removed };
+			})
+			.filter((u) => u.removed.length > 0);
+		if (updates.length === 0) return;
+		await Promise.all(updates.map((u) => updateDog(u.dog.id, { treatments: u.kept })));
 		dogs = await listDogs();
-		toast.success(`Treatment cleared: ${expired.map((d) => d.name).join(', ')}`);
+		const label = updates
+			.map((u) => `${u.dog.name} (${u.removed.map((t) => t.name).join(', ')})`)
+			.join('; ');
+		toast.success(`Treatment cleared: ${label}`);
 	}
 
 	async function refreshDogs() {
@@ -622,7 +629,7 @@
 					{#if treatmentDogs.length === 0}
 						<p class="med-empty">No dogs on treatment.</p>
 					{:else}
-						{#each treatmentDogs as { dog, daysLeft }}
+						{#each treatmentDogs as { dog, treatments }}
 							<div class="med-row">
 								<div class="med-row-body">
 									<button class="med-dog-link" on:click={() => goto(`/dogs/${dog.id}`)}>
@@ -631,19 +638,30 @@
 											<span class="med-kennel">· K{dog.outdoorKennelAssignment}</span>
 										{/if}
 									</button>
-									<div class="med-row-sub">
-										<span class="med-meta">{dog.treatmentName}</span>
-										{#if daysLeft !== null}
-											<span class="med-tag {daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
-												{daysLeft > 0 ? `${daysLeft}d left` : 'Last day'}
-											</span>
-										{/if}
+									<div class="med-tx-list">
+										{#each treatments as { t, daysLeft }}
+											<div class="med-tx-item">
+												<div class="med-tx-line">
+													<span class="med-meta">{t.name}</span>
+													{#if daysLeft !== null}
+														<span class="med-tag {daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
+															{daysLeft > 0 ? `${daysLeft}d left` : 'Last day'}
+														</span>
+													{/if}
+													<button
+														class="med-tx-remove"
+														type="button"
+														aria-label="Remove {t.name}"
+														on:click={() => removeTreatment(dog, t.id)}
+													>×</button>
+												</div>
+												{#if t.notes}
+													<p class="med-notes">{t.notes}</p>
+												{/if}
+											</div>
+										{/each}
 									</div>
-									{#if dog.treatmentNotes}
-										<p class="med-notes">{dog.treatmentNotes}</p>
-									{/if}
 								</div>
-								<button class="med-clear typewriter" type="button" on:click={() => clearTreatment(dog)}>Clear</button>
 							</div>
 						{/each}
 					{/if}
@@ -1002,6 +1020,55 @@
 		font-size: 0.72rem;
 		color: #526b81;
 		line-height: 1.35;
+	}
+
+	.med-tx-list {
+		display: grid;
+		gap: 0.26rem;
+		margin-top: 0.08rem;
+	}
+
+	.med-tx-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.08rem;
+		padding-bottom: 0.22rem;
+		border-bottom: 1px solid rgba(96, 109, 123, 0.12);
+	}
+
+	.med-tx-item:last-child {
+		padding-bottom: 0;
+		border-bottom: none;
+	}
+
+	.med-tx-line {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+
+	.med-tx-remove {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.1rem;
+		height: 1.1rem;
+		border-radius: 999px;
+		border: 1px solid rgba(96, 109, 123, 0.22);
+		background: rgba(255, 255, 255, 0.55);
+		color: #526b81;
+		font-size: 0.86rem;
+		line-height: 1;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.med-tx-remove:hover {
+		background: rgba(207, 75, 75, 0.1);
+		border-color: rgba(207, 75, 75, 0.35);
+		color: #a03232;
 	}
 
 	.med-clear {

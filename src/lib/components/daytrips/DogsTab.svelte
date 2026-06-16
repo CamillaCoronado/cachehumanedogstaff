@@ -43,7 +43,6 @@
 						</thead>
 						<tbody>
 							{#each dogStatsRows as dog}
-								{@const displayDays = daysSince(dog.lastDayTripDate)}
 								{@const sinceReturnDays = getDayTripGapDays(dog, now)}
 								{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
 								{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS}
@@ -60,8 +59,8 @@
 										<span class="dt-alltime-num">{allTime}</span>
 									</td>
 									<td class="td-muted">
-										{#if displayDays !== null}
-											{displayDays}d ago{#if overdue && eligibility.eligible && !dog.isOutOnDayTrip}&thinsp;<span class="dt-overdue-flag">overdue</span>{/if}
+										{#if sinceReturnDays !== null}
+											{sinceReturnDays}d ago{#if overdue && eligibility.eligible && !dog.isOutOnDayTrip}&thinsp;<span class="dt-overdue-flag">overdue</span>{/if}
 										{:else}
 											never
 										{/if}
