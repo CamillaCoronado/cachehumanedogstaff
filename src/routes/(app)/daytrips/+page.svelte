@@ -247,7 +247,8 @@
 			new Date(),
 			dog.dateOfBirth,
 			dog.vaccineCount,
-			dog.vaccinesOutstanding
+			dog.vaccinesOutstanding,
+			dog.dayTripPuppyOverride
 		);
 	}
 
@@ -291,6 +292,13 @@
 		// Always mark it manually managed so the sheet-color auto-clear won't undo it.
 		await updateDog(dog.id, { awaitingEvaluation: next, evaluationAutoCleared: true });
 		toast.success(next ? `${dog.name} marked awaiting evaluation.` : `${dog.name} cleared for evaluation.`);
+		await refresh();
+	}
+
+	async function togglePuppyOverride(dog: Dog) {
+		const next = !dog.dayTripPuppyOverride;
+		await updateDog(dog.id, { dayTripPuppyOverride: next });
+		toast.success(next ? `${dog.name} allowed on day trips early.` : `${dog.name} back to the 30-day puppy rule.`);
 		await refresh();
 	}
 
@@ -353,7 +361,7 @@
 		<!-- ───── BOARD ───── -->
 		{:else if activeTab === 'board'}
 			<BoardTab {dogsOut} {dogsEligible} {dogsIneligible}
-				{allTimeTripsCountByDog} {sheetColors} {getEligibility} {toggleOut} {toggleAwaitingEval} />
+				{allTimeTripsCountByDog} {sheetColors} {getEligibility} {toggleOut} {toggleAwaitingEval} {togglePuppyOverride} />
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}

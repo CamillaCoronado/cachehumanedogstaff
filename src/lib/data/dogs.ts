@@ -96,6 +96,7 @@ interface StoredDog {
 	dayTripManagerOnly?: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
+	dayTripPuppyOverride?: boolean;
 	dayTripNotes: string | null;
 	handlingLevel?: DogHandlingLevel;
 	inFoster: boolean;
@@ -366,6 +367,7 @@ function serializeDog(dog: Dog): StoredDog {
 		dayTripManagerOnly: dog.dayTripManagerOnly ?? false,
 		dayTripManagerOnlyReason: dog.dayTripManagerOnly ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
 		manualTripColor: dog.manualTripColor ?? null,
+		dayTripPuppyOverride: dog.dayTripPuppyOverride ?? false,
 		dayTripNotes: dog.dayTripNotes,
 		handlingLevel: dog.handlingLevel ?? 'volunteer',
 		inFoster: dog.inFoster ?? false,
@@ -514,6 +516,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		manualTripColor: (['green', 'yellow', 'red'].includes(stored.manualTripColor ?? '')
 			? (stored.manualTripColor as 'green' | 'yellow' | 'red')
 			: null),
+		dayTripPuppyOverride: stored.dayTripPuppyOverride ?? false,
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
 		handlingLevel: normalizedHandlingLevel,
 		inFoster: stored.inFoster ?? false,

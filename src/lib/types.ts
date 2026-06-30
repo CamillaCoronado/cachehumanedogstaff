@@ -100,6 +100,8 @@ export interface Dog {
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	/** Manager-set color override; takes precedence over the imported sheet color. */
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
+	/** Manager override letting an under-6-month puppy go on day trips before the 30-day gate. */
+	dayTripPuppyOverride?: boolean;
 	dayTripNotes: string | null;
 	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;

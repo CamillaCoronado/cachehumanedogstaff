@@ -116,7 +116,8 @@
 				today,
 				dog.dateOfBirth,
 				dog.vaccineCount,
-				dog.vaccinesOutstanding
+				dog.vaccinesOutstanding,
+				dog.dayTripPuppyOverride
 			)
 		: { eligible: false, status: 'ineligible' as const, reasons: [] };
 	$: dayTripBadgeClass =

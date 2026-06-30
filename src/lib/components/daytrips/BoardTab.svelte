@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Dog } from '$lib/types';
 	import type { DayTripEligibility } from '$lib/utils/dates';
-	import { daysSince, dogStripeColor, formatDateTime } from '$lib/utils/dates';
+	import { daysSince, dogStripeColor, formatDateTime, isUnderageForDayTrips } from '$lib/utils/dates';
 	import { getDayTripGapDays, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 
 	export let dogsOut: Dog[] = [];
@@ -12,6 +12,7 @@
 	export let getEligibility: (dog: Dog) => DayTripEligibility;
 	export let toggleOut: (dog: Dog) => Promise<void>;
 	export let toggleAwaitingEval: (dog: Dog) => Promise<void>;
+	export let togglePuppyOverride: (dog: Dog) => Promise<void>;
 
 	const now = new Date();
 
@@ -81,9 +82,16 @@
 									<button class="cal-caret" class:cal-caret-open={openEval[dog.id]} on:click={() => toggleEvalMenu(dog.id)} aria-label="More options" aria-expanded={Boolean(openEval[dog.id])}>⌄</button>
 								</div>
 								{#if openEval[dog.id]}
-									<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
-										{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
-									</button>
+									<div class="cal-eval-menu">
+										<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
+											{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
+										</button>
+										{#if isUnderageForDayTrips(dog)}
+											<button class="cal-eval" class:cal-eval-on={dog.dayTripPuppyOverride} on:click={() => togglePuppyOverride(dog)}>
+												{dog.dayTripPuppyOverride ? 'Remove early day-trip access' : 'Allow day trips (under 30d)'}
+											</button>
+										{/if}
+									</div>
 								{/if}
 							</div>
 						{/each}
@@ -109,9 +117,16 @@
 									<button class="cal-caret" class:cal-caret-open={openEval[dog.id]} on:click={() => toggleEvalMenu(dog.id)} aria-label="More options" aria-expanded={Boolean(openEval[dog.id])}>⌄</button>
 								</div>
 								{#if openEval[dog.id]}
-									<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
-										{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
-									</button>
+									<div class="cal-eval-menu">
+										<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
+											{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
+										</button>
+										{#if isUnderageForDayTrips(dog)}
+											<button class="cal-eval" class:cal-eval-on={dog.dayTripPuppyOverride} on:click={() => togglePuppyOverride(dog)}>
+												{dog.dayTripPuppyOverride ? 'Remove early day-trip access' : 'Allow day trips (under 30d)'}
+											</button>
+										{/if}
+									</div>
 								{/if}
 							</div>
 						{/each}
@@ -439,6 +454,15 @@
 		border-color: #d6b3ce;
 		background: #f6e9f3;
 		color: #933980;
+	}
+
+
+
+	.cal-eval-menu {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.3rem;
 	}
 
 

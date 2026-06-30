@@ -11,7 +11,8 @@ export function isDayTripEligible(dog: Dog, sheetColors: Record<string, string> 
 		dog.isolationStatus, dog.dayTripIneligibleReason, dog.dayTripManagerOnly,
 		dog.dayTripManagerOnlyReason, dog.dayTripNotes, dog.handlingLevel,
 		dog.surgeryDate, dog.surgeryRestDays, dog.awaitingEvaluation,
-		null, new Date(), dog.dateOfBirth, dog.vaccineCount, dog.vaccinesOutstanding
+		null, new Date(), dog.dateOfBirth, dog.vaccineCount, dog.vaccinesOutstanding,
+		dog.dayTripPuppyOverride
 	).eligible;
 }
 

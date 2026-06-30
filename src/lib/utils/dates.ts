@@ -152,7 +152,8 @@ export function checkDayTripEligibility(
 	today = new Date(),
 	dateOfBirth: DateValue | string | null | undefined = null,
 	vaccineCount: number | null | undefined = null,
-	vaccinesOutstanding: number | null | undefined = null
+	vaccinesOutstanding: number | null | undefined = null,
+	puppyDayTripOverride: boolean | null | undefined = null
 ): DayTripEligibility {
 	const reasons: string[] = [];
 	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
@@ -212,7 +213,10 @@ export function checkDayTripEligibility(
 	const isPuppy = dobDate !== null && differenceInMonths(today, dobDate) < PUPPY_MAX_AGE_MONTHS;
 	const intakeDateObj = toDate(intakeDate);
 	const daysWithUs = intakeDateObj ? differenceInDays(startOfDay(today), startOfDay(intakeDateObj)) : null;
-	const puppyTooNew = isPuppy && (daysWithUs === null || daysWithUs < PUPPY_MIN_DAYS_AT_SHELTER);
+	// 30-day rule is the default for under-6-month puppies, but a manager can override
+	// it per-dog (puppyDayTripOverride) to allow a specific young puppy out early.
+	const puppyTooNew =
+		isPuppy && (daysWithUs === null || daysWithUs < PUPPY_MIN_DAYS_AT_SHELTER) && !puppyDayTripOverride;
 	if (puppyTooNew) {
 		reasons.push(`Puppy — needs ${PUPPY_MIN_DAYS_AT_SHELTER}+ days at the shelter before day trips`);
 	}
@@ -280,6 +284,17 @@ export function checkDayTripEligibility(
 
 	void today;
 	return { eligible, status, reasons };
+}
+
+// Whether a dog falls under the puppy day-trip age/time gate (under 6 months AND with us
+// less than 30 days), ignoring any override. Used to decide whether to show the
+// "allow day trips" override action.
+export function isUnderageForDayTrips(dog: Dog, today = new Date()): boolean {
+	const dob = toDate(dog.dateOfBirth);
+	if (dob === null || differenceInMonths(today, dob) >= PUPPY_MAX_AGE_MONTHS) return false;
+	const intake = toDate(dog.intakeDate);
+	const daysWithUs = intake ? differenceInDays(startOfDay(today), startOfDay(intake)) : null;
+	return daysWithUs === null || daysWithUs < PUPPY_MIN_DAYS_AT_SHELTER;
 }
 
 export function dogStripeColor(

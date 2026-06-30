@@ -163,5 +163,10 @@ Reported by Camilla 2026-06-30 (day trips + ASM sync review).
   and the status pill so it shows ineligible, not a green pill.
 - Note: uses `intakeDate` for "time with us" (already passed into the function). If staff
   want re-entries to reset the clock, switch to `shelterSince ?? intakeDate` (would add one
-  param + the 4 call sites). Parameters (6 months / 30 days) are inline constants — pull into
-  named constants if they need tuning, and pin with a test.
+  param + the 4 call sites). Parameters are named constants `PUPPY_MAX_AGE_MONTHS` (6) /
+  `PUPPY_MIN_DAYS_AT_SHELTER` (30) in `src/lib/utils/dates.ts`.
+- **Override (2026-06-30):** the 30-day rule is the default, but a manager can allow a
+  specific under-30-day puppy out early via `dayTripPuppyOverride` (threaded through the data
+  layer; `checkDayTripEligibility` skips the puppy block when set). Surfaced on the board: the
+  per-card caret menu shows an "Allow day trips (under 30d)" toggle for underage dogs
+  (`isUnderageForDayTrips` in `src/lib/utils/dates.ts`).

@@ -272,7 +272,8 @@ const today = new Date();
 			today,
 			dog.dateOfBirth,
 			dog.vaccineCount,
-			dog.vaccinesOutstanding
+			dog.vaccinesOutstanding,
+			dog.dayTripPuppyOverride
 		);
 	}
 
