@@ -1,8 +1,9 @@
 <script lang="ts">
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
-	import { createDog, clearDayTripLogs, importHistoricalDayTrip, updateDog } from '$lib/data/dogs';
+	import { createDog, importHistoricalDayTrip, listDayTripLogs } from '$lib/data/dogs';
 	import { matchDogByName } from '$lib/utils/dogs';
+	import { toDate } from '$lib/utils/dates';
 	import type { Dog } from '$lib/types';
 
 	export let dogs: Dog[] = [];
@@ -41,6 +42,33 @@
 		willCreate: boolean;
 		asmStatus?: string;  // status found in ASM for unmatched dogs
 		overrideId?: string;
+		newCount?: number;       // sheet dates not yet logged for the resolved dog
+		existingCount?: number;  // sheet dates already logged (will be kept, not overwritten)
+	}
+
+	// How many of a row's sheet dates are new vs already logged for the resolved dog.
+	// A will-create / unmatched dog has no logs yet, so every date is new.
+	async function computeRowCounts(row: ImportPreviewRow): Promise<{ newCount: number; existingCount: number }> {
+		const effectiveDogId = row.overrideId || row.dogId;
+		if (!effectiveDogId) return { newCount: row.tripCount, existingCount: 0 };
+
+		const logs = await listDayTripLogs(effectiveDogId);
+		const existingDays = new Set(
+			logs.map((l) => toDate(l.startedAt)?.toDateString()).filter((d): d is string => Boolean(d))
+		);
+		let newCount = 0;
+		for (const dateStr of row.dates) {
+			const parts = dateStr.split('-').map(Number);
+			const day = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0).toDateString();
+			if (!existingDays.has(day)) newCount++;
+		}
+		return { newCount, existingCount: row.tripCount - newCount };
+	}
+
+	async function recomputeRow(i: number) {
+		const { newCount, existingCount } = await computeRowCounts(importPreview[i]);
+		importPreview[i] = { ...importPreview[i], newCount, existingCount };
+		importPreview = [...importPreview];
 	}
 
 	let importPreview: ImportPreviewRow[] = [];
@@ -90,118 +118,144 @@
 				}
 			})
 		);
+
+		// Compute new-vs-already-logged counts for every row (in parallel).
+		const counts = await Promise.all(importPreview.map((row) => computeRowCounts(row)));
+		importPreview = importPreview.map((row, i) => ({ ...row, ...counts[i] }));
 	}
 
 	async function runImport() {
+		console.log('[runImport] called, importDryRunDone=', importDryRunDone);
 		if (!importDryRunDone) return;
 		importing = true;
 		importLog = [];
 
 		let totalCreated = 0;
+		let totalExisting = 0;
 		let totalSkipped = 0;
-
-		const previewMap = Object.fromEntries(importPreview.map((r) => [r.sheetName, r]));
 		let totalNewDogs = 0;
 
-		for (const row of sheetData) {
-			const preview = previewMap[row.name];
-			const overrideDog = preview?.overrideId ? dogs.find((d) => d.id === preview.overrideId) : undefined;
-			let dog = overrideDog ?? matchDogByName(row.name, dogs);
+		try {
+			console.log('[runImport] starting try block, sheetData.length=', sheetData.length);
+			const previewMap = Object.fromEntries(importPreview.map((r) => [r.sheetName, r]));
 
-			if (!dog) {
-				// Create a minimal record flagged as adopted (not in system)
-				const newDog = await createDog({
-					name: row.name,
-					breed: '',
-					sex: 'unknown',
-					intakeDate: null,
-					originalIntakeDate: null,
-					reentryDates: [],
-					dateOfBirth: null,
-					weightLbs: null,
-					foodType: '',
-					foodAmount: '',
-					dietaryNotes: '',
-					origin: '',
-					pottyTrained: 'unknown',
-					goodWithDogs: 'unknown',
-					goodWithCats: 'unknown',
-					goodWithKids: 'unknown',
-					idealHome: '',
-					energyLevel: 'unknown',
-					outdoorKennelAssignment: '',
-					lastBathDate: null,
-					lastBathBy: null,
-					lastDayTripDate: null,
-					isOutOnDayTrip: false,
-					currentDayTripStartedAt: null,
-					surgeryDate: null,
-					surgeryRestDays: null,
-					lastSurgeryDate: null,
-					fortifloraDate: null,
-					fortifloraDays: null,
-					fortifloraTime: null,
-					isMicrochipped: false,
-					isFixed: false,
-					fixedDate: null,
-					isVaccinated: false,
-					vaccineCount: 0,
-					vaccinatedDate: null,
-					dayTripStatus: 'eligible',
-					dayTripManagerOnly: false,
-					dayTripNotes: null,
-					handlingLevel: 'volunteer',
-					inFoster: false,
-					isolationStatus: 'none',
-					isolationReason: null,
-					isolationUntilDate: null,
-					status: 'adopted',
-					hiddenComments: 'Auto-created during day trip import — not found in system'
-				});
-				if (!newDog) {
-					importLog = [...importLog, `⚠ Skipped "${row.name}" — could not create dog record`];
+			for (const row of sheetData) {
+				const preview = previewMap[row.name];
+				const overrideDog = preview?.overrideId ? dogs.find((d) => d.id === preview.overrideId) : undefined;
+				let dog = overrideDog ?? matchDogByName(row.name, dogs);
+
+				if (!dog) {
+					// Create a minimal record flagged as adopted (not in system)
+					const newDog = await createDog({
+						name: row.name,
+						breed: '',
+						sex: 'unknown',
+						intakeDate: null,
+						originalIntakeDate: null,
+						reentryDates: [],
+						dateOfBirth: null,
+						weightLbs: null,
+						foodType: '',
+						foodAmount: '',
+						dietaryNotes: '',
+						origin: '',
+						pottyTrained: 'unknown',
+						goodWithDogs: 'unknown',
+						goodWithCats: 'unknown',
+						goodWithKids: 'unknown',
+						idealHome: '',
+						energyLevel: 'unknown',
+						outdoorKennelAssignment: '',
+						lastBathDate: null,
+						lastBathBy: null,
+						lastDayTripDate: null,
+						isOutOnDayTrip: false,
+						currentDayTripStartedAt: null,
+						surgeryDate: null,
+						surgeryRestDays: null,
+						lastSurgeryDate: null,
+						fortifloraDate: null,
+						fortifloraDays: null,
+						fortifloraTime: null,
+						isMicrochipped: false,
+						isFixed: false,
+						fixedDate: null,
+						isVaccinated: false,
+						vaccineCount: 0,
+						vaccinatedDate: null,
+						dayTripStatus: 'eligible',
+						dayTripManagerOnly: false,
+						dayTripNotes: null,
+						handlingLevel: 'volunteer',
+						inFoster: false,
+						isolationStatus: 'none',
+						isolationReason: null,
+						isolationUntilDate: null,
+						status: 'adopted',
+						hiddenComments: 'Auto-created during day trip import — not found in system'
+					});
+					if (!newDog) {
+						importLog = [...importLog, `⚠ Skipped "${row.name}" — could not create dog record`];
+						totalSkipped++;
+						continue;
+					}
+					dog = newDog;
+					totalNewDogs++;
+					importLog = [...importLog, `+ Created "${row.name}" as adopted (not in system)`];
+				}
+
+				const sortedDates = [...row.dates].sort();
+				if (sortedDates.length === 0) {
+					importLog = [...importLog, `⚠ Skipped "${row.name}" — no valid dates`];
 					totalSkipped++;
 					continue;
 				}
-				dog = newDog;
-				totalNewDogs++;
-				importLog = [...importLog, `+ Created "${row.name}" as adopted (not in system)`];
+
+				// Additive import: only add dates that don't already have a log.
+				// Never wipe — preserve manually logged trips, notes, and ratings.
+				// (importHistoricalDayTrip recomputes lastDayTripDate from all logs.)
+				const existingLogs = await listDayTripLogs(dog.id);
+				const existingDays = new Set(
+					existingLogs
+						.map((l) => toDate(l.startedAt)?.toDateString())
+						.filter((d): d is string => Boolean(d))
+				);
+
+				const added: string[] = [];
+				for (const dateStr of sortedDates) {
+					const parts = dateStr.split('-').map(Number);
+					const tripDate = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0);
+					if (existingDays.has(tripDate.toDateString())) continue; // already logged — leave it
+					await importHistoricalDayTrip(dog.id, tripDate, $authProfile);
+					added.push(dateStr);
+					totalCreated++;
+				}
+
+				const skippedExisting = sortedDates.length - added.length;
+				totalExisting += skippedExisting;
+				if (added.length === 0) {
+					importLog = [...importLog, `• ${dog.name} — no new trips (${sortedDates.length} already logged)`];
+				} else {
+					importLog = [...importLog, `✓ ${dog.name} — ${added.length} new trip${added.length === 1 ? '' : 's'} added${skippedExisting ? `, ${skippedExisting} already logged` : ''} (${added.join(', ')})`];
+				}
 			}
 
-			const sortedDates = [...row.dates].sort();
-			if (sortedDates.length === 0) {
-				importLog = [...importLog, `⚠ Skipped "${row.name}" — no valid dates`];
-				totalSkipped++;
-				continue;
-			}
-
-			// Wipe existing logs — spreadsheet is source of truth
-			await clearDayTripLogs(dog.id);
-
-			for (const dateStr of sortedDates) {
-				const parts = dateStr.split('-').map(Number);
-				const tripDate = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0);
-				await importHistoricalDayTrip(dog.id, tripDate, $authProfile);
-				totalCreated++;
-			}
-
-			// Update lastDayTripDate to the most recent imported date
-			const lastDateStr = sortedDates[sortedDates.length - 1];
-			const lp = lastDateStr.split('-').map(Number);
-			const lastDate = new Date(lp[0], lp[1] - 1, lp[2], 0, 0, 0);
-			await updateDog(dog.id, {
-				lastDayTripDate: lastDate,
-				isOutOnDayTrip: false,
-				currentDayTripStartedAt: null
-			});
-
-			importLog = [...importLog, `✓ ${dog.name} — ${row.dates.length} trip${row.dates.length === 1 ? '' : 's'} imported (${sortedDates.join(', ')})`];
+			console.log('[runImport] loop done, totalCreated=', totalCreated, 'totalExisting=', totalExisting, 'totalSkipped=', totalSkipped, 'totalNewDogs=', totalNewDogs);
+			importLog = [...importLog, ``, `Done: ${totalCreated} new trips added, ${totalExisting} already logged (kept), ${totalNewDogs} new dogs added, ${totalSkipped} skipped.`];
+			importDone = true;
+			console.log('[runImport] importDone set to true, calling toast + refresh');
+			toast.success(`Import complete: ${totalCreated} new trips, ${totalNewDogs} new dogs.`);
+			await refresh();
+			console.log('[runImport] refresh done');
+		} catch (e) {
+			console.error('[runImport] caught error:', e);
+			const msg = e instanceof Error ? e.message : String(e);
+			importLog = [...importLog, ``, `✗ Import failed: ${msg}`];
+			toast.error(`Import failed: ${msg}`);
+		} finally {
+			console.log('[runImport] finally block, setting importing=false');
+			importing = false;
 		}
-
-		importLog = [...importLog, ``, `Done: ${totalCreated} trips created, ${totalNewDogs} new dogs added, ${totalSkipped} skipped.`];
-		importing = false;
-		importDone = true;
-		await refresh();
 	}
 
 </script>
@@ -247,6 +301,7 @@
 										<th>Spreadsheet Name</th>
 										<th>Matched Dog</th>
 										<th class="th-center">Trips</th>
+										<th class="th-center">New</th>
 										<th>Dates</th>
 									</tr>
 								</thead>
@@ -263,7 +318,7 @@
 													<span class="dt-import-create typewriter">will create{row.asmStatus ? ` · ASM: ${row.asmStatus}` : ''}</span>
 													<select class="dt-import-override"
 														bind:value={importPreview[i].overrideId}
-														on:change={() => importPreview = [...importPreview]}>
+														on:change={() => recomputeRow(i)}>
 														<option value="">— create new —</option>
 														{#each dogs.slice().sort((a,b) => a.name.localeCompare(b.name)) as dog}
 															<option value={dog.id}>{dog.name}{dog.status !== 'active' ? ` (${dog.status})` : ''}</option>
@@ -274,6 +329,17 @@
 												{/if}
 											</td>
 											<td class="td-center typewriter">{isResolved ? row.tripCount : '—'}</td>
+											<td class="td-center typewriter">
+												{#if !isResolved}
+													—
+												{:else if row.newCount === undefined}
+													…
+												{:else if row.newCount === 0}
+													<span class="dt-import-allold">none</span>
+												{:else}
+													<span class="dt-import-new">{row.newCount}</span>
+												{/if}
+											</td>
 											<td class="dt-import-dates typewriter">
 												{#if isResolved}
 													{row.dates.map(d => d.replace(/^\d{4}-0?/, '')).join(', ')}
@@ -289,6 +355,7 @@
 										<td class="td-foot-label typewriter">Total</td>
 										<td class="td-foot-label typewriter">{importPreview.filter(r => r.matched).length} matched</td>
 										<td class="td-center typewriter">{importPreview.filter(r => r.matched).reduce((s, r) => s + r.tripCount, 0)}</td>
+										<td class="td-center typewriter"><span class="dt-import-new">{importPreview.reduce((s, r) => s + (r.newCount ?? 0), 0)} new</span></td>
 										<td></td>
 									</tr>
 								</tfoot>
@@ -536,6 +603,25 @@
 
 
 	.dt-import-dates { font-size: 0.72rem; color: #5f6368; }
+
+
+
+	.dt-import-new {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.4rem;
+		padding: 0.05rem 0.4rem;
+		border-radius: 999px;
+		background: #e6f4ea;
+		color: #1e7e34;
+		font-size: 0.74rem;
+		font-weight: 700;
+	}
+
+
+
+	.dt-import-allold { font-size: 0.74rem; color: #9aa0a6; }
 
 
 

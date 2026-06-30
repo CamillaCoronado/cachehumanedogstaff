@@ -20,6 +20,10 @@ export function canEditDayTrips(role: UserRole | null | undefined) {
 	return role === 'admin' || role === 'coordinator';
 }
 
+export function canSetDayTripColor(role: UserRole | null | undefined) {
+	return role === 'admin' || role === 'manager';
+}
+
 export function canAccessVolunteers(role: UserRole | null | undefined) {
 	return role === 'admin' || role === 'manager' || role === 'coordinator';
 }

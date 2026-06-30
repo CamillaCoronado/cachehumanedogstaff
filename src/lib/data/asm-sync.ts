@@ -98,6 +98,7 @@ interface AsmAnimal {
 	NEUTEREDDATE: string | null;
 	// Vaccinations
 	VACCGIVENCOUNT: number;
+	VACCOUTSTANDINGCOUNT: number;
 	VACCRABIESDATE: string | null;
 	// Compatibility: 0 = yes, 1 = no, 2 = unknown
 	ISGOODWITHDOGS: number;
@@ -204,6 +205,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		fixedDate: normalizeDateStr(animal.NEUTEREDDATE),
 		isVaccinated: (animal.VACCGIVENCOUNT ?? 0) > 0,
 		vaccineCount: animal.VACCGIVENCOUNT ?? 0,
+		vaccinesOutstanding: animal.VACCOUTSTANDINGCOUNT ?? 0,
 		vaccinatedDate: normalizeDateStr(animal.VACCRABIESDATE),
 		weightLbs: typeof animal.WEIGHT === 'number' && animal.WEIGHT > 0 ? animal.WEIGHT : null,
 		dateOfBirth: normalizeDateStr(animal.DATEOFBIRTH),
@@ -350,7 +352,7 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		} else {
 			// Compare ASM-sourced fields only (exclude _lastSyncedAt — it always changes)
 			const { _lastSyncedAt: _ignored, ...comparable } = asmToStoredFields(animal, now);
-			const DATE_FIELDS = new Set(['dateOfBirth', 'intakeDate', 'originalIntakeDate', 'microchipDate', 'fixedDate', 'vaccinatedDate']);
+			const DATE_FIELDS = new Set(['dateOfBirth', 'intakeDate', 'originalIntakeDate', 'microchipDate', 'fixedDate', 'vaccinatedDate', 'inFosterSince']);
 			const changedFields = (Object.entries(comparable) as [string, unknown][])
 				.filter(([k, v]) => {
 					const stored = existing[k];

@@ -4,8 +4,8 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
-	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, resolveRole } from '$lib/utils/permissions';
-	import { listDogs, startDayTrip, endDayTrip, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog, importedTripId } from '$lib/data/dogs';
+	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, canSetDayTripColor, resolveRole } from '$lib/utils/permissions';
+	import { listDogs, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog, importedTripId } from '$lib/data/dogs';
 	import { listVolunteers } from '$lib/data/volunteers';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
@@ -13,11 +13,12 @@
 	import LogTab from '$lib/components/daytrips/LogTab.svelte';
 	import BoardTab from '$lib/components/daytrips/BoardTab.svelte';
 	import DogsTab from '$lib/components/daytrips/DogsTab.svelte';
+	import ColorsTab from '$lib/components/daytrips/ColorsTab.svelte';
 	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 	import { getDayTripGapDays, isDayTripEligible, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { durationHours, formatDuration, formatTime, formatShortDate } from '$lib/utils/daytrips';
 	import { matchDogByName } from '$lib/utils/dogs';
-	import { parseDayTripNotes, stripDayTripNotes, type ParsedTrip } from '$lib/utils/tripNotesParser';
+	import { parseDayTripNotes } from '$lib/utils/tripNotesParser';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -28,12 +29,22 @@
 	let loading = true;
 	let monthFilter = defaultMonth;
 	let loaded = false;
-	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'import' = 'board';
+	let activeTab: 'board' | 'log' | 'dogs' | 'stats' | 'colors' | 'import' = 'board';
 	let boardColorFilter: 'green' | 'yellow' | null = null;
 
 	let volunteers: Volunteer[] = [];
 	async function autoImportFromHiddenNotes() {
-		const dogsWithNotes = dogs.filter(d => !d.permanentFoster && /day trip notes/i.test(d.hiddenComments ?? ''));
+		// Only sync real, in-shelter dogs, and only when an actual dated note block
+		// is present — a loose "day trip notes" mention (no date) would otherwise be
+		// re-selected on every sync and never clear.
+		const dogsWithNotes = dogs.filter(
+			(d) =>
+				d.status === 'active' &&
+				!d.permanentFoster &&
+				!d.inFoster &&
+				!d.isIncoming &&
+				/Day Trip Notes\s+\d{1,2}\/\d{1,2}\s*:/i.test(d.hiddenComments ?? '')
+		);
 		if (dogsWithNotes.length === 0) return;
 
 		let totalNew = 0;
@@ -88,11 +99,13 @@
 					}
 				}
 
-				// Strip processed notes from hiddenComments
-				const stripped = stripDayTripNotes(dog.hiddenComments!);
-				if (stripped !== dog.hiddenComments) {
-					await updateDog(dog.id, { hiddenComments: stripped });
-				}
+				// NOTE: we intentionally do NOT strip the notes out of hiddenComments
+				// here. ASM owns hiddenComments and re-pushes the full ASM value
+				// (notes included) on every sync, so persisting a stripped copy just
+				// created an endless write-fight (every ASM sync re-flagged "Hidden
+				// comments changed") and could destroy not-yet-logged recent notes.
+				// Trip logging above is idempotent (importedTripId) and patch-guarded,
+				// and the dog detail page strips the notes for display only.
 			}
 		} catch (e) {
 			console.error('[autoImport] error:', e);
@@ -129,6 +142,7 @@
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
 	$: canEditDayTrips = checkCanEditDayTrips($authProfile?.role);
+	$: canSetColors = canSetDayTripColor($authProfile?.role);
 
 	$: monthStart = (() => {
 		const [year, month] = monthFilter.split('-').map(Number);
@@ -166,22 +180,14 @@
 		return acc;
 	}, {});
 
-	$: openTripByDog = logs.reduce<Record<string, DayTripLog>>((acc, log) => {
-		if (log.endedAt) return acc;
-		const existing = acc[log.dogId];
-		const logStart = toDate(log.startedAt)?.getTime() ?? 0;
-		const existingStart = toDate(existing?.startedAt)?.getTime() ?? 0;
-		if (!existing || logStart > existingStart) {
-			acc[log.dogId] = log;
-		}
-		return acc;
-	}, {});
-
+	// Out-status is purely visual (the isOutOnDayTrip flag + currentDayTripStartedAt set by
+	// the Send Out / Mark Returned toggle). It is never derived from trip logs — completed
+	// trips come only from the log form.
 	$: dogsOut = activeDogs
 		.filter((d) => d.isOutOnDayTrip)
 		.sort((a, b) => {
-			const aStart = toDate(openTripByDog[a.id]?.startedAt ?? a.currentDayTripStartedAt)?.getTime() ?? 0;
-			const bStart = toDate(openTripByDog[b.id]?.startedAt ?? b.currentDayTripStartedAt)?.getTime() ?? 0;
+			const aStart = toDate(a.currentDayTripStartedAt)?.getTime() ?? 0;
+			const bStart = toDate(b.currentDayTripStartedAt)?.getTime() ?? 0;
 			return aStart - bStart;
 		});
 
@@ -238,7 +244,10 @@
 			dog.surgeryRestDays,
 			dog.awaitingEvaluation,
 			role,
-			new Date()
+			new Date(),
+			dog.dateOfBirth,
+			dog.vaccineCount,
+			dog.vaccinesOutstanding
 		);
 	}
 
@@ -256,14 +265,17 @@
 			sheetColors = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
 			dogs = dogRows;
 
+			// Auto-clear awaitingEvaluation once, the first time a dog appears on the DT
+			// Numbers sheet with a color. `evaluationAutoCleared` guards it so a later
+			// MANUAL re-check of awaitingEvaluation is respected and not cleared again.
 			const evaluated = dogRows.filter((d) => {
-				if (!d.awaitingEvaluation) return false;
+				if (!d.awaitingEvaluation || d.evaluationAutoCleared) return false;
 				const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
 				return Boolean(colorsRes[key]);
 			});
 			if (evaluated.length > 0) {
-				await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false })));
-				dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false } : d);
+				await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true })));
+				dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false, evaluationAutoCleared: true } : d);
 			}
 		} catch (error) {
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
@@ -272,6 +284,14 @@
 			loading = false;
 		}
 		void autoImportFromHiddenNotes();
+	}
+
+	async function toggleAwaitingEval(dog: Dog) {
+		const next = !dog.awaitingEvaluation;
+		// Always mark it manually managed so the sheet-color auto-clear won't undo it.
+		await updateDog(dog.id, { awaitingEvaluation: next, evaluationAutoCleared: true });
+		toast.success(next ? `${dog.name} marked awaiting evaluation.` : `${dog.name} cleared for evaluation.`);
+		await refresh();
 	}
 
 	async function toggleOut(dog: Dog) {
@@ -323,6 +343,7 @@
 			{#if canEditDayTrips}<button class="dt-tab" class:dt-tab-active={activeTab === 'log'} on:click={() => activeTab = 'log'}>Log</button>{/if}
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'dogs'} on:click={() => activeTab = 'dogs'}>Dogs</button>
 			<button class="dt-tab" class:dt-tab-active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
+			{#if canSetColors}<button class="dt-tab" class:dt-tab-active={activeTab === 'colors'} on:click={() => activeTab = 'colors'}>Colors</button>{/if}
 			{#if canEditDayTrips}<button class="dt-tab" class:dt-tab-active={activeTab === 'import'} on:click={() => activeTab = 'import'}>Import</button>{/if}
 		</nav>
 
@@ -331,8 +352,8 @@
 
 		<!-- ───── BOARD ───── -->
 		{:else if activeTab === 'board'}
-			<BoardTab {dogsOut} {dogsEligible} {dogsIneligible} {openTripByDog}
-				{allTimeTripsCountByDog} {sheetColors} {getEligibility} {toggleOut} />
+			<BoardTab {dogsOut} {dogsEligible} {dogsIneligible}
+				{allTimeTripsCountByDog} {sheetColors} {getEligibility} {toggleOut} {toggleAwaitingEval} />
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}
@@ -351,6 +372,10 @@
 		{:then mod}
 			<svelte:component this={mod.default} {logs} {dogs} {activeDogs} />
 		{/await}
+
+		<!-- ───── COLORS ───── -->
+		{:else if activeTab === 'colors' && canSetColors}
+			<ColorsTab dogs={activeDogs} {sheetColors} {refresh} />
 
 		<!-- ───── IMPORT ───── -->
 		{:else if activeTab === 'import'}
@@ -419,6 +444,12 @@
 	.dt-shell {
 		display: grid;
 		gap: 0;
+	}
+
+	/* Grid children must be allowed to shrink, or wide content (e.g. the log table)
+	   forces the column past the viewport and overflow:hidden clips it instead of scrolling. */
+	.dt-shell > * {
+		min-width: 0;
 	}
 
 

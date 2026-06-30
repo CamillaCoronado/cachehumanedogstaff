@@ -11,6 +11,7 @@
 	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getBathStatus, isBathDue, getDayTripGapDays, isPlaygroupEligible, buildLastPlaygroupMap, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
+	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
@@ -36,8 +37,8 @@
 const today = new Date();
 
 	let dogs: Dog[] = [];
-	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	let failedPhotos = new Set<string>();
+	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
 	let loading = true;
 	let search = '';
@@ -210,15 +211,17 @@ const today = new Date();
 		lastPlaygroupByDogId = buildLastPlaygroupMap(playgroupRows);
 		loading = false;
 
-		// Auto-clear awaitingEvaluation for dogs that appear on the DT Numbers sheet (any color).
+		// Auto-clear awaitingEvaluation once, the first time a dog appears on the DT Numbers
+		// sheet (any color). `evaluationAutoCleared` guards it so a later MANUAL re-check of
+		// awaitingEvaluation is respected and not cleared again.
 		const evaluated = dogRows.filter((d) => {
-			if (!d.awaitingEvaluation) return false;
+			if (!d.awaitingEvaluation || d.evaluationAutoCleared) return false;
 			const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
 			return Boolean((colorsRes as Record<string, string>)[key]);
 		});
 		if (evaluated.length > 0) {
-			await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false })));
-			dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false } : d);
+			await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true })));
+			dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false, evaluationAutoCleared: true } : d);
 		}
 	}
 
@@ -266,7 +269,10 @@ const today = new Date();
 			dog.surgeryRestDays,
 			dog.awaitingEvaluation,
 			role,
-			today
+			today,
+			dog.dateOfBirth,
+			dog.vaccineCount,
+			dog.vaccinesOutstanding
 		);
 	}
 
@@ -540,7 +546,7 @@ const today = new Date();
 													class="card-photo-img"
 													src={dog.photoUrl}
 													alt=""
-													on:error={() => { failedPhotos = new Set([...failedPhotos, dog.id]); }}
+													use:retryablePhoto={{ src: dog.photoUrl, context: 'dogs-list', dogId: dog.id, onFail: () => { failedPhotos = new Set([...failedPhotos, dog.id]); } }}
 												/>
 											{:else}
 												<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>

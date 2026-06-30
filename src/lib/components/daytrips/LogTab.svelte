@@ -120,6 +120,37 @@
 				{#if visibleLogs.length === 0}
 					<p class="dt-panel-empty">No completed trips logged{showAllLogs ? '.' : ` for ${monthLabel}.`}</p>
 				{:else}
+					<!-- Mobile: stacked cards (no horizontal scroll) -->
+					<ul class="dt-trip-cards">
+						{#each visibleLogs as log}
+							{@const startDate = toDate(log.startedAt)}
+							{@const endDate = toDate(log.endedAt)}
+							{@const dog = dogs.find(d => d.id === log.dogId)}
+							<li class="dt-trip-card" class:deleting={deletingTripId === log.id}>
+								<div class="dt-card-top">
+									{#if dog}
+										<a href="/dogs/{dog.id}" class="dt-name-link dt-card-name">{dog.name}</a>
+									{:else}
+										<span class="dt-card-name td-muted">Unknown</span>
+									{/if}
+									<span class="dt-card-date">{formatShortDate(startDate)}</span>
+									<button class="dt-delete-btn" on:click={() => handleDeleteTrip(log)} disabled={deletingTripId === log.id} title="Delete trip">✕</button>
+								</div>
+								<div class="dt-card-meta">
+									<span>{formatTime(startDate)} → {formatTime(endDate)}</span>
+									<span class="dt-card-dot">·</span>
+									<span class="td-strong">{formatDuration(durationHours(log))}</span>
+									<span class="dt-card-dot">·</span>
+									<span>{log.volunteerName || 'No volunteer'}</span>
+								</div>
+								{#if log.tripNotes?.trim()}
+									<p class="dt-card-notes">{log.tripNotes.trim()}</p>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+
+					<!-- Desktop: table -->
 					<div class="dt-table-wrap">
 						<table class="dt-table">
 							<thead>
@@ -201,6 +232,7 @@
 		padding: 1rem;
 		display: grid;
 		gap: 0.8rem;
+		min-width: 0;
 	}
 
 
@@ -210,6 +242,11 @@
 		align-items: flex-start;
 		justify-content: space-between;
 		gap: 0.5rem;
+	}
+
+	/* Let the title block shrink so the controls don't force the panel wider than the screen */
+	.dt-panel-head > div {
+		min-width: 0;
 	}
 
 
@@ -354,10 +391,86 @@
 
 
 	/* ── Table ── */
+	/* Table hidden on mobile — cards used instead */
 	.dt-table-wrap {
+		display: none;
+		min-width: 0;
+		max-width: 100%;
 		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
 		border: 1px solid #dadce0;
 		border-radius: 6px;
+	}
+
+	/* ── Mobile trip cards ── */
+	.dt-trip-cards {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.dt-trip-card {
+		border: 1px solid #e4e6e9;
+		border-radius: 8px;
+		padding: 0.6rem 0.7rem;
+		background: #fff;
+	}
+
+	.dt-trip-card.deleting {
+		opacity: 0.4;
+		pointer-events: none;
+	}
+
+	.dt-card-top {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
+
+	.dt-card-name {
+		font-weight: 700;
+		font-size: 0.95rem;
+		color: #202124;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dt-card-date {
+		margin-left: auto;
+		font-size: 0.75rem;
+		color: #5f6368;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.dt-card-top .dt-delete-btn {
+		flex-shrink: 0;
+	}
+
+	.dt-card-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.3rem;
+		margin-top: 0.3rem;
+		font-size: 0.8rem;
+		color: #5f6368;
+	}
+
+	.dt-card-dot {
+		color: #bdc1c6;
+	}
+
+	.dt-card-notes {
+		margin: 0.4rem 0 0;
+		font-size: 0.8rem;
+		font-style: italic;
+		color: #5f6368;
+		line-height: 1.4;
 	}
 
 
@@ -513,5 +626,7 @@
 
 	@media (min-width: 768px) {
 		.dt-panel { padding: 1.2rem; }
+		.dt-trip-cards { display: none; }
+		.dt-table-wrap { display: block; }
 	}
 </style>

@@ -129,6 +129,11 @@ export interface DayTripEligibility {
 	reasons: string[];
 }
 
+// Puppy day-trip gate: a dog under PUPPY_MAX_AGE_MONTHS old is not day-trip eligible
+// until it has been at the shelter at least PUPPY_MIN_DAYS_AT_SHELTER days.
+export const PUPPY_MAX_AGE_MONTHS = 6;
+export const PUPPY_MIN_DAYS_AT_SHELTER = 30;
+
 export function checkDayTripEligibility(
 	intakeDate: DateValue | string | null | undefined,
 	isVaccinated: boolean,
@@ -144,7 +149,10 @@ export function checkDayTripEligibility(
 	surgeryRestDays: number | null | undefined,
 	awaitingEvaluation: boolean | null | undefined = null,
 	actorRole: UserRole | null | undefined = null,
-	today = new Date()
+	today = new Date(),
+	dateOfBirth: DateValue | string | null | undefined = null,
+	vaccineCount: number | null | undefined = null,
+	vaccinesOutstanding: number | null | undefined = null
 ): DayTripEligibility {
 	const reasons: string[] = [];
 	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
@@ -189,6 +197,26 @@ export function checkDayTripEligibility(
 		reasons.push('Must be vaccinated');
 	}
 
+	// A dog with vaccines on record but still-outstanding (overdue/scheduled) shots in
+	// ASM isn't fully covered yet — block day trips until the outstanding count is 0.
+	// (Replaces the old "given count" heuristic, which inflated with non-core vaccines.)
+	const hasOutstandingVaccines = isVaccinated && (vaccinesOutstanding ?? 0) > 0;
+	if (hasOutstandingVaccines) {
+		reasons.push('Vaccinations due');
+	}
+
+	// Puppies (under 6 months) are not day-trip eligible until they've been with us a
+	// while (30+ days). If we can't tell how long they've been here, stay conservative
+	// and block. Older dogs are unaffected.
+	const dobDate = toDate(dateOfBirth);
+	const isPuppy = dobDate !== null && differenceInMonths(today, dobDate) < PUPPY_MAX_AGE_MONTHS;
+	const intakeDateObj = toDate(intakeDate);
+	const daysWithUs = intakeDateObj ? differenceInDays(startOfDay(today), startOfDay(intakeDateObj)) : null;
+	const puppyTooNew = isPuppy && (daysWithUs === null || daysWithUs < PUPPY_MIN_DAYS_AT_SHELTER);
+	if (puppyTooNew) {
+		reasons.push(`Puppy — needs ${PUPPY_MIN_DAYS_AT_SHELTER}+ days at the shelter before day trips`);
+	}
+
 	if (!isFixed) {
 		reasons.push('Must be spayed/neutered');
 	}
@@ -225,14 +253,16 @@ export function checkDayTripEligibility(
 		reasons.push(hasTripReason ? `Difficult: ${trimmedTripNotes}` : 'Difficult dog - adults only');
 	}
 
-	void intakeDate;
-	const blockedByRequirements = !isVaccinated || !isFixed;
+	void vaccineCount;
+	const blockedByRequirements = !isVaccinated || !isFixed || hasOutstandingVaccines;
 	const blockedByStatus =
-		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay || Boolean(awaitingEvaluation);
+		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay || Boolean(awaitingEvaluation) || puppyTooNew;
 	const eligible = !(blockedByRequirements || blockedByStatus);
 
 	let status: DayTripStatus = 'ineligible';
 	if (awaitingEvaluation) {
+		status = 'ineligible';
+	} else if (puppyTooNew) {
 		status = 'ineligible';
 	} else if (isolationStatus !== 'none') {
 		status = 'ineligible';
@@ -256,6 +286,8 @@ export function dogStripeColor(
 	dog: Dog,
 	sheetColors?: Record<string, 'green' | 'yellow' | 'red'>
 ): 'green' | 'yellow' | 'red' {
+	// Manager-set override wins over everything else.
+	if (dog.manualTripColor) return dog.manualTripColor;
 	if (sheetColors) {
 		const name = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
 		const sheetColor = sheetColors[name];

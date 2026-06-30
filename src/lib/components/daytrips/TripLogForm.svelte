@@ -113,7 +113,9 @@
 		submitting = true;
 		try {
 			const startedAt = buildDateTime(date, timeOut) ?? new Date();
-			const endedAt = timeBack ? buildDateTime(date, timeBack) : null;
+			// Always a completed log — out-status is tracked separately by the visual toggle,
+			// so a trip log is never left "open". No time back → end equals start.
+			const endedAt = (timeBack ? buildDateTime(date, timeBack) : null) ?? startedAt;
 			await logManualTrip(dogId, {
 				startedAt,
 				endedAt,

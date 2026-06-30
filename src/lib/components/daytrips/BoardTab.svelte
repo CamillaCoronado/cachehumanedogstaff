@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DayTripLog, Dog } from '$lib/types';
+	import type { Dog } from '$lib/types';
 	import type { DayTripEligibility } from '$lib/utils/dates';
 	import { daysSince, dogStripeColor, formatDateTime } from '$lib/utils/dates';
 	import { getDayTripGapDays, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
@@ -7,15 +7,17 @@
 	export let dogsOut: Dog[] = [];
 	export let dogsEligible: Dog[] = [];
 	export let dogsIneligible: Dog[] = [];
-	export let openTripByDog: Record<string, DayTripLog> = {};
 	export let allTimeTripsCountByDog: Record<string, number> = {};
 	export let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	export let getEligibility: (dog: Dog) => DayTripEligibility;
 	export let toggleOut: (dog: Dog) => Promise<void>;
+	export let toggleAwaitingEval: (dog: Dog) => Promise<void>;
 
 	const now = new Date();
 
 	let boardColorFilter: 'green' | 'yellow' | null = null;
+	let openEval: Record<string, boolean> = {};
+	const toggleEvalMenu = (id: string) => (openEval = { ...openEval, [id]: !openEval[id] });
 </script>
 
 			<div class="cal-filters">
@@ -35,12 +37,11 @@
 						<p class="cal-empty">None out right now</p>
 					{:else}
 						{#each dogsOut as dog}
-							{@const openTrip = openTripByDog[dog.id]}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event cal-event-blue">
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'}</p>
-								<p class="cal-event-meta">Out since {formatDateTime(openTrip?.startedAt ?? dog.currentDayTripStartedAt)}</p>
+								<p class="cal-event-meta">Out since {formatDateTime(dog.currentDayTripStartedAt)}</p>
 								<p class="cal-event-count">{allTime} total trip{allTime !== 1 ? 's' : ''}</p>
 								<button class="cal-btn cal-btn-blue" on:click={() => toggleOut(dog)}>Mark Returned</button>
 							</div>
@@ -75,7 +76,15 @@
 								{#if eligibility.reasons.length > 0}
 									<p class="cal-event-warning">{eligibility.reasons[0]}</p>
 								{/if}
-								<button class="cal-btn cal-btn-green" on:click={() => toggleOut(dog)}>Send Out</button>
+								<div class="cal-event-actions">
+									<button class="cal-btn cal-btn-green" on:click={() => toggleOut(dog)}>Send Out</button>
+									<button class="cal-caret" class:cal-caret-open={openEval[dog.id]} on:click={() => toggleEvalMenu(dog.id)} aria-label="More options" aria-expanded={Boolean(openEval[dog.id])}>⌄</button>
+								</div>
+								{#if openEval[dog.id]}
+									<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
+										{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
+									</button>
+								{/if}
 							</div>
 						{/each}
 					{/if}
@@ -95,7 +104,15 @@
 							{@const stripe = dogStripeColor(dog, sheetColors)}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
-								<p class="cal-event-meta">{eligibility.reasons[0] ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
+								<div class="cal-event-actions">
+									<p class="cal-event-meta cal-event-meta-grow">{eligibility.reasons[0] ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
+									<button class="cal-caret" class:cal-caret-open={openEval[dog.id]} on:click={() => toggleEvalMenu(dog.id)} aria-label="More options" aria-expanded={Boolean(openEval[dog.id])}>⌄</button>
+								</div>
+								{#if openEval[dog.id]}
+									<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
+										{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
+									</button>
+								{/if}
 							</div>
 						{/each}
 					{/if}
@@ -354,6 +371,75 @@
 
 
 	.cal-btn-blue:hover  { background: #d2e3fc; }
+
+
+
+	.cal-event-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-top: 0.3rem;
+	}
+
+
+
+	.cal-event-meta-grow { flex: 1; margin: 0; }
+
+
+
+	.cal-caret {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.5rem;
+		height: 1.5rem;
+		padding: 0;
+		border-radius: 4px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.8rem;
+		line-height: 1;
+		color: #5f6368;
+		cursor: pointer;
+		transition: transform 0.12s;
+	}
+
+
+
+	.cal-caret:hover { background: #f8f9fa; }
+
+
+
+	.cal-caret-open { transform: rotate(180deg); }
+
+
+
+	.cal-eval {
+		align-self: flex-start;
+		margin-top: 0.4rem;
+		padding: 0.28rem 0.6rem;
+		border-radius: 4px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: #5f6368;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+
+
+	.cal-eval:hover { background: #f8f9fa; }
+
+
+
+	.cal-eval-on {
+		border-color: #d6b3ce;
+		background: #f6e9f3;
+		color: #933980;
+	}
 
 
 

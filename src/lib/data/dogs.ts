@@ -88,12 +88,14 @@ interface StoredDog {
 	fixedDate: string | null;
 	isVaccinated: boolean;
 	vaccineCount?: number;
+	vaccinesOutstanding?: number;
 	vaccinatedDate: string | null;
 	allergyTypes?: string[];
 	dayTripStatus: 'ineligible' | 'difficult' | 'eligible';
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
 	dayTripManagerOnly?: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
+	manualTripColor?: 'green' | 'yellow' | 'red' | null;
 	dayTripNotes: string | null;
 	handlingLevel?: DogHandlingLevel;
 	inFoster: boolean;
@@ -101,6 +103,7 @@ interface StoredDog {
 	shelterSince?: string | null;
 	playgroupReadyDate?: string | null;
 	awaitingEvaluation?: boolean;
+	evaluationAutoCleared?: boolean;
 	asmId?: number | null;
 	asmShelterCode?: string;
 	isIncoming?: boolean;
@@ -355,12 +358,14 @@ function serializeDog(dog: Dog): StoredDog {
 		fixedDate: toDateString(dog.fixedDate),
 		isVaccinated: dog.isVaccinated,
 		vaccineCount: dog.vaccineCount,
+		vaccinesOutstanding: dog.vaccinesOutstanding ?? 0,
 		vaccinatedDate: toDateString(dog.vaccinatedDate),
 		allergyTypes: dog.allergyTypes ?? [],
 		dayTripStatus: dog.dayTripStatus,
 		dayTripIneligibleReason: dog.dayTripIneligibleReason ?? null,
 		dayTripManagerOnly: dog.dayTripManagerOnly ?? false,
 		dayTripManagerOnlyReason: dog.dayTripManagerOnly ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
+		manualTripColor: dog.manualTripColor ?? null,
 		dayTripNotes: dog.dayTripNotes,
 		handlingLevel: dog.handlingLevel ?? 'volunteer',
 		inFoster: dog.inFoster ?? false,
@@ -368,6 +373,7 @@ function serializeDog(dog: Dog): StoredDog {
 		shelterSince: toDateString(dog.shelterSince) ?? null,
 		playgroupReadyDate: toDateString(dog.playgroupReadyDate) ?? null,
 		awaitingEvaluation: dog.awaitingEvaluation ?? false,
+		evaluationAutoCleared: dog.evaluationAutoCleared ?? false,
 		asmId: typeof dog.asmId === 'number' ? dog.asmId : null,
 		asmShelterCode: dog.asmShelterCode ?? '',
 		isolationStatus: dog.isolationStatus,
@@ -498,12 +504,16 @@ function deserializeDog(stored: StoredDog): Dog {
 		fixedDate: stored.fixedDate ? toDate(stored.fixedDate) : null,
 		isVaccinated: stored.isVaccinated ?? false,
 		vaccineCount: stored.vaccineCount ?? (stored.isVaccinated ? 1 : 0),
+		vaccinesOutstanding: stored.vaccinesOutstanding ?? 0,
 		vaccinatedDate: stored.vaccinatedDate ? toDate(stored.vaccinatedDate) : null,
 		allergyTypes: stored.allergyTypes ?? [],
 		dayTripStatus: normalizedDayTripStatus,
 		dayTripIneligibleReason,
 		dayTripManagerOnly,
 		dayTripManagerOnlyReason,
+		manualTripColor: (['green', 'yellow', 'red'].includes(stored.manualTripColor ?? '')
+			? (stored.manualTripColor as 'green' | 'yellow' | 'red')
+			: null),
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
 		handlingLevel: normalizedHandlingLevel,
 		inFoster: stored.inFoster ?? false,
@@ -511,6 +521,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		shelterSince: stored.shelterSince ? toDate(stored.shelterSince) : null,
 		playgroupReadyDate: stored.playgroupReadyDate ? toDate(stored.playgroupReadyDate) : null,
 		awaitingEvaluation: stored.awaitingEvaluation ?? false,
+		evaluationAutoCleared: stored.evaluationAutoCleared ?? false,
 		asmId: typeof stored.asmId === 'number' ? stored.asmId : null,
 		asmShelterCode: stored.asmShelterCode ?? '',
 		isIncoming: stored.isIncoming ?? false,
@@ -1520,6 +1531,17 @@ export async function logDayTrip(dogId: string, profile?: UserProfile | null, no
 // Purely visual whiteboard state: only toggles the "out now" flag and its
 // timestamp. Never touches lastDayTripDate or trip logs — completed trips are
 // recorded via the trip log form (logManualTrip), which owns the overdue clock.
+/**
+ * Manager-set day-trip color override. Pass `null` to clear the override and
+ * fall back to the imported sheet color / computed color.
+ */
+export async function setDogManualTripColor(
+	dogId: string,
+	color: 'green' | 'yellow' | 'red' | null
+): Promise<void> {
+	await updateDog(dogId, { manualTripColor: color });
+}
+
 export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<void> {
 	const now = new Date();
 	if (isOut) {
@@ -1810,11 +1832,7 @@ export async function logManualTrip(
 		else list.unshift(serializeDayTripLog(entry));
 		writeDayTripMap(stored);
 	}
-	if (data.endedAt) {
-		await updateDog(dogId, {
-			isOutOnDayTrip: false,
-			currentDayTripStartedAt: null
-		});
-	}
+	// Out-status is owned solely by the visual toggle (setDogTripStatus) — logging a trip
+	// never changes isOutOnDayTrip/currentDayTripStartedAt.
 	await recomputeLastDayTripDate(dogId);
 }

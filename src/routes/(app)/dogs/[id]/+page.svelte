@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import toast from 'svelte-french-toast';
 	import { page } from '$app/stores';
+	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
@@ -112,7 +113,10 @@
 				dog.surgeryRestDays,
 				dog.awaitingEvaluation,
 				role,
-				today
+				today,
+				dog.dateOfBirth,
+				dog.vaccineCount,
+				dog.vaccinesOutstanding
 			)
 		: { eligible: false, status: 'ineligible' as const, reasons: [] };
 	$: dayTripBadgeClass =
@@ -595,7 +599,7 @@
 										class="kennel-photo-img"
 										src={dog.photoUrl}
 										alt=""
-										on:error={() => { photoLoadFailed = true; }}
+										use:retryablePhoto={{ src: dog.photoUrl, context: 'dog-profile', dogId: dog?.id ?? null, onFail: () => { photoLoadFailed = true; } }}
 									/>
 								{:else}
 									<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
@@ -725,7 +729,10 @@
 									<div class="kennel-section-body kennel-facts">
 										<p><span>Description:</span> <strong class="detail-note">{dog.description || 'No additional profile notes logged yet.'}</strong></p>
 										{#if dog.hiddenComments}
-											<p><span>Hidden Comments:</span> <strong class="detail-note">{dog.hiddenComments}</strong></p>
+											{@const visibleComments = dog.hiddenComments.replace(/\s*Day Trip Notes\s+\d{1,2}\/\d{1,2}\s*:[\s\S]*/i, '').trim()}
+											{#if visibleComments}
+												<p><span>Hidden Comments:</span> <strong class="detail-note">{visibleComments}</strong></p>
+											{/if}
 										{/if}
 										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
 										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>

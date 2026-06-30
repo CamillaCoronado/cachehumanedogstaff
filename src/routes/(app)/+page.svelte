@@ -3,6 +3,7 @@
 	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, listDogs, updateDog } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import { canEditDogs } from '$lib/utils/permissions';
+	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
@@ -64,6 +65,7 @@
 	let activeDogs: Dog[] = [];
 	let allActiveDogs: Dog[] = [];
 	let recentlyAdopted: RecentlyAdoptedItem[] = [];
+	let failedThumbs = new Set<string>();
 	let playgroupSessions: PlaygroupSession[] = [];
 	let dayTripLogs: DayTripLog[] = [];
 	let feedingLogsByDog: Record<string, FeedingLog[]> = {};
@@ -125,7 +127,6 @@
 		minute: '2-digit'
 	}).format(new Date());
 	$: cleaningShift = ($shift === 'am' ? 'morning' : 'evening') as CleaningShift;
-	$: openTripByDog = buildOpenTripMap(dayTripLogs);
 
 	$: dogsOut = activeDogs
 		.filter((dog) => dog.isOutOnDayTrip)
@@ -192,22 +193,10 @@
 				];
 	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs);
 
-	function buildOpenTripMap(logs: DayTripLog[]) {
-		return logs.reduce<Record<string, DayTripLog>>((map, log) => {
-			if (log.endedAt) return map;
-			const existing = map[log.dogId];
-			const started = toDate(log.startedAt)?.getTime() ?? 0;
-			const existingStarted = toDate(existing?.startedAt)?.getTime() ?? 0;
-			if (!existing || started > existingStarted) {
-				map[log.dogId] = log;
-			}
-			return map;
-		}, {});
-	}
 
 	function tripStartForDog(dog: Dog) {
-		const openTrip = openTripByDog[dog.id];
-		return toDate(openTrip?.startedAt) ?? toDate(dog.currentDayTripStartedAt);
+		// Out-status is purely visual — start time comes from the flag's timestamp, not logs.
+		return toDate(dog.currentDayTripStartedAt);
 	}
 
 	function hasFeedingLogForShift(dogId: string, mealTime: MealTime) {
@@ -511,6 +500,7 @@
 	async function loadBoard() {
 		loading = true;
 		errorMessage = '';
+		failedThumbs = new Set();
 		try {
 			const [dogs, tripLogs, feedingByDog, pgSessions, recentAsmAdoptions] = await Promise.all([
 				listDogs(),
@@ -711,8 +701,15 @@
 					{#each fosterDogs as dog}
 						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
 							<span class="planner-row-main">
-								{#if dog.photoUrl}
-									<img class="adopted-thumb" src={dog.photoUrl} alt={dog.name} />
+								{#if dog.photoUrl && !failedThumbs.has(dog.id)}
+									<img
+										class="adopted-thumb"
+										src={dog.photoUrl}
+										alt={dog.name}
+										use:retryablePhoto={{ src: dog.photoUrl, context: 'dashboard', dogId: dog.id, onFail: () => { failedThumbs = new Set([...failedThumbs, dog.id]); } }}
+									/>
+								{:else if dog.photoUrl}
+									<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
 								{:else}
 									<span class="planner-bullet">🏡</span>
 								{/if}
@@ -738,8 +735,15 @@
 				{#each incomingDogs as dog}
 					<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
 						<span class="planner-row-main">
-							{#if dog.photoUrl}
-								<img class="adopted-thumb" src={dog.photoUrl} alt={dog.name} />
+							{#if dog.photoUrl && !failedThumbs.has(dog.id)}
+								<img
+									class="adopted-thumb"
+									src={dog.photoUrl}
+									alt={dog.name}
+									use:retryablePhoto={{ src: dog.photoUrl, context: 'dashboard', dogId: dog.id, onFail: () => { failedThumbs = new Set([...failedThumbs, dog.id]); } }}
+								/>
+							{:else if dog.photoUrl}
+								<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
 							{:else}
 								<span class="planner-bullet">🚛</span>
 							{/if}
@@ -802,8 +806,15 @@
 						{#if item.href}
 							<a class="planner-row planner-row-link" href={item.href}>
 								<span class="planner-row-main">
-									{#if item.photoUrl}
-										<img class="adopted-thumb" src={item.photoUrl} alt={item.name} />
+									{#if item.photoUrl && !failedThumbs.has(item.id)}
+										<img
+											class="adopted-thumb"
+											src={item.photoUrl}
+											alt={item.name}
+											use:retryablePhoto={{ src: item.photoUrl, context: 'dashboard', dogId: item.id, onFail: () => { failedThumbs = new Set([...failedThumbs, item.id]); } }}
+										/>
+									{:else if item.photoUrl}
+										<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{item.name.slice(0, 1).toUpperCase() || '?'}</span>
 									{:else}
 										<span class="planner-bullet">🏠</span>
 									{/if}
@@ -813,8 +824,15 @@
 						{:else}
 							<div class="planner-row planner-row-static">
 								<span class="planner-row-main">
-									{#if item.photoUrl}
-										<img class="adopted-thumb" src={item.photoUrl} alt={item.name} />
+									{#if item.photoUrl && !failedThumbs.has(item.id)}
+										<img
+											class="adopted-thumb"
+											src={item.photoUrl}
+											alt={item.name}
+											use:retryablePhoto={{ src: item.photoUrl, context: 'dashboard', dogId: item.id, onFail: () => { failedThumbs = new Set([...failedThumbs, item.id]); } }}
+										/>
+									{:else if item.photoUrl}
+										<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{item.name.slice(0, 1).toUpperCase() || '?'}</span>
 									{:else}
 										<span class="planner-bullet">🏠</span>
 									{/if}
@@ -1256,6 +1274,18 @@
 		border-radius: 0.25rem;
 		object-fit: cover;
 		flex-shrink: 0;
+	}
+
+	.adopted-thumb-fallback {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--surface-muted, #e6ecf1);
+		color: var(--ink-muted, #4a5b68);
+		font-family: var(--font-ui);
+		font-weight: 600;
+		font-size: 0.85rem;
+		text-transform: uppercase;
 	}
 
 	.attention-tag {

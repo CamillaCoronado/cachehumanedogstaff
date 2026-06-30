@@ -90,12 +90,16 @@ export interface Dog {
 	fixedDate: DateValue | null;
 	isVaccinated: boolean;
 	vaccineCount: number;
+	/** Vaccinations still outstanding/overdue per ASM's schedule (VACCOUTSTANDINGCOUNT). */
+	vaccinesOutstanding?: number;
 	vaccinatedDate: DateValue | null;
 	allergyTypes?: string[];
 	dayTripStatus: DayTripStatus;
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
 	dayTripManagerOnly: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
+	/** Manager-set color override; takes precedence over the imported sheet color. */
+	manualTripColor?: 'green' | 'yellow' | 'red' | null;
 	dayTripNotes: string | null;
 	handlingLevel: DogHandlingLevel;
 	inFoster: boolean;
@@ -103,6 +107,9 @@ export interface Dog {
 	shelterSince?: DateValue | null;
 	playgroupReadyDate?: DateValue | null;
 	awaitingEvaluation?: boolean;
+	/** True once the sheet-color auto-clear has fired for this dog, so a later manual
+	 *  re-check of awaitingEvaluation is respected and not auto-cleared again. */
+	evaluationAutoCleared?: boolean;
 	evaluationNotes?: string | null;
 	notAdoptable?: boolean;
 	notAdoptableReason?: string | null;

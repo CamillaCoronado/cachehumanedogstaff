@@ -234,7 +234,29 @@ export function getRunPosition(run: RunId | null) {
 	return { row: cell.row, col: cell.col };
 }
 
+// Physical feeding walk order, confirmed with staff (2026-06-17):
+// Puppy Run first (top-right corner, where you enter), then down the top wall right→left
+// (15→1), down to 35, across the left island (17–20), across the right island (21–24),
+// then the bottom row right→left (34→25). Rock Run never holds dogs, so it sorts last —
+// it only matters if something is accidentally assigned there.
+const SNAKE_ROUTE_ORDER: string[] = [
+	'puppy',
+	'15', '14', '13', '12', '11', '10', '9', '8', '7', '6', '5', '4', '3', '2', '1',
+	'35',
+	'17', '18', '19', '20',
+	'21', '22', '23', '24',
+	'34', '33', '32', '31', '30', '29', '28', '27', '26', '25',
+	'rock'
+];
+const snakeRankByKey = new Map(SNAKE_ROUTE_ORDER.map((key, index) => [key, index]));
+
 export function getWalkRank(run: RunId | null, path: WalkPathId) {
+	if (path === 'snake_route' || path === 'snake_route_reverse') {
+		const rank = snakeRankByKey.get(runIdToKey(run) ?? '');
+		if (rank === undefined) return 10_000;
+		return path === 'snake_route' ? rank : SNAKE_ROUTE_ORDER.length - 1 - rank;
+	}
+
 	const position = getRunPosition(run);
 	if (!position) return 10_000;
 
@@ -248,18 +270,8 @@ export function getWalkRank(run: RunId | null, path: WalkPathId) {
 		return position.row * 100 + position.col;
 	}
 
-	if (path === 'back_to_front') {
-		return (maxRow - position.row) * 100 + (maxCol - position.col);
-	}
-
-	const rowIndex = allRows.indexOf(position.row);
-	if (path === 'snake_route') {
-		const colRank = rowIndex % 2 === 0 ? position.col : maxCol - position.col;
-		return rowIndex * 100 + colRank;
-	}
-	// snake_route_reverse: starts right-to-left on first row
-	const colRank = rowIndex % 2 === 0 ? maxCol - position.col : position.col;
-	return rowIndex * 100 + colRank;
+	// back_to_front
+	return (maxRow - position.row) * 100 + (maxCol - position.col);
 }
 
 export function compareByWalkPath(a: Dog, b: Dog, path: WalkPathId) {

@@ -67,11 +67,25 @@ describe('getWalkRank / compareByWalkPath', () => {
 		expect(getWalkRank(25, 'back_to_front')).toBeLessThan(getWalkRank(1, 'back_to_front'));
 	});
 
-	it('snake_route alternates direction per row', () => {
-		// Row 1 left-to-right: run 1 before run 15
-		expect(getWalkRank(1, 'snake_route')).toBeLessThan(getWalkRank(15, 'snake_route'));
-		// Next visited row right-to-left: higher col comes first
-		expect(getWalkRank(35, 'snake_route')).toBeGreaterThan(getWalkRank(15, 'snake_route'));
+	it('snake_route follows the confirmed physical walk: 15→1, 35, 17–20, 21–24, 34→25', () => {
+		const order: Array<number | 'puppy' | 'rock'> = [
+			'puppy',
+			15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
+			35,
+			17, 18, 19, 20,
+			21, 22, 23, 24,
+			34, 33, 32, 31, 30, 29, 28, 27, 26, 25,
+			'rock'
+		];
+		const ranks = order.map((run) => getWalkRank(run, 'snake_route'));
+		// Strictly increasing in the exact walk order
+		for (let i = 1; i < ranks.length; i++) {
+			expect(ranks[i], `${order[i]} after ${order[i - 1]}`).toBeGreaterThan(ranks[i - 1]);
+		}
+	});
+
+	it('snake_route_reverse walks the numbered runs backwards (25 before 15)', () => {
+		expect(getWalkRank(25, 'snake_route_reverse')).toBeLessThan(getWalkRank(15, 'snake_route_reverse'));
 	});
 
 	it('ranks unassigned dogs last and ties break by name', () => {
