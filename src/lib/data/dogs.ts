@@ -3,6 +3,7 @@ import type {
 	BehavioralNote,
 	DogHandlingLevel,
 	DayTripIneligibleReason,
+	TripColorReason,
 	DayTripLog,
 	Dog,
 	FeedingLog,
@@ -96,6 +97,7 @@ interface StoredDog {
 	dayTripManagerOnly?: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
+	manualTripColorReason?: TripColorReason | null;
 	lastSheetColor?: 'green' | 'yellow' | 'red' | null;
 	dayTripPuppyOverride?: boolean;
 	dayTripNotes: string | null;
@@ -368,6 +370,7 @@ function serializeDog(dog: Dog): StoredDog {
 		dayTripManagerOnly: dog.dayTripManagerOnly ?? false,
 		dayTripManagerOnlyReason: dog.dayTripManagerOnly ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
 		manualTripColor: dog.manualTripColor ?? null,
+		manualTripColorReason: dog.manualTripColorReason ?? null,
 		lastSheetColor: dog.lastSheetColor ?? null,
 		dayTripPuppyOverride: dog.dayTripPuppyOverride ?? false,
 		dayTripNotes: dog.dayTripNotes,
@@ -517,6 +520,9 @@ function deserializeDog(stored: StoredDog): Dog {
 		dayTripManagerOnlyReason,
 		manualTripColor: (['green', 'yellow', 'red'].includes(stored.manualTripColor ?? '')
 			? (stored.manualTripColor as 'green' | 'yellow' | 'red')
+			: null),
+		manualTripColorReason: (['behavior', 'medical', 'isolation', 'awaiting_eval', 'manager_only', 'difficult', 'other'].includes(stored.manualTripColorReason ?? '')
+			? (stored.manualTripColorReason as TripColorReason)
 			: null),
 		lastSheetColor: (['green', 'yellow', 'red'].includes(stored.lastSheetColor ?? '')
 			? (stored.lastSheetColor as 'green' | 'yellow' | 'red')
@@ -1545,9 +1551,14 @@ export async function logDayTrip(dogId: string, profile?: UserProfile | null, no
  */
 export async function setDogManualTripColor(
 	dogId: string,
-	color: 'green' | 'yellow' | 'red' | null
+	color: 'green' | 'yellow' | 'red' | null,
+	reason: TripColorReason | null = null
 ): Promise<void> {
-	await updateDog(dogId, { manualTripColor: color });
+	// A reason only applies to a restricting color (red/yellow); green/unset clears it.
+	await updateDog(dogId, {
+		manualTripColor: color,
+		manualTripColorReason: color === 'red' || color === 'yellow' ? reason : null
+	});
 }
 
 /**

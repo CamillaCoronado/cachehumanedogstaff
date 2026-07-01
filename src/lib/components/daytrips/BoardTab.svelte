@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Dog } from '$lib/types';
 	import type { DayTripEligibility } from '$lib/utils/dates';
-	import { daysSince, dogStripeColor, formatDateTime, isUnderageForDayTrips } from '$lib/utils/dates';
+	import { daysSince, dogStripeColor, dogColorReason, formatDateTime, isUnderageForDayTrips, tripColorReasonLabel } from '$lib/utils/dates';
 	import { getDayTripGapDays, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 
 	export let dogsOut: Dog[] = [];
@@ -75,6 +75,8 @@
 								<p class="cal-event-count">{allTime} trip{allTime !== 1 ? 's' : ''} total</p>
 								{#if eligibility.reasons.length > 0}
 									<p class="cal-event-warning">{eligibility.reasons[0]}</p>
+								{:else if dogColorReason(dog)}
+									<p class="cal-event-meta">{tripColorReasonLabel(dogColorReason(dog))}</p>
 								{/if}
 								<div class="cal-event-actions">
 									<button class="cal-btn cal-btn-green" on:click={() => toggleOut(dog)}>Send Out</button>
@@ -112,7 +114,7 @@
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<div class="cal-event-actions">
-									<p class="cal-event-meta cal-event-meta-grow">{eligibility.reasons[0] ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
+									<p class="cal-event-meta cal-event-meta-grow">{eligibility.reasons[0] ?? tripColorReasonLabel(dogColorReason(dog)) ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
 									<button class="cal-caret" class:cal-caret-open={openEval[dog.id]} on:click={() => toggleEvalMenu(dog.id)} aria-label="More options" aria-expanded={Boolean(openEval[dog.id])}>⌄</button>
 								</div>
 								{#if openEval[dog.id]}

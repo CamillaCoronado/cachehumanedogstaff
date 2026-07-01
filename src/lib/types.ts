@@ -23,6 +23,17 @@ export interface Treatment {
 export type DogStatus = 'active' | 'adopted' | 'transferred' | 'euthanized';
 export type DayTripStatus = 'ineligible' | 'difficult' | 'eligible';
 export type DayTripIneligibleReason = 'behavior' | 'medical' | 'other';
+
+// Reason a dog's day-trip color was set — mirrors the factors the color is otherwise
+// calculated from, so a manual color reads consistently with a computed one.
+export type TripColorReason =
+	| 'behavior'
+	| 'medical'
+	| 'isolation'
+	| 'awaiting_eval'
+	| 'manager_only'
+	| 'difficult'
+	| 'other';
 export type IsolationStatus = 'none' | 'iso';
 export type IsolationReason = 'sick' | 'bite_quarantine';
 export type DogHandlingLevel = 'manager_only' | 'staff_only' | 'volunteer';
@@ -102,6 +113,8 @@ export interface Dog {
 	 *  or synced in from the sheet; `dogStripeColor` reads this, falling back to a computed
 	 *  color when it's null. (Field name kept for back-compat.) */
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
+	/** Why the color was set (for red/yellow) — null for green or an unset color. */
+	manualTripColorReason?: TripColorReason | null;
 	/** Last color seen from the sheet, so a sheet change can update `manualTripColor` without
 	 *  clobbering a manual change on every load. */
 	lastSheetColor?: 'green' | 'yellow' | 'red' | null;

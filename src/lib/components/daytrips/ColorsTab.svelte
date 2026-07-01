@@ -1,7 +1,8 @@
 <script lang="ts">
-	import type { Dog } from '$lib/types';
-	import { dogStripeColor } from '$lib/utils/dates';
+	import type { Dog, TripColorReason } from '$lib/types';
+	import { dogStripeColor, dogColorReason, tripColorReasonLabel, TRIP_COLOR_REASONS } from '$lib/utils/dates';
 	import { setDogManualTripColor } from '$lib/data/dogs';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import toast from 'svelte-french-toast';
 
 	export let dogs: Dog[] = [];
@@ -17,6 +18,9 @@
 	let dragId: string | null = null;
 	let dragOver: Color | null = null;
 	let saving = false;
+
+	// When a dog is dropped on red/yellow we ask for a reason before committing.
+	let pending: { dog: Dog; color: 'red' | 'yellow' } | null = null;
 
 	$: byColor = (color: Color) =>
 		dogs
@@ -36,19 +40,12 @@
 		dragOver = null;
 	}
 
-	async function dropOn(color: Color) {
-		const id = dragId;
-		dragOver = null;
-		dragId = null;
-		if (!id || saving) return;
-		const dog = dogs.find((d) => d.id === id);
-		if (!dog) return;
-		if (dogStripeColor(dog) === color) return;
-
+	async function commitColor(dog: Dog, color: Color, reason: TripColorReason | null) {
+		if (saving) return;
 		saving = true;
 		try {
-			await setDogManualTripColor(id, color);
-			toast.success(`${dog.name} set to ${color}.`);
+			await setDogManualTripColor(dog.id, color, reason);
+			toast.success(`${dog.name} set to ${color}${reason ? ` (${tripColorReasonLabel(reason)})` : ''}.`);
 			await refresh();
 		} catch {
 			toast.error('Could not set color.');
@@ -57,22 +54,33 @@
 		}
 	}
 
-	async function clearOverride(dog: Dog) {
-		if (saving) return;
-		saving = true;
-		try {
-			await setDogManualTripColor(dog.id, null);
-			toast.success(`${dog.name} color reset.`);
-			await refresh();
-		} catch {
-			toast.error('Could not clear override.');
-		} finally {
-			saving = false;
+	function dropOn(color: Color) {
+		const id = dragId;
+		dragOver = null;
+		dragId = null;
+		if (!id || saving) return;
+		const dog = dogs.find((d) => d.id === id);
+		if (!dog) return;
+		if (dogStripeColor(dog) === color) return;
+
+		if (color === 'green') {
+			// Green = eligible, no reason needed.
+			void commitColor(dog, 'green', null);
+		} else {
+			// Red/yellow: ask why.
+			pending = { dog, color };
 		}
+	}
+
+	async function pickReason(reason: TripColorReason) {
+		if (!pending) return;
+		const { dog, color } = pending;
+		pending = null;
+		await commitColor(dog, color, reason);
 	}
 </script>
 
-<p class="ct-hint">Drag a dog between columns to set its color. This is the dog's color everywhere; the sheet updates the same color when it changes. Tap ✕ to reset to its default.</p>
+<p class="ct-hint">Drag a dog to a column to set its color. Red/yellow will ask for a reason. This is the dog's color everywhere; the sheet updates the same color when it changes.</p>
 
 <div class="ct-board">
 	{#each columns as col}
@@ -105,9 +113,8 @@
 					>
 						<span class="ct-grip" aria-hidden="true">⠿</span>
 						<span class="ct-name">{dog.name}</span>
-						{#if dog.manualTripColor}
-							<span class="ct-badge">set</span>
-							<button class="ct-clear" title="Reset to default color" on:click={() => clearOverride(dog)}>✕</button>
+						{#if col.color !== 'green' && dogColorReason(dog)}
+							<span class="ct-reason">{tripColorReasonLabel(dogColorReason(dog))}</span>
 						{/if}
 					</div>
 				{/each}
@@ -115,6 +122,18 @@
 		</div>
 	{/each}
 </div>
+
+<Modal
+	open={pending !== null}
+	title={pending ? `Why is ${pending.dog.name} ${pending.color}?` : 'Reason'}
+	onClose={() => (pending = null)}
+>
+	<div class="ct-reasons">
+		{#each TRIP_COLOR_REASONS as r}
+			<button class="ct-reason-btn" on:click={() => pickReason(r.value)}>{r.label}</button>
+		{/each}
+	</div>
+</Modal>
 
 <style>
 	.ct-hint {
@@ -209,29 +228,35 @@
 		color: #202124;
 	}
 
-	.ct-badge {
+	.ct-reason {
 		margin-left: auto;
-		font-size: 0.6rem;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
+		font-size: 0.62rem;
+		font-weight: 600;
 		color: #5f6368;
 		background: #f1f3f4;
-		padding: 0.08rem 0.35rem;
+		padding: 0.08rem 0.4rem;
 		border-radius: 999px;
+		white-space: nowrap;
 	}
 
-	.ct-clear {
-		border: none;
-		background: transparent;
-		color: #9aa0a6;
-		font-size: 0.85rem;
-		line-height: 1;
+	.ct-reasons {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+
+	.ct-reason-btn {
+		padding: 0.4rem 0.7rem;
+		border-radius: 6px;
+		border: 1px solid #dadce0;
+		background: #fff;
+		font-size: 0.8rem;
+		font-weight: 500;
+		color: #3c4043;
 		cursor: pointer;
-		padding: 0.1rem 0.2rem;
 	}
 
-	.ct-clear:hover { color: #cf4b4b; }
+	.ct-reason-btn:hover { background: #f1f3f4; border-color: #bdc1c6; }
 
 	@media (min-width: 640px) {
 		.ct-board {

@@ -6,6 +6,7 @@ import type {
 	Dog,
 	DogHandlingLevel,
 	IsolationStatus,
+	TripColorReason,
 	UserRole
 } from '$lib/types';
 import { handlingRestrictionReason, resolveDogHandlingLevel } from '$lib/utils/permissions';
@@ -295,6 +296,44 @@ export function isUnderageForDayTrips(dog: Dog, today = new Date()): boolean {
 	const intake = toDate(dog.intakeDate);
 	const daysWithUs = intake ? differenceInDays(startOfDay(today), startOfDay(intake)) : null;
 	return daysWithUs === null || daysWithUs < PUPPY_MIN_DAYS_AT_SHELTER;
+}
+
+// Reasons a manager can attach when setting a dog's day-trip color, mirroring the factors
+// the color is otherwise calculated from.
+export const TRIP_COLOR_REASONS: { value: TripColorReason; label: string }[] = [
+	{ value: 'behavior', label: 'Behavior' },
+	{ value: 'medical', label: 'Medical' },
+	{ value: 'isolation', label: 'Isolation' },
+	{ value: 'awaiting_eval', label: 'Awaiting evaluation' },
+	{ value: 'manager_only', label: 'Manager only' },
+	{ value: 'difficult', label: 'Difficult (adults only)' },
+	{ value: 'other', label: 'Other' }
+];
+
+export function tripColorReasonLabel(reason: TripColorReason | null | undefined): string | null {
+	return TRIP_COLOR_REASONS.find((r) => r.value === reason)?.label ?? null;
+}
+
+// The reason a dog is its color — derived from what's already on the profile (mirrors the
+// factors dogStripeColor uses), or the manager's picked reason when the profile doesn't
+// explain it. Returns null for a green/eligible dog with nothing on record.
+export function dogColorReason(dog: Dog): TripColorReason | null {
+	if (dog.manualTripColorReason) return dog.manualTripColorReason;
+	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
+	if (dog.isolationStatus !== 'none') return 'isolation';
+	if (level === 'manager_only' || level === 'staff_only') {
+		if (dog.dayTripManagerOnlyReason === 'behavior') return 'behavior';
+		if (dog.dayTripManagerOnlyReason === 'medical') return 'medical';
+		return 'manager_only';
+	}
+	if (dog.awaitingEvaluation) return 'awaiting_eval';
+	if (dog.dayTripStatus === 'difficult') return 'difficult';
+	if (dog.dayTripStatus === 'ineligible') {
+		if (dog.dayTripIneligibleReason === 'behavior') return 'behavior';
+		if (dog.dayTripIneligibleReason === 'medical') return 'medical';
+		return 'other';
+	}
+	return null;
 }
 
 export function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
