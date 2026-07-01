@@ -12,13 +12,9 @@
 
 	onMount(async () => {
 		try {
-			const [all, colorsRes] = await Promise.all([
-				listDogs(),
-				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
-			]);
-			const sheetColors = colorsRes as Record<string, string>;
+			const all = await listDogs();
 			dogs = all
-				.filter((d) => d.status === 'active' && !d.inFoster && isDayTripEligible(d, sheetColors))
+				.filter((d) => d.status === 'active' && !d.inFoster && isDayTripEligible(d))
 				.sort((a, b) => a.name.localeCompare(b.name));
 		} catch (e) {
 			console.error(e);

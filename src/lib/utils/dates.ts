@@ -297,17 +297,10 @@ export function isUnderageForDayTrips(dog: Dog, today = new Date()): boolean {
 	return daysWithUs === null || daysWithUs < PUPPY_MIN_DAYS_AT_SHELTER;
 }
 
-export function dogStripeColor(
-	dog: Dog,
-	sheetColors?: Record<string, 'green' | 'yellow' | 'red'>
-): 'green' | 'yellow' | 'red' {
-	// Manager-set override wins over everything else.
+export function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
+	// Single source of truth: the dog's own color (set manually or synced from the sheet).
 	if (dog.manualTripColor) return dog.manualTripColor;
-	if (sheetColors) {
-		const name = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-		const sheetColor = sheetColors[name];
-		if (sheetColor) return sheetColor;
-	}
+	// Otherwise, a computed default from the dog's status.
 	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
 	if (dog.isolationStatus !== 'none') return 'red';
 	if (level === 'manager_only' || level === 'staff_only') return 'red';

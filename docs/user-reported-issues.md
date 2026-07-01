@@ -1,4 +1,4 @@
-w# User-Reported Issues To Investigate
+# User-Reported Issues To Investigate
 
 Reported by Camilla 2026-06-12 while reviewing the feeding page. These are behavior
 checks/changes, **not** part of the refactor — handle separately, after or alongside
@@ -24,31 +24,42 @@ refactor phases, each as its own verified fix.
   bypass the chart entirely — if amounts still feel wrong for specific dogs, check
   their stored `foodAmount` values.
 
-## 2. Snake route doesn't snake correctly
+## 2. Snake route doesn't snake correctly — RESOLVED 2026-06-17
 
-- The "Snake Route" walk-path ordering on the feeding page does not produce the
-  expected physical walking order.
-- Where to look: `getWalkRank` in `src/lib/utils/kennelLayout.ts` (extracted 2026-06-12,
-  behavior unchanged from the original page code — the bug predates the extraction).
-- Note: ranking currently alternates direction by *row index* among rows that contain
-  runs (rows 1, 2, 4, 6). Suspect the real route should account for the physical
-  bridge/bank layout, not just row order. Get the expected run sequence from Camilla
-  before changing; then pin it with a test.
+- The "Snake Route" walk-path ordering on the feeding page did not match the physical
+  walking order.
+- **Fix:** replaced the old row-index-alternating logic in `getWalkRank`
+  (`src/lib/utils/kennelLayout.ts`) with an explicit staff-confirmed sequence
+  `SNAKE_ROUTE_ORDER` (2026-06-17): Puppy Run → top wall 15→1 → 35 → left island 17–20 →
+  right island 21–24 → bottom row 34→25 → Rock Run last.
+- Pinned by `src/lib/utils/kennelLayout.test.ts` ("snake_route follows the confirmed
+  physical walk…"), which asserts strictly increasing rank in that exact order.
 
-## 3. Modals must be centered within the page (viewport)
+## 3. Modals centered in viewport / share one component — FIXED 2026-06-30 (pending visual verification)
 
-- At least the "didn't eat" panel/modal on the feeding page centers within the content
-  area instead of the full viewport. Audit all modals app-wide.
-- Where to look: `src/lib/components/ui/Modal.svelte` (the shared modal) vs page-local
-  modal/panel markup. Pages using local modals or panels (feeding's didn't-eat panel,
-  stool modal, playgroups' manual/import modals, dogs page add-dog modal, etc.) may not
-  use the shared component or may be missing a portal to `document.body`.
-- Note: playgroups and dog-detail pages define a local `portal()` action for this —
-  candidates to standardize on one shared modal/portal during Phase 2 component
-  extraction, which would fix centering everywhere at once.
+- Symptom: page-local `position: fixed` modals (e.g. feeding's "didn't eat" panel) centered
+  within the content area instead of the full viewport, and duplicated modal styling.
+- **Real fix:** convert page-local form modals to the shared `Modal.svelte`, which portals
+  to `<body>` (so it's viewport-centered regardless of any ancestor) and carries the one
+  canonical modal styling. Converted:
+  - feeding "didn't eat" panel (`src/routes/(app)/feeding/+page.svelte`) — removed its
+    `.didnt-eat-overlay/-modal/-head/-title/-close` markup + CSS.
+  - playgroups "Log playgroup" modal (`src/routes/(app)/playgroups/+page.svelte`) — removed
+    its `.manual-modal-*` markup + CSS and the now-dead local `portal()` action.
+  - (feeding history + stool, and dogs add-dog already used the shared `Modal`.)
+- Secondary cleanup: `.page-paper` had `will-change: transform` (in
+  `src/routes/(app)/+layout.svelte`), which establishes a containing block that traps any
+  remaining page-local `position: fixed` element. Moved the hint onto the `.page-turn-*`
+  classes (only active during the transition).
+- **Not converted (intentional):** the adoption/transfer/foster/incoming **celebration
+  overlays** (layout, admin, dog-detail) are bespoke full-screen animations, not form
+  dialogs — they stay custom.
+- **Pending:** visual confirm — open the didn't-eat panel and the playgroups log-playgroup
+  modal and check they center on the full screen.
 
-## 4. Feature: copy daily updates as Slack-formatted text
+## 4. Feature: copy daily updates as Slack-formatted text — DEFERRED (backlog)
 
+- Deferred 2026-06-30 (Camilla): not building now. Kept as a backlog feature idea.
 - Many daily statuses get re-typed into Slack by hand: baths, playgroups, who didn't
   eat, etc. Wanted: a "copy as Slack update" action that formats the relevant list as a
   ready-to-paste Slack message (e.g. copy the didn't-eat list from the feeding page).

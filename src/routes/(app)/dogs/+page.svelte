@@ -5,7 +5,7 @@
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
-	import { listDogs, updateDog, createDog, logBath, setDogTripStatus, returnDog } from '$lib/data/dogs';
+	import { listDogs, updateDog, createDog, logBath, setDogTripStatus, returnDog, syncSheetColorsToDogs } from '$lib/data/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
@@ -38,7 +38,6 @@ const today = new Date();
 
 	let dogs: Dog[] = [];
 	let failedPhotos = new Set<string>();
-	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
 	let loading = true;
 	let search = '';
@@ -90,7 +89,7 @@ const today = new Date();
 		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
 		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
 		.filter((dog) => filterAdoptable ? getAdoptionAvailability(dog).available : true)
-		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog, sheetColors) === stripeFilter)
+		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
 		const direction = sortDir === 'asc' ? 1 : -1;
@@ -206,10 +205,13 @@ const today = new Date();
 			listPlaygroupSessions(),
 			fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
 		]);
-		sheetColors = colorsRes;
 		dogs = dogRows;
 		lastPlaygroupByDogId = buildLastPlaygroupMap(playgroupRows);
 		loading = false;
+
+		// Sync sheet colors into each dog's single color field (only on a real sheet change).
+		const sheet = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
+		const colorChanges = await syncSheetColorsToDogs(dogRows, sheet);
 
 		// Auto-clear awaitingEvaluation once, the first time a dog appears on the DT Numbers
 		// sheet (any color). `evaluationAutoCleared` guards it so a later MANUAL re-check of
@@ -217,11 +219,21 @@ const today = new Date();
 		const evaluated = dogRows.filter((d) => {
 			if (!d.awaitingEvaluation || d.evaluationAutoCleared) return false;
 			const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-			return Boolean((colorsRes as Record<string, string>)[key]);
+			return Boolean(sheet[key]);
 		});
 		if (evaluated.length > 0) {
 			await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true })));
-			dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false, evaluationAutoCleared: true } : d);
+		}
+
+		if (colorChanges.size > 0 || evaluated.length > 0) {
+			const evaluatedIds = new Set(evaluated.map((e) => e.id));
+			dogs = dogRows.map((d) => {
+				let next = d;
+				const color = colorChanges.get(d.id);
+				if (color) next = { ...next, manualTripColor: color, lastSheetColor: color };
+				if (evaluatedIds.has(d.id)) next = { ...next, awaitingEvaluation: false, evaluationAutoCleared: true };
+				return next;
+			});
 		}
 	}
 
@@ -541,7 +553,7 @@ const today = new Date();
 								<header class="dog-card-header">
 									<div class="card-photo-wrap">
 										<div class="card-photo-frame">
-											<div class={`card-photo-stripe card-stripe-${dogStripeColor(dog, sheetColors)}`} aria-hidden="true"></div>
+											<div class={`card-photo-stripe card-stripe-${dogStripeColor(dog)}`} aria-hidden="true"></div>
 											{#if dog.photoUrl && !failedPhotos.has(dog.id)}
 												<img
 													class="card-photo-img"

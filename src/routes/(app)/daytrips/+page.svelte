@@ -5,7 +5,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, canSetDayTripColor, resolveRole } from '$lib/utils/permissions';
-	import { listDogs, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog, importedTripId } from '$lib/data/dogs';
+	import { listDogs, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog, importedTripId, syncSheetColorsToDogs } from '$lib/data/dogs';
 	import { listVolunteers } from '$lib/data/volunteers';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
@@ -24,7 +24,6 @@
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
 	let dogs: Dog[] = [];
-	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	let logs: DayTripLog[] = [];
 	let loading = true;
 	let monthFilter = defaultMonth;
@@ -191,7 +190,7 @@
 			return aStart - bStart;
 		});
 
-	$: dogsEligible = activeDogs.filter((d) => isDayTripEligible(d, sheetColors))
+	$: dogsEligible = activeDogs.filter((d) => isDayTripEligible(d))
 		.sort((a, b) => {
 			const aDays = getDayTripGapDays(a, now) ?? 999;
 			const bDays = getDayTripGapDays(b, now) ?? 999;
@@ -199,7 +198,7 @@
 		});
 
 	$: dogsIneligible = activeDogs
-		.filter((d) => !d.isOutOnDayTrip && !isDayTripEligible(d, sheetColors))
+		.filter((d) => !d.isOutOnDayTrip && !isDayTripEligible(d))
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: dogStatsRows = activeDogs.slice().sort((a, b) => {
@@ -263,8 +262,12 @@
 				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({})),
 				listVolunteers()
 			]);
-			sheetColors = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
 			dogs = dogRows;
+
+			// Sync sheet colors into each dog's single color field — only when the sheet value
+			// actually changed, so a manual color persists until the sheet next changes.
+			const sheet = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
+			const colorChanges = await syncSheetColorsToDogs(dogRows, sheet);
 
 			// Auto-clear awaitingEvaluation once, the first time a dog appears on the DT
 			// Numbers sheet with a color. `evaluationAutoCleared` guards it so a later
@@ -272,11 +275,22 @@
 			const evaluated = dogRows.filter((d) => {
 				if (!d.awaitingEvaluation || d.evaluationAutoCleared) return false;
 				const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-				return Boolean(colorsRes[key]);
+				return Boolean(sheet[key]);
 			});
 			if (evaluated.length > 0) {
 				await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true })));
-				dogs = dogs.map((d) => evaluated.some((e) => e.id === d.id) ? { ...d, awaitingEvaluation: false, evaluationAutoCleared: true } : d);
+			}
+
+			// Apply both the color sync and the eval auto-clear to the local list in one pass.
+			if (colorChanges.size > 0 || evaluated.length > 0) {
+				const evaluatedIds = new Set(evaluated.map((e) => e.id));
+				dogs = dogRows.map((d) => {
+					let next = d;
+					const color = colorChanges.get(d.id);
+					if (color) next = { ...next, manualTripColor: color, lastSheetColor: color };
+					if (evaluatedIds.has(d.id)) next = { ...next, awaitingEvaluation: false, evaluationAutoCleared: true };
+					return next;
+				});
 			}
 		} catch (error) {
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
@@ -361,7 +375,7 @@
 		<!-- ───── BOARD ───── -->
 		{:else if activeTab === 'board'}
 			<BoardTab {dogsOut} {dogsEligible} {dogsIneligible}
-				{allTimeTripsCountByDog} {sheetColors} {getEligibility} {toggleOut} {toggleAwaitingEval} {togglePuppyOverride} />
+				{allTimeTripsCountByDog} {getEligibility} {toggleOut} {toggleAwaitingEval} {togglePuppyOverride} />
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}
@@ -383,7 +397,7 @@
 
 		<!-- ───── COLORS ───── -->
 		{:else if activeTab === 'colors' && canSetColors}
-			<ColorsTab dogs={activeDogs} {sheetColors} {refresh} />
+			<ColorsTab dogs={activeDogs} {refresh} />
 
 		<!-- ───── IMPORT ───── -->
 		{:else if activeTab === 'import'}

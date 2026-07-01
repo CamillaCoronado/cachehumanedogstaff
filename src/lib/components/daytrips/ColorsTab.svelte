@@ -5,7 +5,6 @@
 	import toast from 'svelte-french-toast';
 
 	export let dogs: Dog[] = [];
-	export let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	export let refresh: () => Promise<void>;
 
 	type Color = 'green' | 'yellow' | 'red';
@@ -21,7 +20,7 @@
 
 	$: byColor = (color: Color) =>
 		dogs
-			.filter((d) => dogStripeColor(d, sheetColors) === color)
+			.filter((d) => dogStripeColor(d) === color)
 			.sort((a, b) => a.name.localeCompare(b.name));
 
 	function onDragStart(event: DragEvent, dog: Dog) {
@@ -44,7 +43,7 @@
 		if (!id || saving) return;
 		const dog = dogs.find((d) => d.id === id);
 		if (!dog) return;
-		if (dogStripeColor(dog, sheetColors) === color) return;
+		if (dogStripeColor(dog) === color) return;
 
 		saving = true;
 		try {
@@ -63,7 +62,7 @@
 		saving = true;
 		try {
 			await setDogManualTripColor(dog.id, null);
-			toast.success(`${dog.name} override cleared.`);
+			toast.success(`${dog.name} color reset.`);
 			await refresh();
 		} catch {
 			toast.error('Could not clear override.');
@@ -73,7 +72,7 @@
 	}
 </script>
 
-<p class="ct-hint">Drag a dog between columns to set its color. The override beats the imported sheet color. Tap ✕ to clear it.</p>
+<p class="ct-hint">Drag a dog between columns to set its color. This is the dog's color everywhere; the sheet updates the same color when it changes. Tap ✕ to reset to its default.</p>
 
 <div class="ct-board">
 	{#each columns as col}
@@ -107,8 +106,8 @@
 						<span class="ct-grip" aria-hidden="true">⠿</span>
 						<span class="ct-name">{dog.name}</span>
 						{#if dog.manualTripColor}
-							<span class="ct-badge">manual</span>
-							<button class="ct-clear" title="Clear override" on:click={() => clearOverride(dog)}>✕</button>
+							<span class="ct-badge">set</span>
+							<button class="ct-clear" title="Reset to default color" on:click={() => clearOverride(dog)}>✕</button>
 						{/if}
 					</div>
 				{/each}

@@ -670,47 +670,41 @@
 	</div>
 </section>
 
-{#if showDidntEatPanel}
-	<div class="didnt-eat-overlay" role="presentation" on:click|self={() => (showDidntEatPanel = false)}>
-		<div class="didnt-eat-modal" role="dialog" aria-modal="true" aria-label="Log who didn't eat">
-			<div class="didnt-eat-head">
-				<p class="didnt-eat-title typewriter">Who didn't eat?</p>
-				<button class="didnt-eat-close" type="button" aria-label="Close" on:click={() => (showDidntEatPanel = false)}>×</button>
-			</div>
-			<p class="didnt-eat-hint typewriter">Select dogs that didn't eat. Already-logged dogs can be updated.</p>
-			<div class="didnt-eat-list">
-				{#each displayDogs.filter((d) => !isSurgeryBlocked(d)) as dog}
-					{@const existingLog = fedMap[dog.id]}
-					<label class="didnt-eat-item {existingLog && existingLog.amountEaten === 'none' ? 'didnt-eat-item-already-none' : ''}">
-						<input
-							type="checkbox"
-							checked={didntEatIds.includes(dog.id)}
-							on:change={(e) => {
-								if (e.currentTarget.checked) {
-									didntEatIds = [...didntEatIds, dog.id];
-								} else {
-									didntEatIds = didntEatIds.filter((id) => id !== dog.id);
-								}
-							}}
-						/>
-						<span class="didnt-eat-name">{dog.name}</span>
-						{#if existingLog}
-							<span class="didnt-eat-fed-note typewriter">{existingLog.amountEaten === 'none' ? 'already none' : `logged: ${existingLog.amountEaten}`}</span>
-						{/if}
-					</label>
-				{/each}
-			</div>
-			<button
-				class="didnt-eat-save"
-				type="button"
-				disabled={savingDidntEat || didntEatIds.length === 0}
-				on:click={saveDidntEat}
-			>
-				{savingDidntEat ? 'Saving…' : `Log ${didntEatIds.length} dog${didntEatIds.length === 1 ? '' : 's'} as didn't eat`}
-			</button>
-		</div>
+<Modal open={showDidntEatPanel} title="Who didn't eat?" onClose={() => (showDidntEatPanel = false)}>
+	<p class="didnt-eat-hint typewriter">Select dogs that didn't eat. Already-logged dogs can be updated.</p>
+	<div class="didnt-eat-list">
+		{#each displayDogs.filter((d) => !isSurgeryBlocked(d)) as dog}
+			{@const existingLog = fedMap[dog.id]}
+			<label class="didnt-eat-item {existingLog && existingLog.amountEaten === 'none' ? 'didnt-eat-item-already-none' : ''}">
+				<input
+					type="checkbox"
+					checked={didntEatIds.includes(dog.id)}
+					on:change={(e) => {
+						if (e.currentTarget.checked) {
+							didntEatIds = [...didntEatIds, dog.id];
+						} else {
+							didntEatIds = didntEatIds.filter((id) => id !== dog.id);
+						}
+					}}
+				/>
+				<span class="didnt-eat-name">{dog.name}</span>
+				{#if existingLog}
+					<span class="didnt-eat-fed-note typewriter">{existingLog.amountEaten === 'none' ? 'already none' : `logged: ${existingLog.amountEaten}`}</span>
+				{/if}
+			</label>
+		{/each}
 	</div>
-{/if}
+	<svelte:fragment slot="footer">
+		<button
+			class="didnt-eat-save"
+			type="button"
+			disabled={savingDidntEat || didntEatIds.length === 0}
+			on:click={saveDidntEat}
+		>
+			{savingDidntEat ? 'Saving…' : `Log ${didntEatIds.length} dog${didntEatIds.length === 1 ? '' : 's'} as didn't eat`}
+		</button>
+	</svelte:fragment>
+</Modal>
 
 <Modal open={showHistory} title="Feeding History" onClose={() => (showHistory = false)}>
 	<div class="feeding-history-shell">
@@ -886,58 +880,6 @@
 		cursor: pointer;
 	}
 
-	.didnt-eat-overlay {
-		position: fixed;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		left: 0;
-		background: rgba(0, 0, 0, 0.38);
-		z-index: 200;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 1rem;
-	}
-
-	.didnt-eat-modal {
-		background: #fff;
-		border: 1px solid #c8d5e4;
-		border-radius: 0.42rem;
-		width: 100%;
-		max-width: 26rem;
-		max-height: min(90vh, 90dvh);
-		overflow-y: auto;
-		padding: 0.82rem;
-		display: grid;
-		gap: 0.6rem;
-	}
-
-	.didnt-eat-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.didnt-eat-title {
-		margin: 0;
-		font-size: 0.62rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: #7a1f1f;
-	}
-
-	.didnt-eat-close {
-		background: none;
-		border: none;
-		font-size: 1.1rem;
-		line-height: 1;
-		color: #7a8fa6;
-		cursor: pointer;
-		padding: 0 0.2rem;
-	}
-
 	.didnt-eat-hint {
 		margin: 0;
 		font-size: 0.62rem;
@@ -947,6 +889,7 @@
 	.didnt-eat-list {
 		display: grid;
 		gap: 0.1rem;
+		margin-top: 0.6rem;
 	}
 
 	.didnt-eat-item {

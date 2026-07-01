@@ -16,6 +16,7 @@
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import { formatDateTime, toDate } from '$lib/utils/dates';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import { getCautionDogs } from '$lib/utils/attention';
 	import {
 		buildRecommendations,
@@ -33,11 +34,6 @@
 	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
 	import { syncVersion } from '$lib/stores/sync';
-
-	function portal(node: HTMLElement) {
-		document.body.appendChild(node);
-		return { destroy() { node.remove(); } };
-	}
 
 	let dogs: Dog[] = [];
 	let sessions: PlaygroupSession[] = [];
@@ -908,14 +904,8 @@
 			{/if}
 		{/if}
 
-		{#if showManualModal}
-			<div class="manual-modal-overlay" use:portal role="presentation" on:click|self={() => showManualModal = false}>
-				<div class="manual-modal" role="dialog" aria-modal="true" aria-label="Log playgroup">
-					<div class="manual-modal-head">
-						<p class="manual-modal-title typewriter">Log playgroup</p>
-						<button class="manual-modal-close" type="button" aria-label="Close" on:click={() => showManualModal = false}>×</button>
-					</div>
-					<form class="manual-form" on:submit|preventDefault={saveManualSession}>
+		<Modal open={showManualModal} title="Log playgroup" onClose={() => showManualModal = false}>
+				<form class="manual-form" on:submit|preventDefault={saveManualSession}>
 						<div class="manual-grid">
 							<label class="form-field" for="manual-group-name">
 								<span class="typewriter">Group name (optional)</span>
@@ -972,10 +962,8 @@
 						<button class="manual-save-btn typewriter" type="submit" disabled={savingManual}>
 							{savingManual ? 'Saving...' : 'Add to history'}
 						</button>
-					</form>
-				</div>
-			</div>
-		{/if}
+				</form>
+		</Modal>
 	</section>
 {/if}
 
@@ -1488,62 +1476,6 @@
 
 	.log-manual-btn:hover {
 		background: #d5eedb;
-	}
-
-	.manual-modal-overlay {
-		position: fixed;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		left: 0;
-		background: rgba(0, 0, 0, 0.38);
-		z-index: 200;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 1rem;
-	}
-
-	.manual-modal {
-		background: #fff;
-		border: 1px solid #c8d5e4;
-		border-radius: 0.42rem;
-		width: 100%;
-		max-width: 30rem;
-		max-height: min(90vh, 90dvh);
-		overflow-y: auto;
-		padding: 0.82rem;
-		padding-bottom: max(0.82rem, env(safe-area-inset-bottom));
-	}
-
-	.manual-modal-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 0.6rem;
-	}
-
-	.manual-modal-title {
-		margin: 0;
-		font-size: 0.62rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: #2e4a66;
-	}
-
-	.manual-modal-close {
-		background: none;
-		border: none;
-		font-size: 1.1rem;
-		line-height: 1;
-		color: #7a8fa6;
-		cursor: pointer;
-		padding: 0 0.2rem;
-	}
-
-	.manual-modal-close:hover {
-		color: #2e4a66;
 	}
 
 	.history-list {

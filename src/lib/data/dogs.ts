@@ -96,6 +96,7 @@ interface StoredDog {
 	dayTripManagerOnly?: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
+	lastSheetColor?: 'green' | 'yellow' | 'red' | null;
 	dayTripPuppyOverride?: boolean;
 	dayTripNotes: string | null;
 	handlingLevel?: DogHandlingLevel;
@@ -367,6 +368,7 @@ function serializeDog(dog: Dog): StoredDog {
 		dayTripManagerOnly: dog.dayTripManagerOnly ?? false,
 		dayTripManagerOnlyReason: dog.dayTripManagerOnly ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
 		manualTripColor: dog.manualTripColor ?? null,
+		lastSheetColor: dog.lastSheetColor ?? null,
 		dayTripPuppyOverride: dog.dayTripPuppyOverride ?? false,
 		dayTripNotes: dog.dayTripNotes,
 		handlingLevel: dog.handlingLevel ?? 'volunteer',
@@ -515,6 +517,9 @@ function deserializeDog(stored: StoredDog): Dog {
 		dayTripManagerOnlyReason,
 		manualTripColor: (['green', 'yellow', 'red'].includes(stored.manualTripColor ?? '')
 			? (stored.manualTripColor as 'green' | 'yellow' | 'red')
+			: null),
+		lastSheetColor: (['green', 'yellow', 'red'].includes(stored.lastSheetColor ?? '')
+			? (stored.lastSheetColor as 'green' | 'yellow' | 'red')
 			: null),
 		dayTripPuppyOverride: stored.dayTripPuppyOverride ?? false,
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
@@ -1535,14 +1540,40 @@ export async function logDayTrip(dogId: string, profile?: UserProfile | null, no
 // timestamp. Never touches lastDayTripDate or trip logs — completed trips are
 // recorded via the trip log form (logManualTrip), which owns the overdue clock.
 /**
- * Manager-set day-trip color override. Pass `null` to clear the override and
- * fall back to the imported sheet color / computed color.
+ * Sets a dog's day-trip color (the single source of truth). Pass `null` to clear it
+ * and fall back to the computed color.
  */
 export async function setDogManualTripColor(
 	dogId: string,
 	color: 'green' | 'yellow' | 'red' | null
 ): Promise<void> {
 	await updateDog(dogId, { manualTripColor: color });
+}
+
+/**
+ * Syncs sheet colors into each dog's single `manualTripColor` field. The sheet is one input
+ * to the source of truth (not a parallel layer): a dog's color is only updated when the
+ * sheet value has *changed* since last sync (`lastSheetColor`), so a manual color set in the
+ * app persists until the sheet actually changes. Returns the map of dogId → new color that
+ * changed, so callers can update their local list without a re-fetch.
+ */
+export async function syncSheetColorsToDogs(
+	dogs: Dog[],
+	sheetColors: Record<string, 'green' | 'yellow' | 'red'>
+): Promise<Map<string, 'green' | 'yellow' | 'red'>> {
+	const changes = new Map<string, 'green' | 'yellow' | 'red'>();
+	for (const dog of dogs) {
+		const key = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+		const sheetColor = sheetColors[key];
+		if (!sheetColor) continue; // sheet has no color for this dog — leave it alone
+		if (sheetColor !== dog.lastSheetColor) changes.set(dog.id, sheetColor);
+	}
+	await Promise.all(
+		[...changes].map(([id, color]) =>
+			updateDog(id, { manualTripColor: color, lastSheetColor: color })
+		)
+	);
+	return changes;
 }
 
 export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<void> {

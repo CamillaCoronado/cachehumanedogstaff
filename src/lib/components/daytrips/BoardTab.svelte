@@ -8,7 +8,6 @@
 	export let dogsEligible: Dog[] = [];
 	export let dogsIneligible: Dog[] = [];
 	export let allTimeTripsCountByDog: Record<string, number> = {};
-	export let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	export let getEligibility: (dog: Dog) => DayTripEligibility;
 	export let toggleOut: (dog: Dog) => Promise<void>;
 	export let toggleAwaitingEval: (dog: Dog) => Promise<void>;
@@ -59,12 +58,12 @@
 					{#if dogsEligible.length === 0}
 						<p class="cal-empty">None ready</p>
 					{:else}
-						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
+						{#each dogsEligible.filter(d => !boardColorFilter || dogStripeColor(d) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
 							{@const sinceReturnDays = getDayTripGapDays(dog, now)}
 							{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
 							{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS}
-							{@const stripe = dogStripeColor(dog, sheetColors)}
+							{@const stripe = dogStripeColor(dog)}
 							{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
@@ -107,9 +106,9 @@
 					{#if dogsIneligible.length === 0}
 						<p class="cal-empty">None</p>
 					{:else}
-						{#each dogsIneligible.filter(d => !boardColorFilter || dogStripeColor(d, sheetColors) === boardColorFilter) as dog}
+						{#each dogsIneligible.filter(d => !boardColorFilter || dogStripeColor(d) === boardColorFilter) as dog}
 							{@const eligibility = getEligibility(dog)}
-							{@const stripe = dogStripeColor(dog, sheetColors)}
+							{@const stripe = dogStripeColor(dog)}
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<div class="cal-event-actions">

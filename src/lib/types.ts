@@ -98,8 +98,13 @@ export interface Dog {
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
 	dayTripManagerOnly: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
-	/** Manager-set color override; takes precedence over the imported sheet color. */
+	/** The dog's day-trip color — the single source of truth. Set by a manager (Colors tab)
+	 *  or synced in from the sheet; `dogStripeColor` reads this, falling back to a computed
+	 *  color when it's null. (Field name kept for back-compat.) */
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
+	/** Last color seen from the sheet, so a sheet change can update `manualTripColor` without
+	 *  clobbering a manual change on every load. */
+	lastSheetColor?: 'green' | 'yellow' | 'red' | null;
 	/** Manager override letting an under-6-month puppy go on day trips before the 30-day gate. */
 	dayTripPuppyOverride?: boolean;
 	dayTripNotes: string | null;

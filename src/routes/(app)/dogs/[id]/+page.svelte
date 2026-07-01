@@ -39,7 +39,6 @@
 	import { getDayTripGapDays } from '$lib/utils/attention';
 	import { shelterTimeLabel, stoolColor, stoolLabel, reentryDatesLabel } from '$lib/utils/labels';
 	import { durationHours as dayTripHours } from '$lib/utils/daytrips';
-	let sheetColors: Record<string, 'green' | 'yellow' | 'red'> = {};
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -241,7 +240,7 @@
 		: adoptionReasonBadge
 			? `Adoption: Unavailable (${adoptionReasonBadge})`
 			: 'Adoption: Unavailable';
-	$: whiteboardStatusTagClass = dog ? `whiteboard-tag-${dogStripeColor(dog, sheetColors)}` : 'whiteboard-tag-green';
+	$: whiteboardStatusTagClass = dog ? `whiteboard-tag-${dogStripeColor(dog)}` : 'whiteboard-tag-green';
 	$: stripHasCarefulWarning =
 		Boolean(dog) &&
 		!dog.isOutOnDayTrip &&
@@ -327,10 +326,7 @@
 		loading = true;
 		activeStatusInfo = null;
 		photoLoadFailed = false;
-		[dog] = await Promise.all([
-			getDog(dogId),
-			fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({})).then(c => { sheetColors = c; })
-		]);
+		dog = await getDog(dogId);
 		if (dog) {
 			[notes, bathLogs, feedingLogs, stoolLogs, dayTripLogs] = await Promise.all([
 				listBehavioralNotes(dogId),

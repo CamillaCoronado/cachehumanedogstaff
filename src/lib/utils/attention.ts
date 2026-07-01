@@ -1,11 +1,11 @@
 import { startOfDay } from 'date-fns';
-import { bathEligible, checkDayTripEligibility, daysSince, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
+import { bathEligible, checkDayTripEligibility, daysSince, dogStripeColor, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
 import type { Dog, PlaygroupSession } from '$lib/types';
 
-export function isDayTripEligible(dog: Dog, sheetColors: Record<string, string> = {}): boolean {
+export function isDayTripEligible(dog: Dog): boolean {
 	if (dog.isOutOnDayTrip) return false;
-	const key = dog.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-	if (sheetColors[key] === 'red') return false;
+	// A red dog (its single source-of-truth color) is never eligible.
+	if (dogStripeColor(dog) === 'red') return false;
 	return checkDayTripEligibility(
 		dog.intakeDate, dog.isVaccinated, dog.isFixed, dog.dayTripStatus,
 		dog.isolationStatus, dog.dayTripIneligibleReason, dog.dayTripManagerOnly,

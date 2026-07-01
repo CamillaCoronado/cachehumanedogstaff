@@ -1222,7 +1222,11 @@
 
 	.page-paper {
 		position: relative;
-		will-change: transform, opacity;
+		/* NOTE: do not put `will-change: transform` (or a transform/filter/contain) here.
+		 * It establishes a containing block for fixed-position descendants, which traps
+		 * page-local `position: fixed` modals inside the content area instead of the
+		 * viewport. The will-change hint lives on the page-turn classes below, which are
+		 * only applied during the transition (no modal is open then). */
 		width: 100%;
 		max-width: 100vw;
 		min-width: 0;
@@ -1238,10 +1242,12 @@
 	}
 
 	.page-turn-forward {
+		will-change: transform, opacity;
 		animation: pageTurnForward 240ms ease-out;
 	}
 
 	.page-turn-backward {
+		will-change: transform, opacity;
 		animation: pageTurnBackward 240ms ease-out;
 	}
 

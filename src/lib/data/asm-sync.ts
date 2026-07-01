@@ -480,7 +480,17 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		fields: []
 	}));
 
-	return { changes: [...pendingChanges, ...archivedChanges, ...newArrivalChanges] };
+	// Dedupe by dog id: a brand-new dog is flagged by both `pendingChanges` (new Firestore
+	// doc) and `newArrivalChanges` (not in the known-ids list), which would list it twice.
+	// Keep the first (richer) entry per id.
+	const seen = new Set<string>();
+	const changes: SyncChange[] = [];
+	for (const change of [...pendingChanges, ...archivedChanges, ...newArrivalChanges]) {
+		if (seen.has(change.id)) continue;
+		seen.add(change.id);
+		changes.push(change);
+	}
+	return { changes };
 }
 
 /**
