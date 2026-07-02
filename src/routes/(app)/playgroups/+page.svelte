@@ -3,7 +3,7 @@
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
-	import { listDogs } from '$lib/data/dogs';
+	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import {
 		addPlaygroupSession,
 		deletePlaygroupSession,
@@ -35,7 +35,7 @@
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
 	import { syncVersion } from '$lib/stores/sync';
 
-	let dogs: Dog[] = [];
+	$: dogs = $dogsStore;
 	let sessions: PlaygroupSession[] = [];
 	let loading = true;
 	let savingManual = false;
@@ -85,7 +85,7 @@
 	$: canEdit = canEditPlaygroups(role);
 	$: if (canViewPlaygroups && !playgroupsLoaded) {
 		playgroupsLoaded = true;
-		void refreshData();
+		void refreshData(false);
 	}
 	$: if (!canViewPlaygroups) {
 		loading = false;
@@ -135,10 +135,12 @@
 
 	$: if ($syncVersion > 0) void refreshData();
 
-	async function refreshData() {
+	async function refreshData(forceDogs = true) {
 		loading = true;
-		[dogs, sessions, pendingPlaygroups] = await Promise.all([
-			listDogs(),
+		// Dogs flow through the shared store; the initial load reuses its cache,
+		// while sync-triggered refreshes force-fetch (as before).
+		[, sessions, pendingPlaygroups] = await Promise.all([
+			forceDogs ? refreshDogs() : ensureDogsLoaded(),
 			listPlaygroupSessions(),
 			listPendingPlaygroups()
 		]);
