@@ -101,6 +101,22 @@ Today every page calls `listDogs()` independently on mount and re-fetches via
 
 This removes duplicated `refreshDogs()` plumbing from ~8 pages and cuts Firestore reads.
 
+### Progress (2026-07-01)
+
+`src/lib/stores/dogs.ts` created: `ensureDogsLoaded()` (cache + 2-min
+stale-while-revalidate), `refreshDogs()` (forced, shared inflight), `patchDogInStore()`,
+and the syncVersion re-fetch handled once at the store level.
+
+- [x] kennels · medical · feeding · playgroups · dogs roster · home dashboard
+      (one commit each; initial loads use the cache, sync/mutation paths force-fetch)
+- [ ] daytrips — still direct via `data/daytripSync.ts` (its loader applies sheet-color
+      side effects to its own copy; migrate as its own step)
+- [ ] admin — direct `listDogs`; fold into the Phase 4 admin data-layer cleanup
+- [ ] trip-log (public QR page) — intentionally standalone; decide whether it should
+      share the store at all
+- [ ] dogs/[id] detail page uses `getDog(id)` per dog (not the collection) — out of
+      scope for the collection store
+
 ## Phase 4 — Cleanups
 
 - [ ] Review `docs/unused-code.md` (inventory of unreferenced exports, generated
