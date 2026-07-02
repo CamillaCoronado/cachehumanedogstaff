@@ -4,9 +4,9 @@
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { resolveRole, canEditDogs } from '$lib/utils/permissions';
-	import { listDogs, updateDog } from '$lib/data/dogs';
+	import { updateDog } from '$lib/data/dogs';
 	import type { Dog, UserRole } from '$lib/types';
-	import { syncVersion } from '$lib/stores/sync';
+	import { dogs as dogsStore, dogsLoaded, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { dogAgeWeeks } from '$lib/utils/attention';
 
 	import {
@@ -22,8 +22,8 @@
 	} from '$lib/utils/kennelLayout';
 	import type { RunId } from '$lib/utils/kennelLayout';
 
-	let dogs: Dog[] = [];
-	let loading = true;
+	$: dogs = $dogsStore;
+	$: loading = !$dogsLoaded;
 	let draggingId: string | null = null;
 	let hoveredRun: RunId | null = null;
 	let hoveredUnassigned = false;
@@ -35,7 +35,7 @@
 	let touchDragY = 0;
 
 	onMount(() => {
-		void refreshDogs();
+		void ensureDogsLoaded();
 
 		const handlePointerMove = (event: PointerEvent) => {
 			handleTouchPointerMove(event);
@@ -76,13 +76,8 @@
 		? kennelEligibleDogs.find((dog) => dog.id === selectedDogId) ?? null
 		: null;
 
-	$: if ($syncVersion > 0) void refreshDogs();
-
-	async function refreshDogs() {
-		loading = true;
-		dogs = await listDogs();
-		loading = false;
-	}
+	// Dog data, the ASM-sync re-fetch, and post-mutation refreshes all flow through
+	// the shared dog store ($lib/stores/dogs); `refreshDogs` is its force-refresh.
 
 	function handleDragStart(event: DragEvent, dog: Dog) {
 		if (!canEdit) return;
