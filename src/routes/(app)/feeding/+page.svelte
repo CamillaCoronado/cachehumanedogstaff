@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
-	import { listDogs, addFeedingLog, updateFeedingLog, updateDog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
+	import { addFeedingLog, updateFeedingLog, updateDog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
+	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs, patchDogInStore } from '$lib/stores/dogs';
 	import { formatDate, isSameCalendarDay, isSurgeryToday } from '$lib/utils/dates';
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -37,7 +38,7 @@
 	const amounts: AmountEaten[] = ['all', 'most', 'half', 'little', 'none'];
 	const HISTORY_LIMIT = 200;
 
-	let dogs: Dog[] = [];
+	$: dogs = $dogsStore;
 	let feedingLogs: Record<string, FeedingLog[]> = {};
 	let stoolLogs: Record<string, StoolLog[]> = {};
 	let loading = true;
@@ -64,7 +65,9 @@
 	let savingDidntEat = false;
 
 	onMount(async () => {
-		await refreshDogs();
+		const rows = await ensureDogsLoaded();
+		await refreshLogs(rows);
+		loading = false;
 	});
 
 	// Exclude foster, permanent foster, and incoming dogs not expected today
@@ -122,8 +125,7 @@
 				hasSecondMeal: feedDraft.hasSecondMeal,
 				secondMealAmount: feedDraft.secondMealAmount.trim()
 			});
-			dogs = dogs.map((d) => d.id === dog.id ? {
-				...d,
+			patchDogInStore(dog.id, {
 				foodType: feedDraft.foodType,
 				foodAmount: feedDraft.foodAmount.trim(),
 				dietaryNotes: feedDraft.dietaryNotes.trim(),
@@ -133,7 +135,7 @@
 				hasSupplements: feedDraft.hasSupplements,
 				hasSecondMeal: feedDraft.hasSecondMeal,
 				secondMealAmount: feedDraft.secondMealAmount.trim()
-			} : d);
+			});
 			editingFeedId = null;
 		} catch {
 			toast.error(`Could not update ${dog.name}'s feeding info.`);
@@ -142,21 +144,24 @@
 		}
 	}
 
-	$: if ($syncVersion > 0) void refreshDogs();
+	// Dogs come from the shared store; logs are per-dog subcollections the page
+	// still owns, so an ASM sync re-fetches both here (the store dedupes the
+	// concurrent dog fetch its own syncVersion subscription triggers).
+	$: if ($syncVersion > 0) void refreshAll();
 
-	async function refreshDogs() {
+	async function refreshAll() {
 		loading = true;
-		dogs = await listDogs();
-		await refreshLogs();
+		const rows = await refreshDogs();
+		await refreshLogs(rows);
 		loading = false;
 	}
 
-	async function refreshLogs() {
+	async function refreshLogs(list: Dog[] = dogs) {
 		const feedingEntries = await Promise.all(
-			dogs.map(async (dog) => [dog.id, await listFeedingLogs(dog.id)] as const)
+			list.map(async (dog) => [dog.id, await listFeedingLogs(dog.id)] as const)
 		);
 		const stoolEntries = await Promise.all(
-			dogs.map(async (dog) => [dog.id, await listStoolLogs(dog.id)] as const)
+			list.map(async (dog) => [dog.id, await listStoolLogs(dog.id)] as const)
 		);
 		feedingLogs = Object.fromEntries(feedingEntries);
 		stoolLogs = Object.fromEntries(stoolEntries);
