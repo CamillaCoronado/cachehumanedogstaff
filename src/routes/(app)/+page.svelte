@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { format, startOfDay } from 'date-fns';
-	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, listDogs, updateDog } from '$lib/data/dogs';
+	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, updateDog } from '$lib/data/dogs';
+	import { ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import { canEditDogs } from '$lib/utils/permissions';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
@@ -86,7 +87,7 @@
 		const canLoad = !firebaseEnabled || ($authReady && Boolean($authUser));
 		if (canLoad && !boardLoaded) {
 			boardLoaded = true;
-			void loadBoard();
+			void loadBoard(false);
 		}
 	}
 
@@ -486,13 +487,15 @@
 
 	$: if ($syncVersion > 0) void loadBoard();
 
-	async function loadBoard() {
+	async function loadBoard(forceDogs = true) {
 		loading = true;
 		errorMessage = '';
 		failedThumbs = new Set();
 		try {
+			// Dogs flow through the shared store: the initial load reuses its cache,
+			// sync- and mutation-triggered reloads force-fetch (as before).
 			const [dogs, tripLogs, feedingByDog, pgSessions, recentAsmAdoptions] = await Promise.all([
-				listDogs(),
+				forceDogs ? refreshDogs() : ensureDogsLoaded(),
 				listAllDayTripLogs(),
 				listAllFeedingLogsForToday(),
 				listPlaygroupSessions(),
