@@ -207,7 +207,6 @@
 					? `Manager only: ${dayTripReasonNote}`
 					: 'Manager only';
 	$: difficultWhiteboardNote = dayTripReasonNote ? `Caution: ${dayTripReasonNote}` : 'Adults only';
-	$: activeTrip = dayTripLogs.find((log) => !log.endedAt) ?? null;
 	$: adoptionAvailability = dog ? getAdoptionAvailability(dog) : null;
 	$: adoptionNotice = dog
 		? adoptionAvailability?.state === 'not_available'
@@ -794,7 +793,7 @@
 						<dt>Current Trip</dt>
 						<dd>
 							{#if dog.isOutOnDayTrip}
-								Out since {formatDateTime(activeTrip?.startedAt ?? dog.currentDayTripStartedAt)}
+								Out on day trip
 							{:else}
 								In shelter
 							{/if}

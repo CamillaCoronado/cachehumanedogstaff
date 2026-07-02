@@ -1588,12 +1588,9 @@ export async function syncSheetColorsToDogs(
 }
 
 export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<void> {
-	const now = new Date();
-	if (isOut) {
-		await updateDog(dogId, { isOutOnDayTrip: true, currentDayTripStartedAt: now });
-	} else {
-		await updateDog(dogId, { isOutOnDayTrip: false, currentDayTripStartedAt: null });
-	}
+	// Out-status is a pure live boolean — no timestamp is stored (currentDayTripStartedAt
+	// stays null) so the board has no lingering "out since" record.
+	await updateDog(dogId, { isOutOnDayTrip: isOut, currentDayTripStartedAt: null });
 }
 
 export async function startDayTrip(dogId: string, profile?: UserProfile | null, notes?: string | null) {

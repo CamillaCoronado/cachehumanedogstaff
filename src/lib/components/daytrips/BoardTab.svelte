@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Dog } from '$lib/types';
 	import type { DayTripEligibility } from '$lib/utils/dates';
-	import { daysSince, dogStripeColor, dogColorReason, formatDateTime, isUnderageForDayTrips, tripColorReasonLabel } from '$lib/utils/dates';
+	import { daysSince, dogStripeColor, dogColorReason, isUnderageForDayTrips, tripColorReasonLabel } from '$lib/utils/dates';
 	import { getDayTripGapDays, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 
 	export let dogsOut: Dog[] = [];
@@ -41,7 +41,6 @@
 							<div class="cal-event cal-event-blue">
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<p class="cal-event-meta">Kennel {dog.outdoorKennelAssignment || '—'}</p>
-								<p class="cal-event-meta">Out since {formatDateTime(dog.currentDayTripStartedAt)}</p>
 								<p class="cal-event-count">{allTime} total trip{allTime !== 1 ? 's' : ''}</p>
 								<button class="cal-btn cal-btn-blue" on:click={() => toggleOut(dog)}>Mark Returned</button>
 							</div>

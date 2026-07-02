@@ -130,11 +130,7 @@
 
 	$: dogsOut = activeDogs
 		.filter((dog) => dog.isOutOnDayTrip)
-		.sort((a, b) => {
-			const first = tripStartForDog(a)?.getTime() ?? 0;
-			const second = tripStartForDog(b)?.getTime() ?? 0;
-			return first - second;
-		});
+		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: managerOnlyDogs = activeDogs
 		.filter(
@@ -194,11 +190,6 @@
 	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs);
 
 
-	function tripStartForDog(dog: Dog) {
-		// Out-status is purely visual — start time comes from the flag's timestamp, not logs.
-		return toDate(dog.currentDayTripStartedAt);
-	}
-
 	function hasFeedingLogForShift(dogId: string, mealTime: MealTime) {
 		const logs = feedingLogsByDog[dogId] ?? [];
 		return logs.some((log) => log.mealTime === mealTime && isSameCalendarDay(log.date, today));
@@ -209,14 +200,12 @@
 	}
 
 	function formatOutLine(dog: Dog) {
-		const startedAt = tripStartForDog(dog);
 		const dob = toDate(dog.dateOfBirth);
 		const ageYears = dob
 			? Math.max(0, Math.floor((today.getTime() - startOfDay(dob).getTime()) / 31_557_600_000))
 			: null;
 		const ageTag = ageYears !== null ? ` (${ageYears})` : '';
-		const timeTag = startedAt ? format(startedAt, 'h:mma').toLowerCase() : 'unknown';
-		return `${dog.name}${ageTag} - ${timeTag}`;
+		return `${dog.name}${ageTag}`;
 	}
 
 	function isolationLabel(dog: Dog) {

@@ -2,7 +2,7 @@ import { startOfDay } from 'date-fns';
 import { bathEligible, checkDayTripEligibility, daysSince, dogStripeColor, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
 import type { Dog, PlaygroupSession } from '$lib/types';
 
-export function isDayTripEligible(dog: Dog): boolean {
+export function isDayTripEligible(dog: Dog, today = new Date()): boolean {
 	if (dog.isOutOnDayTrip) return false;
 	// A red dog (its single source-of-truth color) is never eligible.
 	if (dogStripeColor(dog) === 'red') return false;
@@ -11,7 +11,7 @@ export function isDayTripEligible(dog: Dog): boolean {
 		dog.isolationStatus, dog.dayTripIneligibleReason, dog.dayTripManagerOnly,
 		dog.dayTripManagerOnlyReason, dog.dayTripNotes, dog.handlingLevel,
 		dog.surgeryDate, dog.surgeryRestDays, dog.awaitingEvaluation,
-		null, new Date(), dog.dateOfBirth, dog.vaccineCount, dog.vaccinesOutstanding,
+		null, today, dog.dateOfBirth, dog.vaccineCount, dog.vaccinesOutstanding,
 		dog.dayTripPuppyOverride
 	).eligible;
 }
@@ -171,7 +171,7 @@ export function getOverdueDayTripDogs(dogs: Dog[], today: Date): DayTripAttentio
 	const items: DayTripAttentionItem[] = [];
 	for (const dog of dogs) {
 		if (dog.inFoster) continue;
-		if (dog.dayTripStatus === 'ineligible') continue;
+		if (!isDayTripEligible(dog, today)) continue;
 		if (dog.isolationStatus !== 'none') continue;
 		if (dog.isOutOnDayTrip) continue;
 		if (isSurgeryResting(dog, today)) continue;
