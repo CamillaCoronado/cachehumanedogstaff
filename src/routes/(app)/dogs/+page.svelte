@@ -5,7 +5,8 @@
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
-	import { listDogs, updateDog, createDog, logBath, setDogTripStatus, returnDog, syncSheetColorsToDogs } from '$lib/data/dogs';
+	import { updateDog, createDog, logBath, setDogTripStatus, returnDog, syncSheetColorsToDogs } from '$lib/data/dogs';
+	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs as refreshDogStore, patchDogInStore } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
 	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
@@ -36,7 +37,7 @@
 
 const today = new Date();
 
-	let dogs: Dog[] = [];
+	$: dogs = $dogsStore;
 	let failedPhotos = new Set<string>();
 	let lastPlaygroupByDogId: Record<string, Date | null> = {};
 	let loading = true;
@@ -68,7 +69,7 @@ const today = new Date();
 	let saving = false;
 
 	onMount(async () => {
-		await refreshDogs();
+		await refreshDogs(false);
 	});
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
@@ -197,15 +198,14 @@ const today = new Date();
 
 	$: if ($syncVersion > 0) void refreshDogs();
 
-	async function refreshDogs() {
+	async function refreshDogs(forceDogs = true) {
 		loading = true;
 		failedPhotos = new Set();
 		const [dogRows, playgroupRows, colorsRes] = await Promise.all([
-			listDogs(),
+			forceDogs ? refreshDogStore() : ensureDogsLoaded(),
 			listPlaygroupSessions(),
 			fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({}))
 		]);
-		dogs = dogRows;
 		lastPlaygroupByDogId = buildLastPlaygroupMap(playgroupRows);
 		loading = false;
 
@@ -225,15 +225,12 @@ const today = new Date();
 			await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true })));
 		}
 
-		if (colorChanges.size > 0 || evaluated.length > 0) {
-			const evaluatedIds = new Set(evaluated.map((e) => e.id));
-			dogs = dogRows.map((d) => {
-				let next = d;
-				const color = colorChanges.get(d.id);
-				if (color) next = { ...next, manualTripColor: color, lastSheetColor: color };
-				if (evaluatedIds.has(d.id)) next = { ...next, awaitingEvaluation: false, evaluationAutoCleared: true };
-				return next;
-			});
+		// Apply both side effects to the shared store so every page sees them.
+		for (const [id, color] of colorChanges) {
+			patchDogInStore(id, { manualTripColor: color, lastSheetColor: color });
+		}
+		for (const d of evaluated) {
+			patchDogInStore(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true });
 		}
 	}
 
