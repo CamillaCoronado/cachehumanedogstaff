@@ -5,8 +5,8 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, canSetDayTripColor, resolveRole } from '$lib/utils/permissions';
-	import { listDogs, setDogTripStatus, listAllDayTripLogs, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, logManualTrip, patchDayTripLog, importedTripId, syncSheetColorsToDogs } from '$lib/data/dogs';
-	import { listVolunteers } from '$lib/data/volunteers';
+	import { setDogTripStatus, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog } from '$lib/data/dogs';
+	import { loadDayTripData, autoImportTripsFromHiddenNotes } from '$lib/data/daytripSync';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
 	import ImportTab from '$lib/components/daytrips/ImportTab.svelte';
@@ -18,7 +18,6 @@
 	import { getDayTripGapDays, isDayTripEligible, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { durationHours, formatDuration, formatTime, formatShortDate } from '$lib/utils/daytrips';
 	import { matchDogByName } from '$lib/utils/dogs';
-	import { parseDayTripNotes } from '$lib/utils/tripNotesParser';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -33,87 +32,17 @@
 
 	let volunteers: Volunteer[] = [];
 	async function autoImportFromHiddenNotes() {
-		// Only sync real, in-shelter dogs, and only when an actual dated note block
-		// is present — a loose "day trip notes" mention (no date) would otherwise be
-		// re-selected on every sync and never clear.
-		const dogsWithNotes = dogs.filter(
-			(d) =>
-				d.status === 'active' &&
-				!d.permanentFoster &&
-				!d.inFoster &&
-				!d.isIncoming &&
-				/Day Trip Notes\s+\d{1,2}\/\d{1,2}\s*:/i.test(d.hiddenComments ?? '')
-		);
-		if (dogsWithNotes.length === 0) return;
-
-		let totalNew = 0;
-		let totalPatched = 0;
+		let result;
 		try {
-			for (const dog of dogsWithNotes) {
-				const parsed = parseDayTripNotes(dog.hiddenComments!);
-
-				for (const trip of parsed) {
-					const tripDay = trip.date.toDateString();
-					const existing = logs.find(
-						l => l.dogId === dog.id && toDate(l.startedAt)?.toDateString() === tripDay
-					);
-
-					if (existing) {
-						// Patch only if notes/ratings are still empty
-						const needsPatch =
-							!existing.tripNotes &&
-							!existing.reactionToDogs && !existing.reactionToStrangers &&
-							!existing.reactionToCats && !existing.reactionToKids &&
-							!existing.reactionToLeash && !existing.reactionToCarRides &&
-							!existing.reactionToToys;
-						if (!needsPatch) continue;
-						await patchDayTripLog(dog.id, existing.id, {
-							tripNotes: trip.tripNotes || null,
-							reactionToDogs: trip.reactionToDogs,
-							reactionToStrangers: trip.reactionToStrangers,
-							reactionToCats: trip.reactionToCats,
-							reactionToKids: trip.reactionToKids,
-							reactionToLeash: trip.reactionToLeash,
-							reactionToCarRides: trip.reactionToCarRides,
-							reactionToToys: trip.reactionToToys,
-						});
-						totalPatched++;
-					} else {
-						await logManualTrip(dog.id, {
-							logId: importedTripId(trip.date),
-							startedAt: trip.date,
-							endedAt: trip.date,
-							volunteerName: null,
-							reactionToDogs: trip.reactionToDogs,
-							reactionToStrangers: trip.reactionToStrangers,
-							reactionToCats: trip.reactionToCats,
-							reactionToKids: trip.reactionToKids,
-							reactionToLeash: trip.reactionToLeash,
-							reactionToCarRides: trip.reactionToCarRides,
-							reactionToToys: trip.reactionToToys,
-							tripNotes: trip.tripNotes,
-							source: 'staff',
-						}, null);
-						totalNew++;
-					}
-				}
-
-				// NOTE: we intentionally do NOT strip the notes out of hiddenComments
-				// here. ASM owns hiddenComments and re-pushes the full ASM value
-				// (notes included) on every sync, so persisting a stripped copy just
-				// created an endless write-fight (every ASM sync re-flagged "Hidden
-				// comments changed") and could destroy not-yet-logged recent notes.
-				// Trip logging above is idempotent (importedTripId) and patch-guarded,
-				// and the dog detail page strips the notes for display only.
-			}
+			result = await autoImportTripsFromHiddenNotes(dogs, logs);
 		} catch (e) {
 			console.error('[autoImport] error:', e);
 			toast.error('Failed to sync some trips from hidden notes.');
 			return;
 		}
 
-		const total = totalNew + totalPatched;
-		if (total > 0) {
+		const { totalNew, totalPatched } = result;
+		if (totalNew + totalPatched > 0) {
 			await refresh();
 			const parts = [];
 			if (totalNew) parts.push(`${totalNew} new`);
@@ -254,44 +183,7 @@
 	async function refresh() {
 		loading = true;
 		try {
-			let dogRows: typeof dogs = [];
-			let colorsRes: Record<string, string> = {};
-			[dogRows, logs, colorsRes, volunteers] = await Promise.all([
-				listDogs(),
-				listAllDayTripLogs(),
-				fetch('/api/sheets/dog-colors').then(r => r.ok ? r.json() : {}).catch(() => ({})),
-				listVolunteers()
-			]);
-			dogs = dogRows;
-
-			// Sync sheet colors into each dog's single color field — only when the sheet value
-			// actually changed, so a manual color persists until the sheet next changes.
-			const sheet = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
-			const colorChanges = await syncSheetColorsToDogs(dogRows, sheet);
-
-			// Auto-clear awaitingEvaluation once, the first time a dog appears on the DT
-			// Numbers sheet with a color. `evaluationAutoCleared` guards it so a later
-			// MANUAL re-check of awaitingEvaluation is respected and not cleared again.
-			const evaluated = dogRows.filter((d) => {
-				if (!d.awaitingEvaluation || d.evaluationAutoCleared) return false;
-				const key = d.name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-				return Boolean(sheet[key]);
-			});
-			if (evaluated.length > 0) {
-				await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true })));
-			}
-
-			// Apply both the color sync and the eval auto-clear to the local list in one pass.
-			if (colorChanges.size > 0 || evaluated.length > 0) {
-				const evaluatedIds = new Set(evaluated.map((e) => e.id));
-				dogs = dogRows.map((d) => {
-					let next = d;
-					const color = colorChanges.get(d.id);
-					if (color) next = { ...next, manualTripColor: color, lastSheetColor: color };
-					if (evaluatedIds.has(d.id)) next = { ...next, awaitingEvaluation: false, evaluationAutoCleared: true };
-					return next;
-				});
-			}
+			({ dogs, logs, volunteers } = await loadDayTripData());
 		} catch (error) {
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
 			toast.error(code ? `Unable to load day trip data (${code}).` : 'Unable to load day trip data.');

@@ -29,6 +29,46 @@
 					</div>
 				</div>
 
+				<!-- Mobile: stacked cards (no horizontal scroll) -->
+				<ul class="dt-dog-cards">
+					{#each dogStatsRows as dog}
+						{@const sinceReturnDays = getDayTripGapDays(dog, now)}
+						{@const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate) ?? 0}
+						{@const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS}
+						{@const eligibility = getEligibility(dog)}
+						{@const allTime = allTimeTripsCountByDog[dog.id] ?? 0}
+						<li class="dt-dog-card" class:card-overdue={overdue && eligibility.eligible && !dog.isOutOnDayTrip}>
+							<div class="dt-card-top">
+								<a href="/dogs/{dog.id}" class="dt-name-link dt-card-name">{dog.name}</a>
+								{#if dog.isOutOnDayTrip}
+									<span class="dt-out-badge">out now</span>
+								{/if}
+								<span class="dt-card-status">
+									{#if dog.isOutOnDayTrip}
+										<span class="dt-on-trip-tag">on trip</span>
+									{:else}
+										<span class={`pill pill-sm ${statusPillClass(eligibility.status)}`}>{eligibility.status === 'eligible' ? 'Eligible' : eligibility.status === 'difficult' ? 'Difficult' : 'Ineligible'}</span>
+									{/if}
+								</span>
+							</div>
+							<div class="dt-card-meta">
+								<span>
+									{#if sinceReturnDays !== null}
+										last trip {sinceReturnDays}d ago{#if overdue && eligibility.eligible && !dog.isOutOnDayTrip}&thinsp;<span class="dt-overdue-flag">overdue</span>{/if}
+									{:else}
+										no trips yet
+									{/if}
+								</span>
+								<span class="dt-card-dot">·</span>
+								<span><span class="dt-alltime-num">{allTime}</span> all-time</span>
+								<span class="dt-card-dot">·</span>
+								<span>{tripCountByDog[dog.id] ?? 0} in {monthStart.toLocaleDateString('en-US', { month: 'short' })} ({(tripHoursByDog[dog.id] ?? 0).toFixed(1)}h)</span>
+							</div>
+						</li>
+					{/each}
+				</ul>
+
+				<!-- Desktop: table -->
 				<div class="dt-table-wrap">
 					<table class="dt-table">
 						<thead>
@@ -144,8 +184,60 @@
 
 
 
-	/* ── Table ── */
+	/* ── Mobile dog cards ── */
+	.dt-dog-cards {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.dt-dog-card {
+		border: 1px solid #e4e6e9;
+		border-radius: 8px;
+		padding: 0.6rem 0.7rem;
+		background: #fff;
+	}
+
+	.dt-dog-card.card-overdue { background: #fffbf0; }
+
+	.dt-card-top {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.dt-card-name {
+		font-weight: 700;
+		font-size: 0.95rem;
+		color: #202124;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dt-card-status {
+		margin-left: auto;
+		flex-shrink: 0;
+	}
+
+	.dt-card-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.3rem;
+		margin-top: 0.3rem;
+		font-size: 0.8rem;
+		color: #5f6368;
+	}
+
+	.dt-card-dot { color: #bdc1c6; }
+
+	/* ── Table (desktop only) ── */
 	.dt-table-wrap {
+		display: none;
 		overflow-x: auto;
 		border: 1px solid #dadce0;
 		border-radius: 6px;
@@ -289,5 +381,7 @@
 
 	@media (min-width: 768px) {
 		.dt-panel { padding: 1.2rem; }
+		.dt-dog-cards { display: none; }
+		.dt-table-wrap { display: block; }
 	}
 </style>

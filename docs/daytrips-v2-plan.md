@@ -1,6 +1,23 @@
 # Day Trips v2 — Rebuild Plan
 
-Status: **in progress** · Started 2026-06-19
+Status: **SUPERSEDED 2026-07-01** · Started 2026-06-19
+
+> **Decision (Camilla, 2026-07-01): no parallel rebuild.** The feature inventory below
+> showed v1 was already mostly mobile-ready — a rewrite wasn't warranted. The real gaps
+> were fixed in place on `/daytrips` instead:
+>
+> - **Dogs tab**: mobile card layout (cards <768px, table ≥768px — same pattern as Log).
+> - **Colors tab**: tap-to-assign for touch (tap a dog → "Move here" buttons appear per
+>   column); HTML5 drag never fired on touch, so phones couldn't set colors at all.
+>   Drag still works on desktop.
+> - **Shared data layer**: the page's `refresh()` load + hidden-notes auto-import moved
+>   to `src/lib/data/daytripSync.ts` (`loadDayTripData`, `autoImportTripsFromHiddenNotes`).
+>
+> Deliberately **not** done: tab consolidation (tabs are permission-gated, most users see
+> 3–4; a "More" menu would hide tools), quick-log on Board (stays on Log tab), Import
+> mobile cards (desktop-leaning by nature, works as-is).
+>
+> The inventory below is kept for reference.
 
 ## Goal
 

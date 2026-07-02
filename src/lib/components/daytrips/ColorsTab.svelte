@@ -54,13 +54,8 @@
 		}
 	}
 
-	function dropOn(color: Color) {
-		const id = dragId;
-		dragOver = null;
-		dragId = null;
-		if (!id || saving) return;
-		const dog = dogs.find((d) => d.id === id);
-		if (!dog) return;
+	function requestColor(dog: Dog, color: Color) {
+		if (saving) return;
 		if (dogStripeColor(dog) === color) return;
 
 		if (color === 'green') {
@@ -72,6 +67,32 @@
 		}
 	}
 
+	function dropOn(color: Color) {
+		const id = dragId;
+		dragOver = null;
+		dragId = null;
+		if (!id) return;
+		const dog = dogs.find((d) => d.id === id);
+		if (!dog) return;
+		requestColor(dog, color);
+	}
+
+	// Touch path: HTML5 drag doesn't fire on touch, so tap a dog to select it,
+	// then tap a column to assign (same pattern as the kennels map).
+	let selectedId: string | null = null;
+	$: selectedDog = selectedId ? dogs.find((d) => d.id === selectedId) ?? null : null;
+
+	function toggleSelect(dog: Dog) {
+		selectedId = selectedId === dog.id ? null : dog.id;
+	}
+
+	function tapAssign(color: Color) {
+		if (!selectedDog) return;
+		const dog = selectedDog;
+		selectedId = null;
+		requestColor(dog, color);
+	}
+
 	async function pickReason(reason: TripColorReason) {
 		if (!pending) return;
 		const { dog, color } = pending;
@@ -80,7 +101,11 @@
 	}
 </script>
 
-<p class="ct-hint">Drag a dog to a column to set its color. Red/yellow will ask for a reason. This is the dog's color everywhere; the sheet updates the same color when it changes.</p>
+{#if selectedDog}
+	<p class="ct-hint ct-hint-selected">Selected: <strong>{selectedDog.name}</strong> — tap a column to set its color, or tap the dog again to cancel.</p>
+{:else}
+	<p class="ct-hint">Drag a dog to a column — or tap a dog, then tap a column — to set its color. Red/yellow will ask for a reason. This is the dog's color everywhere; the sheet updates the same color when it changes.</p>
+{/if}
 
 <div class="ct-board">
 	{#each columns as col}
@@ -99,24 +124,30 @@
 				<span class="ct-col-count">{dogsInCol.length}</span>
 			</div>
 
+			{#if selectedDog && dogStripeColor(selectedDog) !== col.color}
+				<button class="ct-move-btn" on:click={() => tapAssign(col.color)}>Move {selectedDog.name} here</button>
+			{/if}
+
 			{#if dogsInCol.length === 0}
 				<p class="ct-empty">Drop dogs here</p>
 			{:else}
 				{#each dogsInCol as dog (dog.id)}
-					<div
+					<button
 						class="ct-card ct-card-{col.color}"
 						class:ct-card-dragging={dragId === dog.id}
-						role="listitem"
+						class:ct-card-selected={selectedId === dog.id}
+						aria-pressed={selectedId === dog.id}
 						draggable="true"
 						on:dragstart={(e) => onDragStart(e, dog)}
 						on:dragend={onDragEnd}
+						on:click={() => toggleSelect(dog)}
 					>
 						<span class="ct-grip" aria-hidden="true">⠿</span>
 						<span class="ct-name">{dog.name}</span>
 						{#if col.color !== 'green' && dogColorReason(dog)}
 							<span class="ct-reason">{tripColorReasonLabel(dogColorReason(dog))}</span>
 						{/if}
-					</div>
+					</button>
 				{/each}
 			{/if}
 		</div>
@@ -205,6 +236,9 @@
 		display: flex;
 		align-items: center;
 		gap: 0.45rem;
+		width: 100%;
+		font: inherit;
+		text-align: left;
 		padding: 0.45rem 0.55rem;
 		background: #fff;
 		border: 1px solid #dadce0;
@@ -212,13 +246,35 @@
 		border-radius: 6px;
 		box-shadow: 0 1px 2px rgba(60, 64, 67, 0.06);
 		cursor: grab;
-		touch-action: none;
 	}
 
 	.ct-card-green { border-left-color: #3aaf2a; }
 	.ct-card-yellow { border-left-color: #f29900; }
 	.ct-card-red { border-left-color: #cf4b4b; }
 	.ct-card-dragging { opacity: 0.45; }
+
+	.ct-card-selected {
+		outline: 2px solid #016aa5;
+		outline-offset: 1px;
+	}
+
+	.ct-hint-selected {
+		color: #016aa5;
+		font-weight: 500;
+	}
+
+	.ct-move-btn {
+		padding: 0.4rem 0.55rem;
+		border: 1px dashed #016aa5;
+		border-radius: 6px;
+		background: #eef6fb;
+		font-size: 0.76rem;
+		font-weight: 600;
+		color: #016aa5;
+		cursor: pointer;
+	}
+
+	.ct-move-btn:hover { background: #ddedf7; }
 
 	.ct-grip { color: #bdc1c6; font-size: 0.9rem; line-height: 1; cursor: grab; }
 
