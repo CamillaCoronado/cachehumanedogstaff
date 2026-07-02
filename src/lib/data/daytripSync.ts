@@ -1,11 +1,11 @@
-import { listDogs, listAllDayTripLogs, updateDog, logManualTrip, patchDayTripLog, importedTripId, syncSheetColorsToDogs } from '$lib/data/dogs';
+import { listAllDayTripLogs, updateDog, logManualTrip, patchDayTripLog, importedTripId, syncSheetColorsToDogs } from '$lib/data/dogs';
 import { listVolunteers } from '$lib/data/volunteers';
+import { ensureDogsLoaded, refreshDogs, patchDogInStore } from '$lib/stores/dogs';
 import { toDate } from '$lib/utils/dates';
 import { parseDayTripNotes } from '$lib/utils/tripNotesParser';
 import type { DayTripLog, Dog, Volunteer } from '$lib/types';
 
 export interface DayTripData {
-	dogs: Dog[];
 	logs: DayTripLog[];
 	volunteers: Volunteer[];
 }
@@ -13,12 +13,13 @@ export interface DayTripData {
 /**
  * Loads everything the day-trips page needs (dogs, all trip logs, volunteers) and applies
  * the two sheet-driven side effects: syncing DT-sheet colors into each dog's single color
- * field, and the one-time awaitingEvaluation auto-clear.
- * Shared by /daytrips (v1) and /daytrips-v2; UI concerns (loading flags, toasts) stay in the pages.
+ * field, and the one-time awaitingEvaluation auto-clear. Dogs flow through the shared
+ * dog store ($lib/stores/dogs) — read them from `$dogs`; both side effects are patched
+ * into the store. UI concerns (loading flags, toasts) stay in the page.
  */
-export async function loadDayTripData(): Promise<DayTripData> {
+export async function loadDayTripData(forceDogs = true): Promise<DayTripData> {
 	const [dogRows, logs, colorsRes, volunteers] = await Promise.all([
-		listDogs(),
+		forceDogs ? refreshDogs() : ensureDogsLoaded(),
 		listAllDayTripLogs(),
 		fetch('/api/sheets/dog-colors').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
 		listVolunteers()
@@ -41,20 +42,16 @@ export async function loadDayTripData(): Promise<DayTripData> {
 		await Promise.all(evaluated.map((d) => updateDog(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true })));
 	}
 
-	// Apply both the color sync and the eval auto-clear to the returned list in one pass.
-	let dogs = dogRows;
-	if (colorChanges.size > 0 || evaluated.length > 0) {
-		const evaluatedIds = new Set(evaluated.map((e) => e.id));
-		dogs = dogRows.map((d) => {
-			let next = d;
-			const color = colorChanges.get(d.id);
-			if (color) next = { ...next, manualTripColor: color, lastSheetColor: color };
-			if (evaluatedIds.has(d.id)) next = { ...next, awaitingEvaluation: false, evaluationAutoCleared: true };
-			return next;
-		});
+	// Apply both the color sync and the eval auto-clear to the shared store so
+	// every page sees them.
+	for (const [id, color] of colorChanges) {
+		patchDogInStore(id, { manualTripColor: color, lastSheetColor: color });
+	}
+	for (const d of evaluated) {
+		patchDogInStore(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true });
 	}
 
-	return { dogs, logs, volunteers };
+	return { logs, volunteers };
 }
 
 export interface AutoImportResult {

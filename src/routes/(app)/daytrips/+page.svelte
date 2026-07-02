@@ -7,6 +7,7 @@
 	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, canSetDayTripColor, resolveRole } from '$lib/utils/permissions';
 	import { setDogTripStatus, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog } from '$lib/data/dogs';
 	import { loadDayTripData, autoImportTripsFromHiddenNotes } from '$lib/data/daytripSync';
+	import { dogs as dogsStore } from '$lib/stores/dogs';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
 	import TripLogForm from '$lib/components/daytrips/TripLogForm.svelte';
 	import ImportTab from '$lib/components/daytrips/ImportTab.svelte';
@@ -22,7 +23,7 @@
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-	let dogs: Dog[] = [];
+	$: dogs = $dogsStore;
 	let logs: DayTripLog[] = [];
 	let loading = true;
 	let monthFilter = defaultMonth;
@@ -55,7 +56,7 @@
 		const canLoad = !firebaseEnabled || ($authReady && Boolean($authUser));
 		if (canLoad && !loaded) {
 			loaded = true;
-			void refresh();
+			void refresh(false);
 		}
 	}
 
@@ -180,10 +181,10 @@
 		);
 	}
 
-	async function refresh() {
+	async function refresh(forceDogs = true) {
 		loading = true;
 		try {
-			({ dogs, logs, volunteers } = await loadDayTripData());
+			({ logs, volunteers } = await loadDayTripData(forceDogs));
 		} catch (error) {
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
 			toast.error(code ? `Unable to load day trip data (${code}).` : 'Unable to load day trip data.');
@@ -247,7 +248,7 @@
 				<span class="dt-chip">{monthLabel} · {monthlyTripCount} trips · {monthlyHourTotal.toFixed(1)}h</span>
 			</div>
 			<div class="dt-topbar-right">
-				<button class="dt-btn-sm" on:click={refresh}>Refresh</button>
+				<button class="dt-btn-sm" on:click={() => refresh()}>Refresh</button>
 			</div>
 		</div>
 
