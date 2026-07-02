@@ -1,18 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { listDogs, updateDog } from '$lib/data/dogs';
+	import { updateDog } from '$lib/data/dogs';
+	import { dogs as dogsStore, dogsLoaded, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { createId } from '$lib/utils/storage';
 	import type { Dog, IsolationReason, Treatment } from '$lib/types';
 	import { formatDate, toDate } from '$lib/utils/dates';
 	import { differenceInDays, startOfDay } from 'date-fns';
 	import toast from 'svelte-french-toast';
-	import { syncVersion } from '$lib/stores/sync';
-
 	const today = new Date();
 
-	let loading = true;
-	let dogs: Dog[] = [];
+	$: dogs = $dogsStore;
+	$: loading = !$dogsLoaded;
 
 	// Surgery form
 	let addDogId = '';
@@ -140,7 +139,7 @@
 				surgeryDate: new Date(addDate + 'T12:00:00'),
 				surgeryRestDays: Number.isFinite(restDays) && restDays! >= 0 ? restDays : null
 			});
-			dogs = await listDogs();
+			await refreshDogs();
 			addDogId = '';
 			addDate = new Date().toISOString().slice(0, 10);
 			addRestDays = '';
@@ -156,7 +155,7 @@
 	async function clearSurgery(dog: Dog) {
 		try {
 			await updateDog(dog.id, { lastSurgeryDate: dog.surgeryDate, surgeryDate: null, surgeryRestDays: null });
-			dogs = await listDogs();
+			await refreshDogs();
 			toast.success(`${dog.name} cleared from surgery list.`);
 		} catch {
 			toast.error('Could not clear surgery record.');
@@ -173,7 +172,7 @@
 				fortifloraDays: Number.isFinite(days) && days! > 0 ? days : null,
 				fortifloraTime: ffTime
 			});
-			dogs = await listDogs();
+			await refreshDogs();
 			ffDogId = '';
 			ffDate = today.toISOString().slice(0, 10);
 			ffDays = '';
@@ -191,7 +190,7 @@
 	async function clearFortiflora(dog: Dog) {
 		try {
 			await updateDog(dog.id, { fortifloraDate: null, fortifloraDays: null, fortifloraTime: null });
-			dogs = await listDogs();
+			await refreshDogs();
 			toast.success(`${dog.name} cleared from FortiFlora list.`);
 		} catch {
 			toast.error('Could not clear FortiFlora record.');
@@ -207,7 +206,7 @@
 				isolationReason: isoReason || null,
 				isolationUntilDate: new Date(isoDate + 'T12:00:00')
 			});
-			dogs = await listDogs();
+			await refreshDogs();
 			isoDogId = '';
 			isoReason = '';
 			isoDate = today.toISOString().slice(0, 10);
@@ -223,7 +222,7 @@
 	async function clearIsolation(dog: Dog) {
 		try {
 			await updateDog(dog.id, { isolationStatus: 'none', isolationUntilDate: null });
-			dogs = await listDogs();
+			await refreshDogs();
 			toast.success(`${dog.name} cleared from isolation.`);
 		} catch {
 			toast.error('Could not clear isolation.');
@@ -234,7 +233,7 @@
 		if (!dateStr) return;
 		try {
 			await updateDog(dog.id, { isolationUntilDate: new Date(dateStr + 'T12:00:00') });
-			dogs = await listDogs();
+			await refreshDogs();
 		} catch {
 			toast.error('Could not update isolation date.');
 		}
@@ -260,7 +259,7 @@
 			await updateDog(txDogId, {
 				treatments: [...(dog?.treatments ?? []), newTreatment]
 			});
-			dogs = await listDogs();
+			await refreshDogs();
 			txDogId = '';
 			txName = '';
 			txNotes = '';
@@ -280,7 +279,7 @@
 			await updateDog(dog.id, {
 				treatments: (dog.treatments ?? []).filter((t) => t.id !== treatmentId)
 			});
-			dogs = await listDogs();
+			await refreshDogs();
 			toast.success(`Treatment removed for ${dog.name}.`);
 		} catch {
 			toast.error('Could not remove treatment.');
@@ -298,7 +297,7 @@
 		await Promise.all(
 			expired.map((d) => updateDog(d.id, { isolationStatus: 'none', isolationUntilDate: null }))
 		);
-		dogs = await listDogs();
+		await refreshDogs();
 		toast.success(`Isolation cleared: ${expired.map((d) => d.name).join(', ')}`);
 	}
 
@@ -317,25 +316,20 @@
 			.filter((u) => u.removed.length > 0);
 		if (updates.length === 0) return;
 		await Promise.all(updates.map((u) => updateDog(u.dog.id, { treatments: u.kept })));
-		dogs = await listDogs();
+		await refreshDogs();
 		const label = updates
 			.map((u) => `${u.dog.name} (${u.removed.map((t) => t.name).join(', ')})`)
 			.join('; ');
 		toast.success(`Treatment cleared: ${label}`);
 	}
 
-	async function refreshDogs() {
-		dogs = await listDogs();
-		loading = false;
-	}
-
-	$: if ($syncVersion > 0) void refreshDogs();
+	// Dog data, the ASM-sync re-fetch, and post-mutation refreshes all flow through
+	// the shared dog store ($lib/stores/dogs); `refreshDogs` is its force-refresh.
 
 	onMount(async () => {
-		dogs = await listDogs();
+		await ensureDogsLoaded();
 		await autoClearExpiredIsolations();
 		await autoClearExpiredTreatments();
-		loading = false;
 	});
 </script>
 
@@ -430,9 +424,7 @@
 												class="med-reason-btn {(dog.isolationReason ?? null) === opt.value ? 'med-reason-active' : ''}"
 												type="button"
 												on:click={() =>
-													updateDog(dog.id, { isolationReason: opt.value }).then(() =>
-														listDogs().then((d) => (dogs = d))
-													)}
+													updateDog(dog.id, { isolationReason: opt.value }).then(() => refreshDogs())}
 											>{opt.label}</button>
 										{/each}
 									</div>
