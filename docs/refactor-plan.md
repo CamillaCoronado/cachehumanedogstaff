@@ -109,13 +109,15 @@ and the syncVersion re-fetch handled once at the store level.
 
 - [x] kennels · medical · feeding · playgroups · dogs roster · home dashboard
       (one commit each; initial loads use the cache, sync/mutation paths force-fetch)
-- [ ] daytrips — still direct via `data/daytripSync.ts` (its loader applies sheet-color
-      side effects to its own copy; migrate as its own step)
-- [ ] admin — direct `listDogs`; fold into the Phase 4 admin data-layer cleanup
-- [ ] trip-log (public QR page) — intentionally standalone; decide whether it should
-      share the store at all
-- [ ] dogs/[id] detail page uses `getDog(id)` per dog (not the collection) — out of
-      scope for the collection store
+- [x] daytrips (2026-07-02) — `loadDayTripData` sources dogs from the store and patches
+      the sheet-color sync + eval auto-clear into it (side effects now reach every page)
+
+**Phase 3 complete.** Deliberately out of scope (decided 2026-07-02):
+
+- admin — direct `listDogs`; fold into the Phase 4 admin data-layer cleanup
+- trip-log (public QR page) — stays standalone: it runs outside the app shell/auth
+  context and one fetch per QR visit is fine
+- dogs/[id] detail page — uses `getDog(id)` per dog, not the collection
 
 ## Phase 4 — Cleanups
 
