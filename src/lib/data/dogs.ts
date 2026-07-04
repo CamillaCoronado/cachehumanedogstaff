@@ -1062,80 +1062,6 @@ export async function listBathLogs(dogId: string) {
 	return logs.map(deserializeBathLog);
 }
 
-// One-time repair: re-derive every dog's lastDayTripDate from its trip logs (the
-// single source of truth) so the cached field matches what the logs actually show.
-// Fixes dogs whose date drifted because a log was created without updating the cache.
-export async function backfillLastDayTripFromLogs() {
-	if (db) {
-		try {
-			const [dogsSnapshot, tripLogsSnapshot] = await Promise.all([
-				getDocs(collection(db, 'dogs')),
-				getDocs(collectionGroup(db, 'dayTripLogs'))
-			]);
-
-			const latestByDog = new Map<string, Date>();
-			for (const docSnap of tripLogsSnapshot.docs) {
-				const dogId = docSnap.ref.parent.parent?.id;
-				if (!dogId) continue;
-				const data = docSnap.data() as StoredDayTripLog;
-				const d = toDate(data.endedAt) ?? toDate(data.startedAt);
-				if (!d) continue;
-				const existing = latestByDog.get(dogId);
-				if (!existing || d > existing) latestByDog.set(dogId, d);
-			}
-
-			let writes = 0;
-			let batch = writeBatch(db);
-			for (const dogDoc of dogsSnapshot.docs) {
-				const data = dogDoc.data() as StoredDog;
-				const latest = latestByDog.get(dogDoc.id) ?? null;
-				const latestStr = latest ? toDateString(latest) : null;
-				const currentStr = data.lastDayTripDate ? toDateString(data.lastDayTripDate) : null;
-				if (latestStr === currentStr) continue;
-				batch.set(doc(db, 'dogs', dogDoc.id), { lastDayTripDate: latestStr }, { merge: true });
-				writes += 1;
-				if (writes % 450 === 0) {
-					await batch.commit();
-					batch = writeBatch(db);
-				}
-			}
-
-			if (writes % 450 !== 0) {
-				await batch.commit();
-			}
-
-			return writes;
-		} catch (error) {
-			if (isPermissionDenied(error)) return 0;
-			throw error;
-		}
-	}
-
-	const dogs = readJson<StoredDog[]>(DOGS_KEY, []);
-	const stored = readDayTripMap();
-	let writes = 0;
-
-	for (const dog of dogs) {
-		const logs = stored[dog.id] ?? [];
-		let latest: Date | null = null;
-		for (const log of logs) {
-			const d = toDate(log.endedAt) ?? toDate(log.startedAt);
-			if (d && (!latest || d > latest)) latest = d;
-		}
-		const latestStr = latest ? toDateString(latest) : null;
-		const currentStr = dog.lastDayTripDate ? toDateString(dog.lastDayTripDate) : null;
-		if (latestStr === currentStr) continue;
-		dog.lastDayTripDate = latestStr;
-		writes += 1;
-	}
-
-	if (writes > 0) {
-		writeJson(DOGS_KEY, dogs);
-	}
-
-	return writes;
-}
-
 export async function listStoolLogs(dogId: string) {
 	const ref = dogSubcollectionRef(dogId, 'stoolLogs');
 	if (ref) {
@@ -1459,8 +1385,6 @@ export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<v
 	await updateDog(dogId, { isOutOnDayTrip: isOut, currentDayTripStartedAt: null });
 }
 
-/** Creates a historical day trip log entry with a specific date and zero duration.
- *  Does NOT update the dog's lastDayTripDate — callers should do that separately. */
 export async function clearDayTripLogs(dogId: string): Promise<void> {
 	await deleteDogSubcollection(dogId, 'dayTripLogs');
 }

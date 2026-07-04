@@ -12,7 +12,6 @@
 	import { normalizeText } from '$lib/utils/labels';
 	import { canAccessVolunteers, canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
-	import { backfillLastDayTripFromLogs } from '$lib/data/dogs';
 	import { syncVersion } from '$lib/stores/sync';
 	import { readJson, writeJson } from '$lib/utils/storage';
 
@@ -53,7 +52,6 @@
 	let animating = false;
 	let mobileNavOpen = false;
 	let asmAttempted = false;
-	let lastTripBackfillAttempted = false;
 	let storedOverlayChanges: SyncChange[] | null = null;
 	let storedOverlayAttempted = false;
 	let asmSyncing = false;
@@ -202,13 +200,6 @@
 			.finally(() => {
 				asmSyncing = false;
 			});
-	}
-
-	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !lastTripBackfillAttempted) {
-		lastTripBackfillAttempted = true;
-		void backfillLastDayTripFromLogs().catch((err: unknown) => {
-			console.error('[Last day trip backfill]', err instanceof Error ? err.message : err);
-		});
 	}
 
 	$: currentPath = $page.url.pathname;
