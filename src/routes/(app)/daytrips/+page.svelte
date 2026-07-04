@@ -82,7 +82,6 @@
 	})();
 	$: monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
 	$: monthLabel = monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-	$: currentYear = monthStart.getFullYear();
 
 	$: monthlyLogs = logs.filter((log) => {
 		const startedAt = toDate(log.startedAt);
@@ -136,26 +135,6 @@
 		const bDays = getDayTripGapDays(b, now) ?? 9999;
 		return bDays - aDays;
 	});
-
-	$: yearLogs = logs.filter((log) => {
-		const d = toDate(log.startedAt);
-		return d ? d.getFullYear() === currentYear : false;
-	});
-
-	$: yearlyStats = (() => {
-		const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-		const stats = MONTHS.map((name) => ({ name, trips: 0, hours: 0 }));
-		for (const log of yearLogs) {
-			const d = toDate(log.startedAt);
-			if (!d) continue;
-			stats[d.getMonth()].trips += 1;
-			stats[d.getMonth()].hours += durationHours(log);
-		}
-		return stats;
-	})();
-
-	$: yearTripTotal = yearLogs.length;
-	$: yearHourTotal = yearLogs.reduce((sum, log) => sum + durationHours(log), 0);
 
 	function getEligibility(dog: Dog) {
 		return checkDayTripEligibility(
