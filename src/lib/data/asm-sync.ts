@@ -1,5 +1,6 @@
 import { doc, writeBatch, getDocs, collection } from 'firebase/firestore';
 import { db } from '$lib/firebase/config';
+import { readJson, writeJson } from '$lib/utils/storage';
 
 export type SyncChange = {
 	id: string;
@@ -330,14 +331,10 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	// Add any newly seen dogs to changes as isNew:true so they get saved to localStorage
 	// and the overlay keeps firing until the user explicitly closes it.
 	const KNOWN_DOG_IDS_KEY = 'asm_known_dog_ids';
-	let newlyArrivedAnimals: AsmAnimal[] = [];
-	try {
-		const knownIds: string[] = JSON.parse(localStorage.getItem(KNOWN_DOG_IDS_KEY) ?? '[]');
-		const knownSet = new Set(knownIds);
-		newlyArrivedAnimals = dogs.filter(d => !knownSet.has(String(d.ID)));
-		// Update known IDs now — overlay persistence handled by overlayAcked in STORAGE_KEY
-		localStorage.setItem(KNOWN_DOG_IDS_KEY, JSON.stringify(dogs.map(d => String(d.ID))));
-	} catch { /* ignore */ }
+	const knownSet = new Set(readJson<string[]>(KNOWN_DOG_IDS_KEY, []));
+	const newlyArrivedAnimals = dogs.filter(d => !knownSet.has(String(d.ID)));
+	// Update known IDs now — overlay persistence handled by overlayAcked in STORAGE_KEY
+	writeJson(KNOWN_DOG_IDS_KEY, dogs.map(d => String(d.ID)));
 
 	// 4. Determine which dogs need writing (new or changed ASM fields)
 	type PendingWrite = { animal: AsmAnimal; isNew: boolean; changedFields: string[] };
@@ -430,14 +427,11 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			const recentAdoptions: { id: string; shelterCode: string; adoptedAt: string }[] = await recentRes.json();
 
 			// Compare to previously known adoption IDs to find NEW ones
-			let knownIds: string[] = [];
-			try { knownIds = JSON.parse(localStorage.getItem(KNOWN_ADOPTIONS_KEY) ?? '[]'); } catch { /* ignore */ }
-			const knownSet = new Set(knownIds);
+			const knownSet = new Set(readJson<string[]>(KNOWN_ADOPTIONS_KEY, []));
 			newAdoptionIds = recentAdoptions.map(a => a.id).filter(id => !knownSet.has(id));
 
 			// Update stored known IDs
-			const allCurrentIds = recentAdoptions.map(a => a.id);
-			try { localStorage.setItem(KNOWN_ADOPTIONS_KEY, JSON.stringify(allCurrentIds)); } catch { /* ignore */ }
+			writeJson(KNOWN_ADOPTIONS_KEY, recentAdoptions.map(a => a.id));
 
 			// Only build outcomes for NEW adoptions
 			for (const a of recentAdoptions.filter(a => newAdoptionIds.includes(a.id))) {

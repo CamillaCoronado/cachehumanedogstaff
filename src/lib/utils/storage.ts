@@ -14,7 +14,26 @@ export function readJson<T>(key: string, fallback: T): T {
 
 export function writeJson<T>(key: string, value: T) {
 	if (!browser) return;
-	localStorage.setItem(key, JSON.stringify(value));
+	try {
+		localStorage.setItem(key, JSON.stringify(value));
+	} catch (error) {
+		console.warn(`Failed to write localStorage key ${key}`, error);
+	}
+}
+
+// For values stored as plain strings (not JSON), e.g. the local role fallback.
+export function readString(key: string): string | null {
+	if (!browser) return null;
+	return localStorage.getItem(key);
+}
+
+export function writeString(key: string, value: string) {
+	if (!browser) return;
+	try {
+		localStorage.setItem(key, value);
+	} catch (error) {
+		console.warn(`Failed to write localStorage key ${key}`, error);
+	}
 }
 
 export function createId(prefix = 'id') {

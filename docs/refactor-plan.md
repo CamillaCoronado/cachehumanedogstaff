@@ -131,7 +131,9 @@ and the syncVersion re-fetch handled once at the store level.
       (merge, repair) should always read fresh.
 - [x] Unify date/duration formatters (done across Phases 1–2; volunteers' local
       `formatDate` stays — verified 2026-06-12 as intentionally different).
-- [ ] Review `src/lib/utils/storage.ts` + scattered `localStorage` use for one pattern.
+- [x] One localStorage pattern (2026-07-02): all raw `localStorage` calls now go through
+      `utils/storage.ts` (`readJson`/`writeJson`, plus `readString`/`writeString` for the
+      plain-string role key); writes swallow quota errors in the helper.
 - [ ] Delete `src/lib/data/migrate-food-types.ts` and `backfillBathLogsFromDogs` if the
       one-time migrations have been run (confirm with owner first).
 

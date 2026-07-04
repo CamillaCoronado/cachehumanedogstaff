@@ -14,6 +14,7 @@
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { backfillLastDayTripFromLogs } from '$lib/data/dogs';
 	import { syncVersion } from '$lib/stores/sync';
+	import { readJson, writeJson } from '$lib/utils/storage';
 
 	type TabItem = {
 		href: string;
@@ -81,14 +82,7 @@
 			overlayQueue = overlayQueue.slice(1);
 		} else {
 			currentOverlay = null;
-			try {
-				// Ack the sync-change overlay
-				const raw = localStorage.getItem(STORAGE_KEY);
-				if (raw) {
-					const parsed = JSON.parse(raw);
-					localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, overlayAcked: true }));
-				}
-				} catch { /* ignore */ }
+			ackStoredOverlay();
 		}
 	}
 
@@ -98,6 +92,13 @@
 	}
 
 	const STORAGE_KEY = 'asm_last_changes';
+	type StoredSyncState = { changes: SyncChange[]; changedAt: string; overlayAcked?: boolean };
+
+	// Ack the sync-change overlay so it doesn't re-show on the next load.
+	function ackStoredOverlay() {
+		const parsed = readJson<StoredSyncState | null>(STORAGE_KEY, null);
+		if (parsed) writeJson(STORAGE_KEY, { ...parsed, overlayAcked: true });
+	}
 
 	beforeNavigate(({ from, to }) => {
 		const fromIdx = tabs.findIndex(t => t.href === from?.url.pathname);
@@ -114,19 +115,16 @@
 
 	onMount(() => {
 		initAuthListener();
-		try {
-			const stored = localStorage.getItem(STORAGE_KEY);
-			if (stored) {
-				const parsed = JSON.parse(stored) as { changes: SyncChange[]; changedAt: string; overlayAcked?: boolean };
-				asmChanges = parsed.changes;
-				asmLastChangedAt = parsed.changedAt;
-				if (!parsed.overlayAcked && parsed.changes.some(
-					(c) => c.isArchived || c.isTransferredOut || c.isNew || c.fields.some((f) => f === 'Foster (yes)')
-				)) {
-					storedOverlayChanges = parsed.changes;
-				}
+		const parsed = readJson<StoredSyncState | null>(STORAGE_KEY, null);
+		if (parsed) {
+			asmChanges = parsed.changes;
+			asmLastChangedAt = parsed.changedAt;
+			if (!parsed.overlayAcked && parsed.changes.some(
+				(c) => c.isArchived || c.isTransferredOut || c.isNew || c.fields.some((f) => f === 'Foster (yes)')
+			)) {
+				storedOverlayChanges = parsed.changes;
 			}
-		} catch { /* ignore */ }
+		}
 	});
 
 	$: if ($authReady && !$authUser) {
@@ -137,13 +135,7 @@
 		storedOverlayAttempted = true;
 		const changes = storedOverlayChanges;
 		// Ack immediately so a browser close before the user clicks "Close" doesn't re-show on next load
-		try {
-			const raw = localStorage.getItem(STORAGE_KEY);
-			if (raw) {
-				const parsed = JSON.parse(raw);
-				localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, overlayAcked: true }));
-			}
-		} catch { /* ignore */ }
+		ackStoredOverlay();
 		const buildOverlay = async (filtered: SyncChange[], type: OverlayItem['type']): Promise<OverlayItem | null> => {
 			if (filtered.length === 0) return null;
 			try {
@@ -179,9 +171,7 @@
 					syncVersion.update((v) => v + 1);
 					asmChanges = result.changes;
 					asmLastChangedAt = asmSyncedAt;
-					try {
-						localStorage.setItem(STORAGE_KEY, JSON.stringify({ changes: asmChanges, changedAt: asmLastChangedAt }));
-					} catch { /* ignore */ }
+					writeJson(STORAGE_KEY, { changes: asmChanges, changedAt: asmLastChangedAt });
 					asmLogVisible = true;
 				}
 
