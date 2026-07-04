@@ -10,13 +10,6 @@ export async function getUserProfile(uid: string) {
 	return snap.data() as UserProfile;
 }
 
-export async function hasAnyUserProfiles() {
-	if (!db) throw new Error('Firestore is not available.');
-	const usersRef = collection(db, 'users');
-	const snapshot = await getDocs(query(usersRef, limit(1)));
-	return !snapshot.empty;
-}
-
 export async function listUserProfiles() {
 	if (!db) throw new Error('Firestore is not available.');
 	const usersRef = collection(db, 'users');

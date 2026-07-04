@@ -1488,59 +1488,6 @@ export async function deleteBathLog(dogId: string, logId: string) {
 	});
 }
 
-export async function logDayTrip(dogId: string, profile?: UserProfile | null, notes?: string | null) {
-	const identity = getUserIdentity(profile);
-	const now = new Date();
-	const ref = dogSubcollectionRef(dogId, 'dayTripLogs');
-	if (ref) {
-		const entry: DayTripLog = {
-			id: createId('trip'),
-			dogId,
-			startedAt: now,
-			endedAt: now,
-			startedBy: identity.uid,
-			startedByName: identity.name,
-			endedBy: identity.uid,
-			endedByName: identity.name,
-			startNotes: notes ?? null,
-			endNotes: null,
-			createdAt: now,
-			updatedAt: now
-		};
-		await setDoc(doc(ref, entry.id), serializeDayTripLog(entry));
-		return updateDog(dogId, {
-			lastDayTripDate: now,
-			isOutOnDayTrip: false,
-			currentDayTripStartedAt: null
-		});
-	}
-
-	const stored = readDayTripMap();
-	const list = stored[dogId] ?? [];
-	const entry: DayTripLog = {
-		id: createId('trip'),
-		dogId,
-		startedAt: now,
-		endedAt: now,
-		startedBy: identity.uid,
-		startedByName: identity.name,
-		endedBy: identity.uid,
-		endedByName: identity.name,
-		startNotes: notes ?? null,
-		endNotes: null,
-		createdAt: now,
-		updatedAt: now
-	};
-	list.unshift(serializeDayTripLog(entry));
-	stored[dogId] = list;
-	writeDayTripMap(stored);
-	return updateDog(dogId, {
-		lastDayTripDate: now,
-		isOutOnDayTrip: false,
-		currentDayTripStartedAt: null
-	});
-}
-
 // Visual-only toggle — updates the dog's status without creating a trip log entry.
 // Purely visual whiteboard state: only toggles the "out now" flag and its
 // timestamp. Never touches lastDayTripDate or trip logs — completed trips are
