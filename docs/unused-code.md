@@ -30,16 +30,21 @@ own-file usage), deleted in per-module commits, `npm run check` at baseline afte
 - `getRunPosition`, `getWalkRank` (`utils/kennelLayout.ts`) — used by `compareByWalkPath`.
 - `recomputeLastDayTripDate` (`data/dogs.ts`) — used internally by trip log mutations.
 
-## Still pending owner sign-off (ask Camilla before touching)
+## Resolved with owner sign-off 2026-07-02
 
-- `startDayTrip`, `endDayTrip` (`data/dogs.ts`) — orphaned since out/return toggles
-  became visual-only (2026-06-12). The visual-only model has been in daily use since;
-  delete once confirmed it's staying.
+- `startDayTrip`, `endDayTrip` — deleted; Camilla confirmed the visual-only
+  out/return model is staying.
+- `data/migrate-food-types.ts` + admin "Migrate food types" card — deleted; migration
+  confirmed run.
+- `backfillBathLogsFromDogs` — deleted, including the layout call that re-ran it
+  every session (it was reading the full dogs collection + all bath logs on each
+  app load for editors). Note: `backfillLastDayTripFromLogs` still runs per session
+  from the layout — same pattern, candidate for the same treatment (ask first).
+
+## Still pending owner sign-off
+
 - `markStaleAsmDogsArchived` (`data/asm-sync.ts`) — exported but unreferenced; was it
   meant to be wired into the sync flow?
-- One-time migration tooling — delete once confirmed the migrations ran:
-  `data/migrate-food-types.ts` (`migrateFoodTypes`, still imported by admin page) and
-  `data/dogs.ts` `backfillBathLogsFromDogs`.
 
 ## Internal-only (used within their own file; exported unnecessarily or for tests)
 

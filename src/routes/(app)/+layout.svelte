@@ -12,7 +12,7 @@
 	import { normalizeText } from '$lib/utils/labels';
 	import { canAccessVolunteers, canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
-	import { backfillBathLogsFromDogs, backfillLastDayTripFromLogs } from '$lib/data/dogs';
+	import { backfillLastDayTripFromLogs } from '$lib/data/dogs';
 	import { syncVersion } from '$lib/stores/sync';
 
 	type TabItem = {
@@ -52,7 +52,6 @@
 	let animating = false;
 	let mobileNavOpen = false;
 	let asmAttempted = false;
-	let bathBackfillAttempted = false;
 	let lastTripBackfillAttempted = false;
 	let storedOverlayChanges: SyncChange[] | null = null;
 	let storedOverlayAttempted = false;
@@ -213,13 +212,6 @@
 			.finally(() => {
 				asmSyncing = false;
 			});
-	}
-
-	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !bathBackfillAttempted) {
-		bathBackfillAttempted = true;
-		void backfillBathLogsFromDogs().catch((err: unknown) => {
-			console.error('[Bath log backfill]', err instanceof Error ? err.message : err);
-		});
 	}
 
 	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !lastTripBackfillAttempted) {
