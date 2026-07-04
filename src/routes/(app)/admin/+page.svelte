@@ -2,7 +2,7 @@
 	import toast from 'svelte-french-toast';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { migrateFoodTypes } from '$lib/data/migrate-food-types';
-	import { listUserProfiles, updateUserProfile } from '$lib/firebase/firestore';
+	import { listUserProfiles, updateUserProfile } from '$lib/data/users';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import type { DayTripLog, Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDateTime, toDate, toDateString } from '$lib/utils/dates';

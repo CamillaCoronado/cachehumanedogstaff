@@ -2,7 +2,7 @@ import { writable } from 'svelte/store';
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '$lib/firebase/config';
-import { createUserProfile, getUserProfile } from '$lib/firebase/firestore';
+import { createUserProfile, getUserProfile } from '$lib/data/users';
 import type { UserProfile } from '$lib/types';
 
 export const authUser = writable<User | null>(null);

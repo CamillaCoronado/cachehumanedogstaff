@@ -1,6 +1,6 @@
-import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import type { UserProfile, UserRole } from '$lib/types';
-import { db } from './config';
+import { db } from '$lib/firebase/config';
 
 export async function getUserProfile(uid: string) {
 	if (!db) throw new Error('Firestore is not available.');
