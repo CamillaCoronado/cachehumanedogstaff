@@ -1,5 +1,11 @@
 # Page-by-Page Redesign Plan (Daily Shelter Operations)
 
+Status: **IDEAS / NOT STARTED** (written 2026-03-09). Was deferred behind the
+incremental refactor, which completed 2026-07-02 — so this is now unblocked, but
+nothing here is committed work. Re-read critically before acting: some items may
+already exist or be obsolete (e.g. day trips got a "due for trip" queue and
+permission-aligned actions in June).
+
 ## Design Principles
 
 1. Every screen must answer: what is due now, what is blocked, what changed this shift.

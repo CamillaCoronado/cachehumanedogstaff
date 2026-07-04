@@ -38,8 +38,10 @@ own-file usage), deleted in per-module commits, `npm run check` at baseline afte
   confirmed run.
 - `backfillBathLogsFromDogs` — deleted, including the layout call that re-ran it
   every session (it was reading the full dogs collection + all bath logs on each
-  app load for editors). Note: `backfillLastDayTripFromLogs` still runs per session
-  from the layout — same pattern, candidate for the same treatment (ask first).
+  app load for editors).
+- `backfillLastDayTripFromLogs` — deleted (same pattern, also ran every session);
+  every trip-log write path recomputes `lastDayTripDate` via
+  `recomputeLastDayTripDate`, so the repair was redundant.
 
 ## Still pending owner sign-off
 

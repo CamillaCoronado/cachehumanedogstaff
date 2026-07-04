@@ -1,5 +1,8 @@
 # Incremental Refactor Plan
 
+Status: **COMPLETE 2026-07-02** — all phases done; kept as a record of what moved where
+and why. Follow-up work now lives in the deferred docs (Phase 5).
+
 Goal: make the codebase safe to change — for humans and AI agents — without altering
 any behavior. No data-model changes, no redesigns. The v2 event-timeline model
 (`docs/v2-information-architecture.md`) is explicitly deferred until this plan is done.

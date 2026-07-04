@@ -1,5 +1,8 @@
 # Security Hardening Notes
 
+Status: **SHIPPED** (March 2026). Historical reference — describes changes that are
+live; the admin-bootstrap steps below are still the procedure for a fresh project.
+
 ## What Changed
 
 - Self-service profile creation is now staff-only.

@@ -1,5 +1,10 @@
 # Shelter App v2 Information Architecture
 
+Status: **IDEAS / NOT STARTED** (written 2026-03-09). A ground-up event-timeline data
+model and route restructure — a separate, large effort. Was deferred behind the
+incremental refactor (completed 2026-07-02); unblocked but uncommitted. Note this is a
+different "v2" from the retired daytrips-v2 page plan.
+
 ## Goals
 
 1. Keep daily operations fast for staff on shift.
