@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { format, startOfDay } from 'date-fns';
-	import { loadCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
+	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import type { CleaningShift } from '$lib/data/cleaning';
 
 	type Shift = CleaningShift;
@@ -251,8 +251,18 @@
 	let completed = new Set<string>();
 	let lastUpdated = '';
 
-	onMount(async () => {
-		completed = await loadCompletedTasks(dateKey, shift);
+	// Live subscription: checkmarks from other devices appear without a reload.
+	let unsubscribeCompleted: (() => void) | null = null;
+	function subscribeToShift() {
+		unsubscribeCompleted?.();
+		unsubscribeCompleted = subscribeCompletedTasks(dateKey, shift, (ids) => {
+			completed = ids;
+		});
+	}
+
+	onMount(() => {
+		subscribeToShift();
+		return () => unsubscribeCompleted?.();
 	});
 
 	$: showSunday = isSunday || showSundayOverride;
@@ -272,10 +282,10 @@
 		void toggleCleaningTask(dateKey, shift, taskId, checked);
 	}
 
-	async function setShift(value: Shift) {
+	function setShift(value: Shift) {
 		shift = value;
-		completed = await loadCompletedTasks(dateKey, shift);
 		lastUpdated = '';
+		subscribeToShift();
 	}
 </script>
 

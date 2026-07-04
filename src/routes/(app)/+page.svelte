@@ -9,9 +9,9 @@
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import { getBathAttentionDogs, getCautionDogs, getOverdueDayTripDogs, getOverduePlaygroupDogs } from '$lib/utils/attention';
-	import { loadCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
+	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import type { CleaningShift } from '$lib/data/cleaning';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { syncVersion } from '$lib/stores/sync';
 	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
@@ -128,6 +128,17 @@
 		minute: '2-digit'
 	}).format(new Date());
 	$: cleaningShift = ($shift === 'am' ? 'morning' : 'evening') as CleaningShift;
+
+	// Live cleaning-completion subscription — re-subscribes when the shift toggle
+	// flips, and picks up coworkers' checkmarks without a reload.
+	let unsubscribeCompleted: (() => void) | null = null;
+	$: {
+		unsubscribeCompleted?.();
+		unsubscribeCompleted = subscribeCompletedTasks(todayKey, cleaningShift, (ids) => {
+			completedTaskIds = ids;
+		});
+	}
+	onDestroy(() => unsubscribeCompleted?.());
 
 	$: dogsOut = activeDogs
 		.filter((dog) => dog.isOutOnDayTrip)
@@ -524,7 +535,6 @@
 			dayTripLogs = tripLogs;
 			feedingLogsByDog = feedingByDog;
 			playgroupSessions = pgSessions;
-			completedTaskIds = await loadCompletedTasks(todayKey, cleaningShift);
 		} catch (error) {
 			console.error(error);
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';

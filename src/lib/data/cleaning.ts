@@ -1,5 +1,5 @@
 import { db } from '$lib/firebase/config';
-import { arrayRemove, arrayUnion, doc, getDoc, setDoc } from 'firebase/firestore';
+import { arrayRemove, arrayUnion, doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { readJson, writeJson } from '$lib/utils/storage';
 
 const LOCAL_KEY = 'shelter.cleaningCompletions.v1';
@@ -19,6 +19,31 @@ export async function loadCompletedTasks(date: string, shift: CleaningShift): Pr
 	}
 	const stored = readJson<Record<string, { completedTaskIds?: string[] }>>(LOCAL_KEY, {});
 	return new Set(stored[docId(date, shift)]?.completedTaskIds ?? []);
+}
+
+/**
+ * Live-subscribe to the completed task IDs for a date + shift, so every device
+ * sees checkmarks appear as coworkers toggle them. Returns an unsubscribe fn.
+ * Local writes echo back instantly (Firestore latency compensation), so the
+ * caller can rely on the subscription alone for state. Without Firebase
+ * (local dev), delivers the stored set once.
+ */
+export function subscribeCompletedTasks(
+	date: string,
+	shift: CleaningShift,
+	callback: (completed: Set<string>) => void
+): () => void {
+	if (db) {
+		return onSnapshot(
+			doc(db, 'cleaningCompletions', docId(date, shift)),
+			(snap) => {
+				callback(new Set(snap.exists() ? ((snap.data().completedTaskIds ?? []) as string[]) : []));
+			},
+			(error) => console.error('[cleaning] completions subscription failed:', error)
+		);
+	}
+	void loadCompletedTasks(date, shift).then(callback);
+	return () => {};
 }
 
 /** Toggle a single task. Optimistic-update friendly — call fire-and-forget from the UI. */
