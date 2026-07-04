@@ -43,8 +43,11 @@ own-file usage), deleted in per-module commits, `npm run check` at baseline afte
 
 ## Still pending owner sign-off
 
-- `markStaleAsmDogsArchived` (`data/asm-sync.ts`) — exported but unreferenced; was it
-  meant to be wired into the sync flow?
+(none — all resolved 2026-07-02)
+
+Correction: `markStaleAsmDogsArchived` (`data/asm-sync.ts`) is LIVE — called by
+`syncAnimalsFromASM` in its own file (the 06-12 scan only checked external refs).
+It archives dogs that disappear from the ASM feed. Do not delete.
 
 ## Internal-only (used within their own file; exported unnecessarily or for tests)
 
