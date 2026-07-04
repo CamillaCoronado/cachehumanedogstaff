@@ -1,55 +1,61 @@
 # Unused / Unreferenced Code Inventory
 
-Generated 2026-06-12 by scanning every `export function/const` in `src/lib` for
-references outside its defining file (test files excluded). **Nothing here should be
-deleted without first re-verifying it is unused** — the scan is text-based and a
-function may be kept deliberately (public API surface, planned feature, admin tooling).
-Deletions follow the ground rules in `refactor-plan.md`: verify, delete in its own
-commit, `npm run check` against baseline.
+Originally generated 2026-06-12; **re-scanned and acted on 2026-07-02** (Phase 4).
+Deletions followed the ground rules in `refactor-plan.md`: re-verified (including
+own-file usage), deleted in per-module commits, `npm run check` at baseline after each.
 
-## Probably safe to delete (no callers anywhere, including own file)
+## Deleted 2026-07-02
 
 | Export | File | Notes |
 |---|---|---|
-| `eligiblePuppies` | `utils/playgroupRecommendations.ts` | never called; likely leftover from earlier puppy-group feature |
-| `priorityLabel` | `utils/playgroupRecommendations.ts` | never called; all recommendations are `priority: 'high'` |
-| `logDayTrip` | `data/dogs.ts` | superseded by `logManualTrip`? verify |
-| `startDayTrip`, `endDayTrip` | `data/dogs.ts` | orphaned 2026-06-12 when all out/return toggles became visual-only (`setDogTripStatus`); trips are logged via `logManualTrip` only. Keep until the visual-only model is confirmed in daily use. |
-| `hasAnyUserProfiles` | `firebase/firestore.ts` | possibly from old admin-bootstrap flow (see security-hardening-notes.md) |
-| `getEffectiveAdoptionDate`, `missingAdoptionMedicalRequirements` | `utils/adoption.ts` | check git history for when they lost their callers |
+| `getEffectiveAdoptionDate` | `utils/adoption.ts` | no callers |
 | `normalizeDay`, `ageInYears` | `utils/dates.ts` | no callers |
-| `isPuppyFood`, `isNormalFood` | `utils/feeding.ts` | may relate to migrate-food-types; verify together |
+| `adoptionRequirementAction` | `utils/dogCard.ts` | no callers |
 | `dayTripLabel` | `utils/labels.ts` | no callers |
-| `roleLabel`, `canHandleDog`, `handlingRequirementLabel` | `utils/permissions.ts` | no callers |
-| `markStaleAsmDogsArchived` | `data/asm-sync.ts` | exported but unreferenced; was this meant to be wired into the sync flow? **ask before touching** |
+| `roleLabel` | `utils/permissions.ts` | no callers |
+| `eligiblePuppies`, `priorityLabel` | `utils/playgroupRecommendations.ts` | leftover from earlier puppy-group feature |
+| `stripDayTripNotes` | `utils/tripNotesParser.ts` | orphaned when strip-and-persist was removed (issue #5); display stripping lives elsewhere |
+| `logDayTrip` | `data/dogs.ts` | superseded by `logManualTrip` |
+| `hasAnyUserProfiles` | `data/users.ts` (ex `firebase/firestore.ts`) | old admin-bootstrap flow |
+| `dogColors`, `loadDogColors` | `stores/dogColors.ts` (file deleted) | abandoned approach; sheet colors are persisted onto dogs via `syncSheetColorsToDogs` and read with `dogStripeColor(dog)` |
+| year-stats reactives | `daytrips/+page.svelte` | `yearLogs`/`yearlyStats`/`yearTripTotal`/`yearHourTotal` computed but never rendered |
 
-## Dead page-level reactives (found during Phase 2, 2026-06-12)
+## Corrections from the 06-12 inventory (now LIVE, do not delete)
 
-- `daytrips/+page.svelte`: `yearLogs`, `yearlyStats`, `yearTripTotal`, `yearHourTotal` —
-  computed on every change but rendered nowhere (likely superseded by the sheet-based
-  StatsTab). Also `adoptionRequirementAction` in `utils/dogCard.ts` has no callers.
+- `canHandleDog`, `handlingRequirementLabel` (`utils/permissions.ts`) — used by
+  `handlingRestrictionReason`.
+- `missingAdoptionMedicalRequirements` (`utils/adoption.ts`) — used by
+  `getAdoptionAvailability`.
+- `isPuppyFood`, `isNormalFood`, `isOwnFood` (`utils/feeding.ts`) — live internals.
+- `getRunPosition`, `getWalkRank` (`utils/kennelLayout.ts`) — used by `compareByWalkPath`.
+- `recomputeLastDayTripDate` (`data/dogs.ts`) — used internally by trip log mutations.
+
+## Still pending owner sign-off (ask Camilla before touching)
+
+- `startDayTrip`, `endDayTrip` (`data/dogs.ts`) — orphaned since out/return toggles
+  became visual-only (2026-06-12). The visual-only model has been in daily use since;
+  delete once confirmed it's staying.
+- `markStaleAsmDogsArchived` (`data/asm-sync.ts`) — exported but unreferenced; was it
+  meant to be wired into the sync flow?
+- One-time migration tooling — delete once confirmed the migrations ran:
+  `data/migrate-food-types.ts` (`migrateFoodTypes`, still imported by admin page) and
+  `data/dogs.ts` `backfillBathLogsFromDogs`.
 
 ## Internal-only (used within their own file; exported unnecessarily or for tests)
 
 Not dead code — just exports that could become module-private. Low priority.
 
-- `utils/dates.ts`: `isMondayOrThursday` (used by `isSurgeryToday`)
+- `utils/dates.ts`: `isMondayOrThursday`, `PUPPY_MAX_AGE_MONTHS`, `PUPPY_MIN_DAYS_AT_SHELTER`
 - `utils/attention.ts`: `BATH_OVERDUE_DAYS`
 - `utils/playgroupRecommendations.ts`: `isPuppyVaccinated`, `intactConflict`,
   `energyRank`, `dogEnergyRank`, `sizeRank`, `sizeCompatible` — engine internals,
   exported for unit tests; keep.
-
-## One-time migration tooling (confirm migrations ran, then delete)
-
-Already tracked in refactor-plan.md Phase 4:
-
-- `data/migrate-food-types.ts` (`migrateFoodTypes`)
-- `data/dogs.ts`: `backfillBathLogsFromDogs`
+- `stores/dogs.ts`: `dogsLoading` — store API, exercised by `dogs.test.ts`.
 
 ## Re-running the scan
 
 ```sh
-for f in src/lib/utils/*.ts src/lib/data/*.ts src/lib/firebase/*.ts; do
+for f in src/lib/utils/*.ts src/lib/data/*.ts src/lib/stores/*.ts; do
   [[ "$f" == *.test.ts ]] && continue
   grep -oE "^export (async )?(function|const) [A-Za-z0-9_]+" "$f" | awk '{print $NF}' | while read -r n; do
     refs=$(grep -rE "\b${n}\b" src --include='*.svelte' --include='*.ts' -l | grep -v "$f" | grep -v '\.test\.ts' | wc -l | tr -d ' ')
@@ -57,3 +63,6 @@ for f in src/lib/utils/*.ts src/lib/data/*.ts src/lib/firebase/*.ts; do
   done
 done
 ```
+
+A hit only means "no references outside its own file" — always check own-file usage
+before deleting (several 06-12 entries turned out to be live internals).

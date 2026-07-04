@@ -121,12 +121,16 @@ and the syncVersion re-fetch handled once at the store level.
 
 ## Phase 4 — Cleanups
 
-- [ ] Review `docs/unused-code.md` (inventory of unreferenced exports, generated
-      2026-06-12) and delete confirmed-dead code, one commit per module.
-
-- [ ] `admin/+page.svelte` is the only page importing Firestore directly — move those
-      operations into `src/lib/data/` (e.g. `users.ts`).
-- [ ] Unify date/duration formatters on `utils/dates.ts`; delete page-local duplicates.
+- [x] Review `docs/unused-code.md` and delete confirmed-dead code (2026-07-02: re-ran
+      the scan, deleted 12 truly-dead exports + the unused `dogColors` store + the dead
+      year-stats reactives on the daytrips page; see unused-code.md for what stayed and
+      why. Still pending owner sign-off: `startDayTrip`/`endDayTrip`,
+      `markStaleAsmDogsArchived`, one-time migrations.)
+- [x] Move user-profile Firestore ops into `src/lib/data/users.ts` (2026-07-02); the
+      admin page's `listDogs` calls stay direct on purpose — its destructive tools
+      (merge, repair) should always read fresh.
+- [x] Unify date/duration formatters (done across Phases 1–2; volunteers' local
+      `formatDate` stays — verified 2026-06-12 as intentionally different).
 - [ ] Review `src/lib/utils/storage.ts` + scattered `localStorage` use for one pattern.
 - [ ] Delete `src/lib/data/migrate-food-types.ts` and `backfillBathLogsFromDogs` if the
       one-time migrations have been run (confirm with owner first).
