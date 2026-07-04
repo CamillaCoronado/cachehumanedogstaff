@@ -141,15 +141,6 @@ export function sizeLabelShort(dog: Dog): string {
 	return 'L';
 }
 
-export function eligiblePuppies(allDogs: Dog[]): Dog[] {
-	return allDogs.filter((dog) => {
-		if (dog.isolationStatus !== 'none') return false;
-		if (dog.goodWithDogs === 'no') return false;
-		const weeks = dogAgeWeeks(dog, new Date());
-		return weeks !== null && weeks >= 12 && weeks < 26 && dog.isVaccinated;
-	});
-}
-
 export function buildRecommendations(ready: Dog[]): { groups: PlaygroupRecommendation[]; swapIns: SwapInSuggestion[] } {
 	const groups: PlaygroupRecommendation[] = [];
 	const groupedIds = new Set<string>();
@@ -219,6 +210,3 @@ export function buildTestSuggestions(caution: Dog[], readyGroups: PlaygroupRecom
 	});
 }
 
-export function priorityLabel(priority: RecommendationPriority) {
-	return priority === 'high' ? 'High priority' : 'Evaluation';
-}

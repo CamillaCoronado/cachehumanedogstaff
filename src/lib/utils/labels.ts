@@ -36,12 +36,6 @@ export function sexLabel(value: DogSex | null | undefined): string {
 	return 'Unknown';
 }
 
-export function dayTripLabel(status: DayTripStatus | null | undefined): string {
-	if (status === 'eligible') return 'Eligible';
-	if (status === 'difficult') return 'Adults only';
-	return 'Ineligible';
-}
-
 export function handlingLevelLabel(level: DogHandlingLevel | null | undefined): string {
 	if (level === 'manager_only') return 'Manager only';
 	if (level === 'staff_only') return 'Staff only';

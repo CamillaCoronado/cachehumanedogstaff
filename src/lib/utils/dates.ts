@@ -52,11 +52,6 @@ export function formatDateTime(value: DateValue | string | null | undefined, fal
 	return date ? format(date, 'MMM d, yyyy h:mm a') : fallback;
 }
 
-export function normalizeDay(value: DateValue | string | null | undefined) {
-	const date = toDate(value);
-	return date ? startOfDay(date) : null;
-}
-
 // Returns null if the activity date predates shelterSince (dog was away and starts fresh on return).
 export function sinceReturn(
 	activityDate: DateValue | string | null | undefined,
@@ -74,13 +69,6 @@ export function daysSince(value: DateValue | string | null | undefined, now = ne
 	const date = toDate(value);
 	if (!date) return null;
 	return Math.max(0, differenceInDays(startOfDay(now), startOfDay(date)));
-}
-
-export function ageInYears(value: DateValue | string | null | undefined, now = new Date()) {
-	const date = toDate(value);
-	if (!date) return null;
-	const days = differenceInDays(startOfDay(now), startOfDay(date));
-	return Math.max(0, Math.floor(days / 365));
 }
 
 export function formatAge(value: DateValue | string | null | undefined, now = new Date()) {

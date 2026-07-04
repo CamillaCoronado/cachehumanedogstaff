@@ -64,10 +64,6 @@ function parseBehaviorText(text: string): Partial<ParsedTrip> {
 	return result;
 }
 
-export function stripDayTripNotes(text: string): string {
-	return text.replace(/\s*Day Trip Notes\s+\d{1,2}\/\d{1,2}\s*:[\s\S]*?(?=Day Trip Notes\s+\d{1,2}\/\d{1,2}|$)/gi, '').trim();
-}
-
 export function parseDayTripNotes(text: string): ParsedTrip[] {
 	const entryPattern = /Day Trip Notes\s+(\d{1,2})\/(\d{1,2})\s*:/gi;
 	const today = new Date();

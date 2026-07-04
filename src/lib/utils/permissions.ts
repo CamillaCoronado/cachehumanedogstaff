@@ -32,10 +32,6 @@ export function canEditVolunteers(role: UserRole | null | undefined) {
 	return role === 'admin' || role === 'coordinator';
 }
 
-export function roleLabel(role: UserRole | null | undefined) {
-	return role ?? 'staff';
-}
-
 export function resolveRole(profile: UserProfile | null | undefined, fallbackRole: UserRole) {
 	return profile?.role ?? fallbackRole;
 }

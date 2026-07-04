@@ -93,13 +93,6 @@ export function missingEvaluations(dog: Dog) {
 	return missing;
 }
 
-export function adoptionRequirementAction(requirement: string) {
-	if (requirement === 'microchip') return { label: 'Adoption blocked: add microchip.', priority: 97 };
-	if (requirement === 'vaccines') return { label: 'Adoption blocked: complete vaccinations.', priority: 96 };
-	if (requirement === 'spay/neuter') return { label: 'Adoption blocked: complete spay/neuter.', priority: 95 };
-	return { label: `Adoption blocked: ${requirement}.`, priority: 94 };
-}
-
 export function pendingItems(
 	dog: Dog,
 	tripEligibility: TripEligibility,
