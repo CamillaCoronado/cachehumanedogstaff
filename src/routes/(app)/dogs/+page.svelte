@@ -9,8 +9,8 @@
 	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs as refreshDogStore, patchDogInStore } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
-	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
-	import { getBathStatus, isBathDue, getDayTripGapDays, isPlaygroupEligible, buildLastPlaygroupMap, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
+	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSameCalendarDay, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { getBathStatus, isBathDue, getDayTripGapDays, isPlaygroupEligible, buildLastPlaygroupMap, isSurgeryResting, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -61,6 +61,28 @@ const today = new Date();
 		expandedPill = expandedPill;
 	}
 	let stripeFilter: 'all' | 'green' | 'yellow' | 'red' = 'all';
+	let filterIntakeToday = false;
+	let filterNoEnrichment = false;
+	let filterMedical = false;
+
+	// "No enrichment 3d+": no day trip and no playgroup within the window.
+	const NO_ENRICHMENT_DAYS = 3;
+	function hasNoRecentEnrichment(dog: Dog, lastPgByDog: Record<string, Date | null>) {
+		const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - NO_ENRICHMENT_DAYS);
+		const lastTrip = toDate(dog.lastDayTripDate);
+		const lastPg = lastPgByDog[dog.id] ?? null;
+		return (!lastTrip || lastTrip < cutoff) && (!lastPg || lastPg < cutoff);
+	}
+
+	// "Medical": in isolation, resting after surgery, or on an active treatment.
+	function isMedicalHold(dog: Dog) {
+		if (dog.isolationStatus !== 'none') return true;
+		if (isSurgeryResting(dog, today)) return true;
+		return (dog.treatments ?? []).some((t) => {
+			const end = toDate(t.endDate ?? null);
+			return !end || end >= today;
+		});
+	}
 	let sortKey: 'name' | 'days' | 'age' | 'weight' = 'days';
 	let sortDir: 'asc' | 'desc' = 'asc';
 	let showAddModal = false;
@@ -90,6 +112,9 @@ const today = new Date();
 		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
 		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
 		.filter((dog) => filterAdoptable ? getAdoptionAvailability(dog).available : true)
+		.filter((dog) => filterIntakeToday ? isSameCalendarDay(dog.intakeDate, today) : true)
+		.filter((dog) => filterNoEnrichment ? hasNoRecentEnrichment(dog, lastPlaygroupByDogId) : true)
+		.filter((dog) => filterMedical ? isMedicalHold(dog) : true)
 		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
@@ -478,6 +503,26 @@ const today = new Date();
 						on:click={() => (hideIncoming = !hideIncoming)}
 					>
 						hide incoming
+					</button>
+				</div>
+				<div class="archived-filter-group" role="group" aria-label="Quick filters">
+					<button
+						class={`sort-chip ${filterIntakeToday ? 'sort-chip-active' : ''}`}
+						on:click={() => (filterIntakeToday = !filterIntakeToday)}
+					>
+						intake today
+					</button>
+					<button
+						class={`sort-chip ${filterNoEnrichment ? 'sort-chip-active' : ''}`}
+						on:click={() => (filterNoEnrichment = !filterNoEnrichment)}
+					>
+						no enrichment 3d+
+					</button>
+					<button
+						class={`sort-chip ${filterMedical ? 'sort-chip-active' : ''}`}
+						on:click={() => (filterMedical = !filterMedical)}
+					>
+						medical
 					</button>
 				</div>
 				<div class="archived-filter-group" role="group" aria-label="Filter by compatibility">
