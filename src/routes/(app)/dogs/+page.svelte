@@ -9,7 +9,7 @@
 	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs as refreshDogStore, patchDogInStore } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
-	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSameCalendarDay, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getBathStatus, isBathDue, getDayTripGapDays, isPlaygroupEligible, buildLastPlaygroupMap, isSurgeryResting, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
@@ -61,7 +61,6 @@ const today = new Date();
 		expandedPill = expandedPill;
 	}
 	let stripeFilter: 'all' | 'green' | 'yellow' | 'red' = 'all';
-	let filterIntakeToday = false;
 	let filterNoEnrichment = false;
 	let filterMedical = false;
 
@@ -112,7 +111,6 @@ const today = new Date();
 		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
 		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
 		.filter((dog) => filterAdoptable ? getAdoptionAvailability(dog).available : true)
-		.filter((dog) => filterIntakeToday ? isSameCalendarDay(dog.intakeDate, today) : true)
 		.filter((dog) => filterNoEnrichment ? hasNoRecentEnrichment(dog, lastPlaygroupByDogId) : true)
 		.filter((dog) => filterMedical ? isMedicalHold(dog) : true)
 		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
@@ -506,12 +504,6 @@ const today = new Date();
 					</button>
 				</div>
 				<div class="archived-filter-group" role="group" aria-label="Quick filters">
-					<button
-						class={`sort-chip ${filterIntakeToday ? 'sort-chip-active' : ''}`}
-						on:click={() => (filterIntakeToday = !filterIntakeToday)}
-					>
-						intake today
-					</button>
 					<button
 						class={`sort-chip ${filterNoEnrichment ? 'sort-chip-active' : ''}`}
 						on:click={() => (filterNoEnrichment = !filterNoEnrichment)}
