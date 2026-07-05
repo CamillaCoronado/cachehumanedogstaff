@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog, FeedingLog, StoolLog } from '$lib/types';
 import {
+	appetiteRiskLabel,
 	estimateFoodAmountPerMeal,
 	feedingFlags,
 	foodAmountLabel,
@@ -126,5 +127,26 @@ describe('log aggregation', () => {
 			({ id: `s${stoolType}`, timestamp: when, stoolType, notes: null, loggedBy: '', loggedByName: '' }) as StoolLog;
 		const logs = { d1: [stool(4, day), stool(6, day), stool(7, new Date(2026, 5, 1))] };
 		expect(getAbnormalCount([dog], logs, day)).toBe(1);
+	});
+
+	it('appetiteRiskLabel flags only the most recent meal', () => {
+		expect(appetiteRiskLabel([])).toBeNull();
+		expect(appetiteRiskLabel([log({ amountEaten: 'all' })])).toBeNull();
+		expect(appetiteRiskLabel([log({ amountEaten: 'none' })])).toBe("Didn't eat last meal");
+		expect(appetiteRiskLabel([log({ amountEaten: 'little' })])).toBe('Ate little last meal');
+		// An older refusal is superseded by a newer full meal (same day, later createdAt)…
+		expect(
+			appetiteRiskLabel([
+				log({ id: 'refused', amountEaten: 'none', createdAt: new Date(2026, 5, 12, 8) }),
+				log({ id: 'ate', amountEaten: 'all', createdAt: new Date(2026, 5, 12, 17) })
+			])
+		).toBeNull();
+		// …and a newer-date refusal wins over an older full meal.
+		expect(
+			appetiteRiskLabel([
+				log({ id: 'ate', amountEaten: 'all', date: new Date(2026, 5, 11) }),
+				log({ id: 'refused', amountEaten: 'none', date: new Date(2026, 5, 12) })
+			])
+		).toBe("Didn't eat last meal");
 	});
 });

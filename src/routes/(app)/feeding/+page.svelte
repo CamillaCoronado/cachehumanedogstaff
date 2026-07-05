@@ -16,6 +16,7 @@
 		feedingFlags,
 		specialFeedingReasons,
 		isSpecialFeeding,
+		appetiteRiskLabel,
 		foodSummary,
 		getFedMap,
 		getFeedingHistoryEntries,
@@ -90,6 +91,15 @@
 		? [...secondMealDogs].sort((a, b) => compareByWalkPath(a, b, walkPath))
 		: [...shelterDogs].sort((a, b) => compareByWalkPath(a, b, walkPath));
 	$: specialFeedDogs = displayDogs.filter((dog) => isSpecialFeeding(dog));
+	// Today's exceptions, pinned above the special list: surgery-day dogs and
+	// dogs whose most recent meal was refused or barely touched.
+	$: exceptionDogs = displayDogs
+		.map((dog) => ({
+			dog,
+			surgery: isSurgeryDay(dog),
+			appetite: appetiteRiskLabel(feedingLogs[dog.id] ?? [])
+		}))
+		.filter((entry) => entry.surgery || entry.appetite);
 	$: feedingHistoryEntries = getFeedingHistoryEntries(shelterDogs, feedingLogs).slice(0, HISTORY_LIMIT);
 
 	function activeFoodAmountLabel(dog: Dog) {
@@ -397,6 +407,26 @@
 					</div>
 				</div>
 				<p class="feeding-order-note typewriter">Feed straight down the list.</p>
+				{#if exceptionDogs.length > 0}
+					<div class="feeding-special-summary feeding-exceptions">
+						<p class="feeding-special-title typewriter">today's exceptions</p>
+						<div class="feeding-special-list">
+							{#each exceptionDogs as entry (entry.dog.id)}
+								<div class="feeding-special-row">
+									<a class="feeding-special-name dog-name-link" href="/dogs/{entry.dog.id}">{entry.dog.name}</a>
+									{#if entry.surgery}
+										<span class="feeding-exception-tag feeding-exception-surgery">
+											{mealTime === 'am' ? 'Surgery today — do not feed' : 'Surgery today'}
+										</span>
+									{/if}
+									{#if entry.appetite}
+										<span class="feeding-exception-tag">{entry.appetite}</span>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
 				{#if specialFeedDogs.length > 0}
 					<div class="feeding-special-summary">
 						<p class="feeding-special-title typewriter">special feeding list</p>
@@ -1263,6 +1293,24 @@
 		text-transform: uppercase;
 		color: #556d89;
 	}
+
+	/* "Today's exceptions" — same summary shell, warm alert palette */
+	.feeding-exceptions {
+		border-color: #d9a05b;
+		background: #fdf8ef;
+	}
+
+	.feeding-exceptions .feeding-special-title { color: #8a5a1c; }
+
+	.feeding-exception-tag {
+		font-size: 0.58rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #8a5a1c;
+		white-space: nowrap;
+	}
+
+	.feeding-exception-surgery { color: #c5221f; font-weight: 700; }
 
 	.feeding-feed-row {
 		border: 0;

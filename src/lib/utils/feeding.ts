@@ -214,6 +214,22 @@ export function isSpecialFeeding(dog: Dog) {
 	return specialFeedingReasons(dog).length > 0;
 }
 
+/**
+ * Appetite-risk flag: returns a label when the dog's most recent meal was
+ * refused ('none') or barely eaten ('little'), null otherwise.
+ */
+export function appetiteRiskLabel(logs: FeedingLog[]): string | null {
+	if (logs.length === 0) return null;
+	const latest = [...logs].sort((a, b) => {
+		const dateDiff = (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0);
+		if (dateDiff !== 0) return dateDiff;
+		return (toDate(b.createdAt)?.getTime() ?? 0) - (toDate(a.createdAt)?.getTime() ?? 0);
+	})[0];
+	if (latest.amountEaten === 'none') return "Didn't eat last meal";
+	if (latest.amountEaten === 'little') return 'Ate little last meal';
+	return null;
+}
+
 export function foodSummary(dog: Dog) {
 	return `${foodAmountLabel(dog)} • ${foodTypeLabel(dog)}`;
 }
