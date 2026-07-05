@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { format, startOfDay } from 'date-fns';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
-	import type { CleaningShift } from '$lib/data/cleaning';
+	import type { CleaningShift, TaskCompletionMeta } from '$lib/data/cleaning';
+	import { authProfile } from '$lib/stores/auth';
 
 	type Shift = CleaningShift;
 
@@ -249,15 +250,24 @@
 	let shift: Shift = defaultShift;
 	let showSundayOverride = false;
 	let completed = new Set<string>();
+	let taskMeta: Record<string, TaskCompletionMeta> = {};
 	let lastUpdated = '';
 
 	// Live subscription: checkmarks from other devices appear without a reload.
 	let unsubscribeCompleted: (() => void) | null = null;
 	function subscribeToShift() {
 		unsubscribeCompleted?.();
-		unsubscribeCompleted = subscribeCompletedTasks(dateKey, shift, (ids) => {
-			completed = ids;
+		unsubscribeCompleted = subscribeCompletedTasks(dateKey, shift, (completions) => {
+			completed = completions.ids;
+			taskMeta = completions.meta;
 		});
+	}
+
+	function taskByLine(taskId: string) {
+		const meta = taskMeta[taskId];
+		if (!meta?.by) return '';
+		const at = new Date(meta.at);
+		return Number.isNaN(at.getTime()) ? meta.by : `${meta.by} · ${format(at, 'h:mma').toLowerCase()}`;
 	}
 
 	onMount(() => {
@@ -274,12 +284,20 @@
 
 	function toggleTask(taskId: string) {
 		const checked = !completed.has(taskId);
+		const byName = $authProfile?.displayName ?? null;
 		const next = new Set(completed);
-		if (checked) next.add(taskId);
-		else next.delete(taskId);
+		const nextMeta = { ...taskMeta };
+		if (checked) {
+			next.add(taskId);
+			nextMeta[taskId] = { by: byName, at: new Date().toISOString() };
+		} else {
+			next.delete(taskId);
+			delete nextMeta[taskId];
+		}
 		completed = next;
+		taskMeta = nextMeta;
 		lastUpdated = new Date().toISOString();
-		void toggleCleaningTask(dateKey, shift, taskId, checked);
+		void toggleCleaningTask(dateKey, shift, taskId, checked, byName);
 	}
 
 	function setShift(value: Shift) {
@@ -363,6 +381,9 @@
 									on:change={() => toggleTask(task.id)}
 								/>
 								<span class="task-copy">{task.description}</span>
+								{#if completed.has(task.id) && taskByLine(task.id)}
+									<span class="task-by">{taskByLine(task.id)}</span>
+								{/if}
 							</label>
 						{/each}
 					</div>
@@ -580,6 +601,14 @@
 		font-size: 0.9rem;
 		line-height: 1.28;
 		color: var(--marker-black);
+	}
+
+	.task-by {
+		margin-left: auto;
+		font-size: 0.66rem;
+		color: #7a8794;
+		white-space: nowrap;
+		align-self: center;
 	}
 
 	@media (min-width: 760px) {

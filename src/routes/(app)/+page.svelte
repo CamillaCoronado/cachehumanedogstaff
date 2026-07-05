@@ -134,8 +134,8 @@
 	let unsubscribeCompleted: (() => void) | null = null;
 	$: {
 		unsubscribeCompleted?.();
-		unsubscribeCompleted = subscribeCompletedTasks(todayKey, cleaningShift, (ids) => {
-			completedTaskIds = ids;
+		unsubscribeCompleted = subscribeCompletedTasks(todayKey, cleaningShift, (completions) => {
+			completedTaskIds = completions.ids;
 		});
 	}
 	onDestroy(() => unsubscribeCompleted?.());
@@ -389,7 +389,7 @@
 		else next.delete(taskId);
 		completedTaskIds = next;
 		// Persist to Firestore in background
-		void toggleCleaningTask(todayKey, cleaningShift, taskId, shouldComplete);
+		void toggleCleaningTask(todayKey, cleaningShift, taskId, shouldComplete, $authProfile?.displayName ?? null);
 	}
 
 	function primaryCleaningTaskId() {
