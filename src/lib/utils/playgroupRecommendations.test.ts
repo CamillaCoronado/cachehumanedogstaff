@@ -120,13 +120,49 @@ describe('buildRecommendations', () => {
 		expect(swapIns[0].compatibleGroups).toHaveLength(0);
 	});
 
-	it('skips groups with an intact male/female conflict', () => {
+	it('splits an intact male/female conflict out instead of discarding the group', () => {
 		const dogs = [
 			makeDog({ name: 'M', weightLbs: 30, isFixed: false, sex: 'male' }),
+			makeDog({ name: 'F', weightLbs: 32, isFixed: false, sex: 'female' }),
+			makeDog({ name: 'X', weightLbs: 34 }),
+			makeDog({ name: 'Y', weightLbs: 36 })
+		];
+		const { groups, swapIns } = buildRecommendations(dogs);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].dogs.map((d) => d.name)).toEqual(['M', 'X', 'Y']);
+		expect(groups[0].reason).toContain('intact M/F kept separate');
+		// F can't join the group that holds the intact male…
+		expect(swapIns.map((s) => s.dog.name)).toEqual(['F']);
+		expect(swapIns[0].compatibleGroups).toHaveLength(0);
+	});
+
+	it('still produces no group when an intact pair is all there is', () => {
+		const { groups } = buildRecommendations([
+			makeDog({ name: 'M', weightLbs: 30, isFixed: false, sex: 'male' }),
 			makeDog({ name: 'F', weightLbs: 32, isFixed: false, sex: 'female' })
+		]);
+		expect(groups).toHaveLength(0);
+	});
+
+	it('keeps energy within one level and regroups the skipped dogs', () => {
+		const dogs = [
+			makeDog({ name: 'CalmA', weightLbs: 40, energyLevel: 'low' }),
+			makeDog({ name: 'CalmB', weightLbs: 41, energyLevel: 'low' }),
+			makeDog({ name: 'WildA', weightLbs: 42, energyLevel: 'very_high' }),
+			makeDog({ name: 'WildB', weightLbs: 43, energyLevel: 'very_high' })
 		];
 		const { groups } = buildRecommendations(dogs);
-		expect(groups).toHaveLength(0);
+		expect(groups).toHaveLength(2);
+		expect(groups[0].dogs.map((d) => d.name)).toEqual(['CalmA', 'CalmB']);
+		expect(groups[1].dogs.map((d) => d.name)).toEqual(['WildA', 'WildB']);
+	});
+
+	it('explains each group with its size range and energy band', () => {
+		const { groups } = buildRecommendations([
+			makeDog({ weightLbs: 30, energyLevel: 'medium' }),
+			makeDog({ weightLbs: 45, energyLevel: 'high' })
+		]);
+		expect(groups[0].reason).toBe('30–45 lbs · medium–high energy');
 	});
 
 	it('ignores dogs with unknown weight', () => {

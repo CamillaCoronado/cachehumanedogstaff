@@ -141,6 +141,32 @@ export function sizeLabelShort(dog: Dog): string {
 	return 'L';
 }
 
+// Energy is a hard constraint like size: all members must be within one
+// energy level of each other (puppies count as high).
+export function energyCompatible(group: Dog[], candidate: Dog): boolean {
+	const ranks = [...group.map(dogEnergyRank), dogEnergyRank(candidate)];
+	return Math.max(...ranks) - Math.min(...ranks) <= 1;
+}
+
+const ENERGY_LABELS: Record<number, string> = { 1: 'low', 2: 'medium', 3: 'high', 4: 'very high' };
+
+// Human-readable rationale for a group card: actual size range, energy band,
+// and whether an intact male/female was deliberately kept out.
+function groupReason(group: Dog[], heldOutForIntact: number): string {
+	const weights = group.map((d) => d.weightLbs as number);
+	const minW = Math.min(...weights);
+	const maxW = Math.max(...weights);
+	const ranks = group.map(dogEnergyRank);
+	const minR = Math.min(...ranks);
+	const maxR = Math.max(...ranks);
+	const parts = [
+		minW === maxW ? `${minW} lbs` : `${minW}–${maxW} lbs`,
+		`${minR === maxR ? ENERGY_LABELS[minR] : `${ENERGY_LABELS[minR]}–${ENERGY_LABELS[maxR]}`} energy`
+	];
+	if (heldOutForIntact > 0) parts.push('intact M/F kept separate');
+	return parts.join(' · ');
+}
+
 export function buildRecommendations(ready: Dog[]): { groups: PlaygroupRecommendation[]; swapIns: SwapInSuggestion[] } {
 	const groups: PlaygroupRecommendation[] = [];
 	const groupedIds = new Set<string>();
@@ -148,30 +174,42 @@ export function buildRecommendations(ready: Dog[]): { groups: PlaygroupRecommend
 	const knownWeight = [...ready.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined)]
 		.sort((a, b) => sizeRank(a) - sizeRank(b) || dogEnergyRank(a) - dogEnergyRank(b) || a.name.localeCompare(b.name));
 
+	// Repeatedly seed a group with the lightest ungrouped dog. Dogs that don't
+	// fit (size window, energy band, or an intact conflict) stay in the pool and
+	// get their own chance to anchor a later group — a single mismatch no longer
+	// discards everyone around it.
 	let groupNumber = 1;
-	let i = 0;
-	while (i < knownWeight.length) {
-		const anchor = knownWeight[i];
-		const group: Dog[] = [];
-		let j = i;
-		// Anchor is always lightest (sorted); once size window breaks, all heavier fail too
-		while (j < knownWeight.length && group.length < 4) {
-			if (!sizeCompatible([anchor, knownWeight[j]])) break;
-			group.push(knownWeight[j]);
-			j++;
+	let remaining = knownWeight;
+	while (remaining.length > 0) {
+		const [anchor, ...rest] = remaining;
+		const group: Dog[] = [anchor];
+		const leftover: Dog[] = [];
+		let heldOutForIntact = 0;
+		for (const candidate of rest) {
+			// Anchor is the group's lightest dog, so pairwise size check with it
+			// bounds the whole group's spread.
+			if (group.length >= 4 || !sizeCompatible([anchor, candidate]) || !energyCompatible(group, candidate)) {
+				leftover.push(candidate);
+				continue;
+			}
+			if (intactConflict([...group, candidate])) {
+				heldOutForIntact++;
+				leftover.push(candidate);
+				continue;
+			}
+			group.push(candidate);
 		}
-		i = j;
-		if (group.length < 2 || intactConflict(group)) continue;
-		const rec: PlaygroupRecommendation = {
+		remaining = leftover;
+		if (group.length < 2) continue; // ungrouped anchor becomes a swap-in below
+		groups.push({
 			id: `ready-${group.map((d) => d.id).join('-')}`,
 			title: `Ready Group ${groupNumber++}`,
 			dogs: group,
 			dogIds: group.map((d) => d.id),
-			reason: `${group.length} dogs grouped by size and energy.`,
+			reason: groupReason(group, heldOutForIntact),
 			recommendationType: 'ready_group',
 			priority: 'high'
-		};
-		groups.push(rec);
+		});
 		group.forEach((d) => groupedIds.add(d.id));
 	}
 
@@ -181,7 +219,7 @@ export function buildRecommendations(ready: Dog[]): { groups: PlaygroupRecommend
 		.map((dog) => ({
 			dog,
 			compatibleGroups: groups.filter(
-				(g) => sizeCompatible([...g.dogs, dog]) && !intactConflict([...g.dogs, dog])
+				(g) => sizeCompatible([...g.dogs, dog]) && energyCompatible(g.dogs, dog) && !intactConflict([...g.dogs, dog])
 			)
 		}));
 
