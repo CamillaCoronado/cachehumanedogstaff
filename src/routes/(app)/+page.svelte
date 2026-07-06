@@ -1,4 +1,5 @@
 <script lang="ts">
+	import toast from 'svelte-french-toast';
 	import { format, startOfDay } from 'date-fns';
 	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, updateDog } from '$lib/data/dogs';
 	import { ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
@@ -10,6 +11,7 @@
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import { getBathAttentionDogs, getCautionDogs, getOverdueDayTripDogs, getOverduePlaygroupDogs } from '$lib/utils/attention';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
+	import { subscribeHandoff, saveHandoff, type ShiftHandoff } from '$lib/data/handoff';
 	import type { CleaningShift } from '$lib/data/cleaning';
 	import { onDestroy, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
@@ -139,6 +141,53 @@
 		});
 	}
 	onDestroy(() => unsubscribeCompleted?.());
+
+	// Shift handoff: read the previous shift's note (morning reads yesterday
+	// evening's; evening reads this morning's) and edit our own shift's note.
+	let prevHandoff: ShiftHandoff | null = null;
+	let ownHandoff: ShiftHandoff | null = null;
+	let handoffDraft = '';
+	let handoffDirty = false;
+	let savingHandoff = false;
+	$: yesterdayKey = format(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1), 'yyyy-MM-dd');
+	$: prevShiftLabel = cleaningShift === 'morning' ? 'last evening' : 'this morning';
+
+	let unsubscribeHandoffs: (() => void) | null = null;
+	$: {
+		unsubscribeHandoffs?.();
+		const [prevDate, prevShift] =
+			cleaningShift === 'morning'
+				? ([yesterdayKey, 'evening'] as const)
+				: ([todayKey, 'morning'] as const);
+		const unsubPrev = subscribeHandoff(prevDate, prevShift, (h) => (prevHandoff = h));
+		const unsubOwn = subscribeHandoff(todayKey, cleaningShift, (h) => (ownHandoff = h));
+		unsubscribeHandoffs = () => {
+			unsubPrev();
+			unsubOwn();
+		};
+	}
+	onDestroy(() => unsubscribeHandoffs?.());
+
+	// Keep the editor in sync with remote saves unless the user is mid-edit.
+	$: if (!handoffDirty) handoffDraft = ownHandoff?.note ?? '';
+
+	async function saveHandoffNote() {
+		savingHandoff = true;
+		try {
+			await saveHandoff(todayKey, cleaningShift, handoffDraft, $authProfile?.displayName ?? null);
+			handoffDirty = false;
+		} catch {
+			toast.error('Could not save the handoff note.');
+		} finally {
+			savingHandoff = false;
+		}
+	}
+
+	function handoffMetaLine(h: ShiftHandoff) {
+		const at = new Date(h.updatedAt);
+		const time = Number.isNaN(at.getTime()) ? '' : ` · ${format(at, 'h:mma').toLowerCase()}`;
+		return `${h.updatedBy ?? 'Unknown'}${time}`;
+	}
 
 	$: dogsOut = activeDogs
 		.filter((dog) => dog.isOutOnDayTrip)
@@ -612,6 +661,42 @@
 			</div>
 		</section>
 
+		<section class="planner-list planner-list-sand planner-handoff">
+			<div class="planner-list-head">
+				<h2>Shift Handoff</h2>
+				<span class="planner-pill planner-pill-sand">{cleaningShift === 'morning' ? 'AM' : 'PM'}</span>
+			</div>
+			<div class="planner-items">
+				<div class="handoff-block">
+					<p class="handoff-label typewriter">from {prevShiftLabel}</p>
+					{#if prevHandoff}
+						<p class="handoff-note">{prevHandoff.note}</p>
+						<p class="handoff-meta">{handoffMetaLine(prevHandoff)}</p>
+					{:else}
+						<p class="handoff-empty">No notes left.</p>
+					{/if}
+				</div>
+				<div class="handoff-block">
+					<p class="handoff-label typewriter">notes for the next shift</p>
+					<textarea
+						class="handoff-input"
+						rows="3"
+						placeholder="Blockers, unfinished tasks, FYIs…"
+						bind:value={handoffDraft}
+						on:input={() => (handoffDirty = true)}
+					></textarea>
+					<div class="handoff-actions">
+						<button class="handoff-save" on:click={saveHandoffNote} disabled={savingHandoff || !handoffDirty}>
+							{savingHandoff ? 'Saving…' : 'Save'}
+						</button>
+						{#if ownHandoff}
+							<span class="handoff-meta">{handoffMetaLine(ownHandoff)}</span>
+						{/if}
+					</div>
+				</div>
+			</div>
+		</section>
+
 		<section class="planner-list planner-list-rose" class:planner-list-empty={!loading && dogsOut.length === 0}>
 			<div class="planner-list-head">
 				<h2>Day Trips</h2>
@@ -1036,6 +1121,76 @@
 		color: #a13b3b;
 		font-size: 0.78rem;
 		font-weight: 600;
+	}
+
+	/* ── Shift handoff card ── */
+	.handoff-block {
+		display: grid;
+		gap: 0.26rem;
+	}
+
+	.handoff-label {
+		margin: 0;
+		font-size: 0.6rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		color: #75664a;
+	}
+
+	.handoff-note {
+		margin: 0;
+		font-size: 0.85rem;
+		line-height: 1.35;
+		color: #35322a;
+		white-space: pre-wrap;
+	}
+
+	.handoff-empty {
+		margin: 0;
+		font-size: 0.78rem;
+		color: #9a8d70;
+	}
+
+	.handoff-meta {
+		margin: 0;
+		font-size: 0.66rem;
+		color: #9a8d70;
+	}
+
+	.handoff-input {
+		width: 100%;
+		border: 1px solid #d9cdb2;
+		border-radius: 0.5rem;
+		padding: 0.45rem 0.5rem;
+		font: inherit;
+		font-size: 0.85rem;
+		background: rgba(255, 255, 255, 0.75);
+		color: #35322a;
+		resize: vertical;
+	}
+
+	.handoff-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.handoff-save {
+		padding: 0.3rem 0.85rem;
+		border: 1px solid #c9b98f;
+		border-radius: 0.5rem;
+		background: #fff;
+		font-size: 0.76rem;
+		font-weight: 600;
+		color: #6b5a33;
+		cursor: pointer;
+	}
+
+	.handoff-save:hover:not(:disabled) { background: #faf5e8; }
+
+	.handoff-save:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.planner-columns {
