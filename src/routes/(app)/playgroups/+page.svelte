@@ -69,6 +69,10 @@
 	let savingPending = false;
 
 	// Tabs
+	// Recommendations tab hidden 2026-07-05 (Camilla): the grouping suggestions
+	// aren't trustworthy yet. Flip this to true to bring the tab back — the
+	// engine ($lib/utils/playgroupRecommendations), markup, and tests are intact.
+	const SHOW_RECOMMENDATIONS = false;
 	let activeTab: 'dogs' | 'recommendations' | 'history' = 'dogs';
 
 	// History editing
@@ -625,7 +629,9 @@
 
 			<div class="pg-tab-bar">
 				<button class={`pg-tab ${activeTab === 'dogs' ? 'pg-tab-active' : ''}`} type="button" on:click={() => activeTab = 'dogs'}>Dogs</button>
-				<button class={`pg-tab ${activeTab === 'recommendations' ? 'pg-tab-active' : ''}`} type="button" on:click={() => activeTab = 'recommendations'}>Recommendations</button>
+				{#if SHOW_RECOMMENDATIONS}
+					<button class={`pg-tab ${activeTab === 'recommendations' ? 'pg-tab-active' : ''}`} type="button" on:click={() => activeTab = 'recommendations'}>Recommendations</button>
+				{/if}
 				<button class={`pg-tab ${activeTab === 'history' ? 'pg-tab-active' : ''}`} type="button" on:click={() => activeTab = 'history'}>History</button>
 			</div>
 
