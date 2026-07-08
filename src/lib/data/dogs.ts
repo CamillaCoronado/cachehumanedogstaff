@@ -2,14 +2,17 @@ import type {
 	BathLog,
 	BehavioralNote,
 	DogHandlingLevel,
+	DogPlayStyle,
 	DayTripIneligibleReason,
 	TripColorReason,
 	DayTripLog,
 	Dog,
 	FeedingLog,
+	MealTime,
 	StoolLog,
 	Treatment,
-	UserProfile
+	UserProfile,
+	YardLog
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { toDate, toDateString } from '$lib/utils/dates';
@@ -19,6 +22,7 @@ import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, se
 const DOGS_KEY = 'shelter.dogs';
 const NOTES_KEY = 'shelter.behavioralNotes';
 const BATH_KEY = 'shelter.bathLogs';
+const YARD_KEY = 'shelter.yardLogs';
 const FEEDING_KEY = 'shelter.feedingLogs';
 const STOOL_KEY = 'shelter.stoolLogs';
 const DAY_TRIP_KEY = 'shelter.dayTripLogs';
@@ -52,6 +56,7 @@ interface StoredDog {
 	color?: string;
 	markings?: string;
 	hiddenComments?: string;
+	entryReason?: string;
 	description?: string;
 	warningNotes?: string;
 	holdNotes?: string;
@@ -65,10 +70,12 @@ interface StoredDog {
 	crateTrained?: 'yes' | 'no' | 'unknown';
 	idealHome?: string;
 	energyLevel?: 'low' | 'medium' | 'high' | 'very_high' | 'unknown';
+	playStyles?: string[];
 	outdoorKennelAssignment: string;
 	microchipDate?: string | null;
 	healthProblems?: string;
 	lastBathDate: string | null;
+	lastYardDate?: string | null;
 	lastBathBy: string | null;
 	lastDayTripDate: string | null;
 	// day trip in-progress state
@@ -80,6 +87,9 @@ interface StoredDog {
 	fortifloraDate?: string | null;
 	fortifloraDays?: number | null;
 	fortifloraTime?: string | null;
+	fastUntilDate?: string | null;
+	fastUntilMeal?: string | null;
+	fastReason?: string | null;
 	satinBalls?: boolean;
 	hasSupplements?: boolean;
 	hasSecondMeal?: boolean;
@@ -94,6 +104,7 @@ interface StoredDog {
 	allergyTypes?: string[];
 	dayTripStatus: 'ineligible' | 'difficult' | 'eligible';
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
+	/** Legacy flag, no longer read or written — handlingLevel === 'manager_only' replaced it. */
 	dayTripManagerOnly?: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
@@ -147,6 +158,14 @@ interface StoredFeedingLog {
 interface StoredBathLog {
 	id: string;
 	timestamp: string;
+	loggedBy: string;
+	loggedByName: string;
+}
+
+interface StoredYardLog {
+	id: string;
+	timestamp: string;
+	durationMinutes?: number | null;
 	loggedBy: string;
 	loggedByName: string;
 }
@@ -330,6 +349,7 @@ function serializeDog(dog: Dog): StoredDog {
 		origin: dog.origin,
 		markings: dog.markings ?? '',
 		hiddenComments: dog.hiddenComments ?? '',
+		entryReason: dog.entryReason ?? '',
 		description: dog.description ?? '',
 		warningNotes: dog.warningNotes ?? '',
 		holdNotes: dog.holdNotes ?? '',
@@ -343,10 +363,12 @@ function serializeDog(dog: Dog): StoredDog {
 		crateTrained: dog.crateTrained ?? 'unknown',
 		idealHome: dog.idealHome,
 		energyLevel: dog.energyLevel,
+		playStyles: dog.playStyles ?? [],
 		outdoorKennelAssignment: normalizeKennelAssignment(dog.inFoster ? '' : dog.outdoorKennelAssignment),
 		microchipDate: toDateString(dog.microchipDate),
 		healthProblems: dog.healthProblems ?? '',
 		lastBathDate: toDateString(dog.lastBathDate),
+		lastYardDate: toDateString(dog.lastYardDate) ?? null,
 		lastBathBy: dog.lastBathBy,
 		lastDayTripDate: toDateString(dog.lastDayTripDate),
 		isOutOnDayTrip: dog.isOutOnDayTrip ?? false,
@@ -357,6 +379,9 @@ function serializeDog(dog: Dog): StoredDog {
 		fortifloraDate: toDateString(dog.fortifloraDate) ?? null,
 		fortifloraDays: typeof dog.fortifloraDays === 'number' ? dog.fortifloraDays : null,
 		fortifloraTime: dog.fortifloraTime ?? null,
+		fastUntilDate: toDateString(dog.fastUntilDate) ?? null,
+		fastUntilMeal: dog.fastUntilMeal ?? null,
+		fastReason: dog.fastReason ?? null,
 		isMicrochipped: dog.isMicrochipped ?? false,
 		isFixed: dog.isFixed,
 		fixedDate: toDateString(dog.fixedDate),
@@ -367,8 +392,8 @@ function serializeDog(dog: Dog): StoredDog {
 		allergyTypes: dog.allergyTypes ?? [],
 		dayTripStatus: dog.dayTripStatus,
 		dayTripIneligibleReason: dog.dayTripIneligibleReason ?? null,
-		dayTripManagerOnly: dog.dayTripManagerOnly ?? false,
-		dayTripManagerOnlyReason: dog.dayTripManagerOnly ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
+		dayTripManagerOnlyReason:
+			dog.handlingLevel === 'manager_only' ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
 		manualTripColor: dog.manualTripColor ?? null,
 		manualTripColorReason: dog.manualTripColorReason ?? null,
 		lastSheetColor: dog.lastSheetColor ?? null,
@@ -436,8 +461,11 @@ function deserializeDog(stored: StoredDog): Dog {
 	const normalizedDayTripNotes = (stored.dayTripNotes ?? '').trim();
 	const normalizedDayTripIneligibleReason = normalizeDayTripIneligibleReason(stored.dayTripIneligibleReason);
 	const normalizedDayTripManagerOnlyReason = normalizeDayTripIneligibleReason(stored.dayTripManagerOnlyReason);
+	// handlingLevel is the single source of truth for manager-only status. The legacy
+	// dayTripManagerOnly flag is ignored on read: the form always synced handlingLevel to
+	// manager_only when it was checked, so a mismatch means the level was later lowered
+	// and the stale flag should not resurrect the restriction.
 	const normalizedHandlingLevel = normalizeDogHandlingLevel(stored.handlingLevel);
-	const dayTripManagerOnly = stored.dayTripManagerOnly ?? false;
 	const normalizedDayTripStatus =
 		(stored.dayTripStatus ?? 'eligible') === 'ineligible' &&
 			normalizedDayTripNotes.length === 0 &&
@@ -449,7 +477,7 @@ function deserializeDog(stored: StoredDog): Dog {
 			? normalizedDayTripIneligibleReason
 			: null;
 	const dayTripManagerOnlyReason =
-		dayTripManagerOnly ? (normalizedDayTripManagerOnlyReason ?? 'other') : null;
+		normalizedHandlingLevel === 'manager_only' ? (normalizedDayTripManagerOnlyReason ?? 'other') : null;
 
 	const dog: Dog = {
 		id: stored.id,
@@ -479,6 +507,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		color: stored.color ?? '',
 		markings: stored.markings ?? '',
 		hiddenComments: stored.hiddenComments ?? '',
+		entryReason: stored.entryReason ?? '',
 		description: stored.description ?? '',
 		warningNotes: stored.warningNotes ?? '',
 		holdNotes: stored.holdNotes ?? '',
@@ -492,10 +521,14 @@ function deserializeDog(stored: StoredDog): Dog {
 		crateTrained: stored.crateTrained ?? 'unknown',
 		idealHome: stored.idealHome ?? '',
 		energyLevel: stored.energyLevel ?? 'unknown',
+		playStyles: (stored.playStyles ?? []).filter(
+			(s): s is DogPlayStyle => s === 'rough_and_rowdy' || s === 'gentle_and_dainty' || s === 'solo'
+		),
 		outdoorKennelAssignment: stored.outdoorKennelAssignment,
 		microchipDate: stored.microchipDate ? toDate(stored.microchipDate) : null,
 		healthProblems: stored.healthProblems ?? '',
 		lastBathDate: stored.lastBathDate ? toDate(stored.lastBathDate) : null,
+		lastYardDate: stored.lastYardDate ? toDate(stored.lastYardDate) : null,
 		lastBathBy: stored.lastBathBy ?? null,
 		lastDayTripDate: stored.lastDayTripDate ? toDate(stored.lastDayTripDate) : null,
 		isOutOnDayTrip: stored.isOutOnDayTrip ?? false,
@@ -506,6 +539,9 @@ function deserializeDog(stored: StoredDog): Dog {
 		fortifloraDate: stored.fortifloraDate ? toDate(stored.fortifloraDate) : null,
 		fortifloraDays: typeof stored.fortifloraDays === 'number' ? stored.fortifloraDays : null,
 		fortifloraTime: (['am', 'pm', 'both'].includes(stored.fortifloraTime ?? '') ? stored.fortifloraTime as 'am' | 'pm' | 'both' : null),
+		fastUntilDate: stored.fastUntilDate ? toDate(stored.fastUntilDate) : null,
+		fastUntilMeal: (['am', 'pm', 'second'].includes(stored.fastUntilMeal ?? '') ? stored.fastUntilMeal as MealTime : null),
+		fastReason: stored.fastReason ?? null,
 		isMicrochipped: stored.isMicrochipped ?? false,
 		isFixed: stored.isFixed ?? false,
 		fixedDate: stored.fixedDate ? toDate(stored.fixedDate) : null,
@@ -516,12 +552,11 @@ function deserializeDog(stored: StoredDog): Dog {
 		allergyTypes: stored.allergyTypes ?? [],
 		dayTripStatus: normalizedDayTripStatus,
 		dayTripIneligibleReason,
-		dayTripManagerOnly,
 		dayTripManagerOnlyReason,
 		manualTripColor: (['green', 'yellow', 'red'].includes(stored.manualTripColor ?? '')
 			? (stored.manualTripColor as 'green' | 'yellow' | 'red')
 			: null),
-		manualTripColorReason: (['behavior', 'medical', 'isolation', 'awaiting_eval', 'manager_only', 'difficult', 'other'].includes(stored.manualTripColorReason ?? '')
+		manualTripColorReason: (['behavior', 'medical', 'isolation', 'awaiting_eval', 'manager_only', 'staff_only', 'difficult', 'other'].includes(stored.manualTripColorReason ?? '')
 			? (stored.manualTripColorReason as TripColorReason)
 			: null),
 		lastSheetColor: (['green', 'yellow', 'red'].includes(stored.lastSheetColor ?? '')
@@ -610,6 +645,26 @@ function deserializeBathLog(log: StoredBathLog): BathLog {
 	return {
 		id: log.id,
 		timestamp: toDate(log.timestamp) ?? new Date(),
+		loggedBy: log.loggedBy,
+		loggedByName: log.loggedByName
+	};
+}
+
+function serializeYardLog(log: YardLog): StoredYardLog {
+	return {
+		id: log.id,
+		timestamp: toDateString(log.timestamp) ?? new Date().toISOString(),
+		durationMinutes: log.durationMinutes ?? null,
+		loggedBy: log.loggedBy,
+		loggedByName: log.loggedByName
+	};
+}
+
+function deserializeYardLog(log: StoredYardLog): YardLog {
+	return {
+		id: log.id,
+		timestamp: toDate(log.timestamp) ?? new Date(),
+		durationMinutes: typeof log.durationMinutes === 'number' ? log.durationMinutes : null,
 		loggedBy: log.loggedBy,
 		loggedByName: log.loggedByName
 	};
@@ -746,7 +801,7 @@ function dogRef(dogId: string) {
 
 function dogSubcollectionRef(
 	dogId: string,
-	subcollection: 'behavioralNotes' | 'bathLogs' | 'feedingLogs' | 'stoolLogs' | 'dayTripLogs'
+	subcollection: 'behavioralNotes' | 'bathLogs' | 'yardLogs' | 'feedingLogs' | 'stoolLogs' | 'dayTripLogs'
 ) {
 	if (!db) return null;
 	return collection(db, 'dogs', dogId, subcollection);
@@ -754,7 +809,7 @@ function dogSubcollectionRef(
 
 async function deleteDogSubcollection(
 	dogId: string,
-	subcollection: 'behavioralNotes' | 'bathLogs' | 'feedingLogs' | 'stoolLogs' | 'dayTripLogs'
+	subcollection: 'behavioralNotes' | 'bathLogs' | 'yardLogs' | 'feedingLogs' | 'stoolLogs' | 'dayTripLogs'
 ) {
 	const ref = dogSubcollectionRef(dogId, subcollection);
 	if (!ref) return;
@@ -841,7 +896,7 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 }
 
 export async function mergeDogs(keepId: string, deleteId: string) {
-	const subcollections = ['behavioralNotes', 'bathLogs', 'feedingLogs', 'stoolLogs', 'dayTripLogs'] as const;
+	const subcollections = ['behavioralNotes', 'bathLogs', 'yardLogs', 'feedingLogs', 'stoolLogs', 'dayTripLogs'] as const;
 
 	if (db) {
 		for (const sub of subcollections) {
@@ -912,6 +967,7 @@ export async function deleteDog(id: string) {
 	if (ref) {
 		await deleteDogSubcollection(id, 'behavioralNotes');
 		await deleteDogSubcollection(id, 'bathLogs');
+		await deleteDogSubcollection(id, 'yardLogs');
 		await deleteDogSubcollection(id, 'feedingLogs');
 		await deleteDogSubcollection(id, 'stoolLogs');
 		await deleteDogSubcollection(id, 'dayTripLogs');
@@ -930,6 +986,10 @@ export async function deleteDog(id: string) {
 	const baths = readJson<LogMap<StoredBathLog>>(BATH_KEY, {});
 	delete baths[id];
 	writeJson(BATH_KEY, baths);
+
+	const yards = readJson<LogMap<StoredYardLog>>(YARD_KEY, {});
+	delete yards[id];
+	writeJson(YARD_KEY, yards);
 
 	const feeding = readJson<LogMap<StoredFeedingLog>>(FEEDING_KEY, {});
 	delete feeding[id];
@@ -1239,6 +1299,18 @@ export async function updateFeedingLog(
 	writeJson(FEEDING_KEY, stored);
 }
 
+export async function deleteFeedingLog(dogId: string, logId: string) {
+	const ref = dogSubcollectionRef(dogId, 'feedingLogs');
+	if (ref) {
+		await deleteDoc(doc(ref, logId));
+		return;
+	}
+
+	const stored = readJson<LogMap<StoredFeedingLog>>(FEEDING_KEY, {});
+	stored[dogId] = (stored[dogId] ?? []).filter((e) => e.id !== logId);
+	writeJson(FEEDING_KEY, stored);
+}
+
 export async function addStoolLog(dogId: string, log: Omit<StoolLog, 'id' | 'loggedBy' | 'loggedByName'>, profile?: UserProfile | null) {
 	const ref = dogSubcollectionRef(dogId, 'stoolLogs');
 	if (ref) {
@@ -1301,6 +1373,85 @@ export async function logBath(dogId: string, profile?: UserProfile | null, times
 	writeJson(BATH_KEY, stored);
 	await updateDog(dogId, { lastBathDate: now, lastBathBy: identity.name });
 	return entry;
+}
+
+export async function listYardLogs(dogId: string) {
+	const ref = dogSubcollectionRef(dogId, 'yardLogs');
+	if (ref) {
+		try {
+			const snapshot = await getDocs(ref);
+			const logs = snapshot.docs.map((docSnap) =>
+				deserializeYardLog({ ...(docSnap.data() as StoredYardLog), id: docSnap.id })
+			);
+			return sortByDateDesc(logs, (log) => log.timestamp);
+		} catch (error) {
+			if (isPermissionDenied(error)) return [];
+			throw error;
+		}
+	}
+
+	const stored = readJson<LogMap<StoredYardLog>>(YARD_KEY, {});
+	const logs = stored[dogId] ?? [];
+	return logs.map(deserializeYardLog);
+}
+
+export async function logYardTime(
+	dogId: string,
+	durationMinutes: number | null,
+	profile?: UserProfile | null,
+	timestamp?: Date
+) {
+	const identity = getUserIdentity(profile);
+	const now = timestamp ?? new Date();
+	const entry: YardLog = {
+		id: createId('yard'),
+		timestamp: now,
+		durationMinutes,
+		loggedBy: identity.uid,
+		loggedByName: identity.name
+	};
+	const ref = dogSubcollectionRef(dogId, 'yardLogs');
+	if (ref) {
+		try {
+			await setDoc(doc(ref, entry.id), serializeYardLog(entry));
+		} catch (error) {
+			if (!isPermissionDenied(error)) throw error;
+		}
+		await updateDog(dogId, { lastYardDate: now });
+		return null;
+	}
+
+	const stored = readJson<LogMap<StoredYardLog>>(YARD_KEY, {});
+	const list = stored[dogId] ?? [];
+	list.unshift(serializeYardLog(entry));
+	stored[dogId] = list;
+	writeJson(YARD_KEY, stored);
+	await updateDog(dogId, { lastYardDate: now });
+	return entry;
+}
+
+export async function deleteYardLog(dogId: string, logId: string) {
+	const ref = dogSubcollectionRef(dogId, 'yardLogs');
+	if (ref) {
+		await deleteDoc(doc(ref, logId));
+		// Recompute lastYardDate from remaining logs
+		const remaining = await getDocs(ref);
+		let latestMs = 0;
+		let latestLog: StoredYardLog | null = null;
+		for (const snap of remaining.docs) {
+			const data = snap.data() as StoredYardLog;
+			const ms = new Date(data.timestamp).getTime();
+			if (ms > latestMs) { latestMs = ms; latestLog = data; }
+		}
+		await updateDog(dogId, { lastYardDate: latestLog ? new Date(latestLog.timestamp) : null });
+		return;
+	}
+	const stored = readJson<LogMap<StoredYardLog>>(YARD_KEY, {});
+	const list = (stored[dogId] ?? []).filter((l) => l.id !== logId);
+	stored[dogId] = list;
+	writeJson(YARD_KEY, stored);
+	const latest = list[0] ?? null;
+	await updateDog(dogId, { lastYardDate: latest ? new Date(latest.timestamp) : null });
 }
 
 export async function deleteBathLog(dogId: string, logId: string) {

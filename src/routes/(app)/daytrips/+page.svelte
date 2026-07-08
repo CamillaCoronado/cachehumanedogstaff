@@ -144,7 +144,6 @@
 			dog.dayTripStatus,
 			dog.isolationStatus,
 			dog.dayTripIneligibleReason,
-			dog.dayTripManagerOnly,
 			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
 			dog.handlingLevel,

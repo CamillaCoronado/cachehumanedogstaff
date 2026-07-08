@@ -15,7 +15,11 @@ confirmation text back. Voicemails are transcribed and handled exactly like text
 - **Access: staff allowlist** — only phone numbers registered on user profiles can
   write; unknown numbers get a polite rejection and nothing is stored.
 - **Voice: voicemail-style** — greeting → message → transcript → same pipeline as SMS.
-  No interactive prompts in v1.
+  No interactive conversation in v1.
+- **Confirm before write (Camilla, 2026-07-05): nothing is logged until the sender
+  confirms.** Every message (text or transcribed voicemail) produces a proposal SMS
+  ("Ready to log: … Reply YES to save, NO to cancel"). Only YES writes. Proposals
+  expire after 15 minutes; a new message replaces any pending proposal.
 - **Provider: undecided** — design is provider-agnostic; the adapter (webhook format,
   signature check, reply format) is one thin file. Twilio is the default assumption
   (~$1–2/mo + usage) unless a different provider is chosen at P2.
@@ -51,8 +55,9 @@ New, under `src/lib/server/phoneInbox/`:
 | `allowlist.ts` | match sender number → user profile (E.164-normalized `phoneNumber` field on profiles) |
 | `parse.ts` | AI structured extraction: message + current dog-name roster → actions with confidence; low confidence → `needs_review` |
 | `apply.ts` | apply actions via Admin SDK (feeding log, didn't-eat, trip log/note, handoff note, dog note) |
-| `confirm.ts` | build the reply text ("Logged: Buddy didn't eat (PM). ✓") |
-| `pipeline.ts` | glue: allowlist → parse → apply → confirmation; unparseable → `phoneInbox` review collection |
+| `confirmations.ts` | pending-proposal state per phone number (Firestore, 15-min expiry); YES/NO handling |
+| `replies.ts` | build proposal + confirmation texts ("Ready to log: … Reply YES" / "Saved ✓") |
+| `pipeline.ts` | glue: allowlist → (YES/NO? apply/cancel pending) → parse → propose; unparseable → `phoneInbox` review collection |
 
 Routes: `/api/phone/inbound` (SMS webhook) and `/api/phone/voice` (voicemail:
 answer + record, then recording-ready callback → transcribe → pipeline).
@@ -74,4 +79,4 @@ answer + record, then recording-ready callback → transcribe → pipeline).
 ## Open questions
 
 - Which greeting voice/text for the voicemail line?
-- Should the confirmation SMS include an undo hint (e.g. "reply UNDO")? (v2)
+- Resolved 2026-07-05: no undo needed — the YES/NO confirmation step covers it.

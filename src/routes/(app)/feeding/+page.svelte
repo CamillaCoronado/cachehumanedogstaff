@@ -2,9 +2,9 @@
 	import { onMount } from 'svelte';
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
-	import { addFeedingLog, updateFeedingLog, updateDog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
+	import { addFeedingLog, updateFeedingLog, deleteFeedingLog, updateDog, addStoolLog, listFeedingLogs, listStoolLogs } from '$lib/data/dogs';
 	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs, patchDogInStore } from '$lib/stores/dogs';
-	import { formatDate, isSameCalendarDay, isSurgeryToday } from '$lib/utils/dates';
+	import { formatDate, isSameCalendarDay, isSurgeryToday, toDate } from '$lib/utils/dates';
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import {
@@ -16,6 +16,8 @@
 		feedingFlags,
 		specialFeedingReasons,
 		isSpecialFeeding,
+		isFastingMeal,
+		fastingLabel,
 		appetiteRiskLabel,
 		foodSummary,
 		getFedMap,
@@ -44,7 +46,7 @@
 	let stoolLogs: Record<string, StoolLog[]> = {};
 	let loading = true;
 	let editingFeedId: string | null = null;
-	let feedDraft: { foodType: string; foodAmount: string; dietaryNotes: string; hasOwnFood: boolean; transitionToHills: boolean | null; satinBalls: boolean; hasSupplements: boolean; hasSecondMeal: boolean; secondMealAmount: string } = { foodType: 'Normal', foodAmount: '', dietaryNotes: '', hasOwnFood: false, transitionToHills: null, satinBalls: false, hasSupplements: false, hasSecondMeal: false, secondMealAmount: '' };
+	let feedDraft: { foodType: string; foodAmount: string; dietaryNotes: string; hasOwnFood: boolean; transitionToHills: boolean | null; satinBalls: boolean; hasSupplements: boolean; hasSecondMeal: boolean; secondMealAmount: string; fasting: boolean; fastUntilDate: string; fastUntilMeal: MealTime; fastReason: string } = { foodType: 'Normal', foodAmount: '', dietaryNotes: '', hasOwnFood: false, transitionToHills: null, satinBalls: false, hasSupplements: false, hasSecondMeal: false, secondMealAmount: '', fasting: false, fastUntilDate: '', fastUntilMeal: 'am', fastReason: '' };
 	let savingFeed = false;
 	const _now = new Date();
 	const _day = _now.getDay(); // 0=Sun, 5=Fri, 6=Sat
@@ -52,6 +54,7 @@
 	let mealTime: MealTime = _now.getHours() < 12 ? 'am' : (_now.getHours() < _closingHour ? 'pm' : 'second');
 	const selectedDay = new Date();
 	let markingAll = false;
+	let unmarkingAll = false;
 	let notesByDog: Record<string, string> = {};
 	let stoolDog: Dog | null = null;
 	let stoolType = 4;
@@ -97,9 +100,10 @@
 		.map((dog) => ({
 			dog,
 			surgery: isSurgeryDay(dog),
-			appetite: appetiteRiskLabel(feedingLogs[dog.id] ?? [])
+			fasting: isFastingMeal(dog, selectedDay, mealTime) ? fastingLabel(dog) : null,
+			appetite: appetiteRiskLabel(feedingLogs[dog.id] ?? [], { day: selectedDay, mealTime })
 		}))
-		.filter((entry) => entry.surgery || entry.appetite);
+		.filter((entry) => entry.surgery || entry.fasting || entry.appetite);
 	$: feedingHistoryEntries = getFeedingHistoryEntries(shelterDogs, feedingLogs).slice(0, HISTORY_LIMIT);
 
 	function activeFoodAmountLabel(dog: Dog) {
@@ -117,35 +121,47 @@
 			satinBalls: dog.satinBalls ?? false,
 			hasSupplements: dog.hasSupplements ?? false,
 			hasSecondMeal: dog.hasSecondMeal ?? false,
-			secondMealAmount: dog.secondMealAmount ?? ''
+			secondMealAmount: dog.secondMealAmount ?? '',
+			fasting: !!toDate(dog.fastUntilDate ?? null),
+			fastUntilDate: toInputDate(dog.fastUntilDate),
+			fastUntilMeal: dog.fastUntilMeal ?? 'am',
+			fastReason: dog.fastReason ?? ''
 		};
+	}
+
+	function toInputDate(value: Dog['fastUntilDate']) {
+		const d = toDate(value ?? null);
+		if (!d) return '';
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	}
+
+	function parseInputDate(value: string) {
+		const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+		if (!match) return new Date();
+		const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+		return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 	}
 
 	async function saveFeed(dog: Dog) {
 		savingFeed = true;
+		const fastActive = feedDraft.fasting && feedDraft.fastUntilDate;
+		const updates = {
+			foodType: feedDraft.foodType,
+			foodAmount: feedDraft.foodAmount.trim(),
+			dietaryNotes: feedDraft.dietaryNotes.trim(),
+			hasOwnFood: feedDraft.hasOwnFood,
+			transitionToHills: feedDraft.transitionToHills,
+			satinBalls: feedDraft.satinBalls,
+			hasSupplements: feedDraft.hasSupplements,
+			hasSecondMeal: feedDraft.hasSecondMeal,
+			secondMealAmount: feedDraft.secondMealAmount.trim(),
+			fastUntilDate: fastActive ? parseInputDate(feedDraft.fastUntilDate) : null,
+			fastUntilMeal: fastActive ? feedDraft.fastUntilMeal : null,
+			fastReason: fastActive ? feedDraft.fastReason.trim() || null : null
+		};
 		try {
-			await updateDog(dog.id, {
-				foodType: feedDraft.foodType,
-				foodAmount: feedDraft.foodAmount.trim(),
-				dietaryNotes: feedDraft.dietaryNotes.trim(),
-				hasOwnFood: feedDraft.hasOwnFood,
-				transitionToHills: feedDraft.transitionToHills,
-				satinBalls: feedDraft.satinBalls,
-				hasSupplements: feedDraft.hasSupplements,
-				hasSecondMeal: feedDraft.hasSecondMeal,
-				secondMealAmount: feedDraft.secondMealAmount.trim()
-			});
-			patchDogInStore(dog.id, {
-				foodType: feedDraft.foodType,
-				foodAmount: feedDraft.foodAmount.trim(),
-				dietaryNotes: feedDraft.dietaryNotes.trim(),
-				hasOwnFood: feedDraft.hasOwnFood,
-				transitionToHills: feedDraft.transitionToHills,
-				satinBalls: feedDraft.satinBalls,
-				hasSupplements: feedDraft.hasSupplements,
-				hasSecondMeal: feedDraft.hasSecondMeal,
-				secondMealAmount: feedDraft.secondMealAmount.trim()
-			});
+			await updateDog(dog.id, updates);
+			patchDogInStore(dog.id, updates);
 			editingFeedId = null;
 		} catch {
 			toast.error(`Could not update ${dog.name}'s feeding info.`);
@@ -185,6 +201,16 @@
 		return isSurgeryToday(dog.surgeryDate, selectedDay);
 	}
 
+	function isFastBlocked(dog: Dog) {
+		return isFastingMeal(dog, selectedDay, mealTime);
+	}
+
+	// Any vet-ordered feeding block for the meal being worked: surgery-day AM
+	// or an active fast.
+	function isDoNotFeed(dog: Dog) {
+		return isSurgeryBlocked(dog) || isFastBlocked(dog);
+	}
+
 	async function logFeeding(dog: Dog, amount: AmountEaten) {
 		if (dog.inFoster) {
 			toast.error('Dogs in foster are not on the feeding schedule.');
@@ -193,6 +219,10 @@
 		if (fedMap[dog.id]) return;
 		if (isSurgeryBlocked(dog)) {
 			toast.error('Surgery today — do not feed.');
+			return;
+		}
+		if (isFastBlocked(dog)) {
+			toast.error(`${fastingLabel(dog)} — do not feed.`);
 			return;
 		}
 		try {
@@ -244,6 +274,23 @@
 		}
 	}
 
+	// Undo a mistaken "fed" entry: removes the log so the dog goes back to unfed.
+	async function removeFeeding() {
+		if (!editLog || savingEdit) return;
+		savingEdit = true;
+		try {
+			await deleteFeedingLog(editLog.dogId, editLog.logId);
+			await refreshLogs();
+			toast.success('Feeding log removed.');
+			editLog = null;
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to remove feeding log.');
+		} finally {
+			savingEdit = false;
+		}
+	}
+
 	async function markAllFed() {
 		if (markingAll) return;
 		markingAll = true;
@@ -256,8 +303,12 @@
 						{
 							date: selectedDay,
 							mealTime,
-							amountEaten: isSurgeryBlocked(dog) ? 'none' : 'all',
-							notes: isSurgeryBlocked(dog) ? 'Surgery — do not feed' : null
+							amountEaten: isDoNotFeed(dog) ? 'none' : 'all',
+							notes: isSurgeryBlocked(dog)
+								? 'Surgery — do not feed'
+								: isFastBlocked(dog)
+									? fastingLabel(dog)
+									: null
 						},
 						$authProfile
 					)
@@ -270,6 +321,25 @@
 			toast.error('Unable to mark all as fed.');
 		} finally {
 			markingAll = false;
+		}
+	}
+
+	// Bulk undo for "Mark all as fed": removes every log for this meal + day.
+	async function unmarkAllFed() {
+		if (unmarkingAll) return;
+		const targets = Object.entries(fedMap).filter(([, log]) => log) as [string, FeedingLog][];
+		if (targets.length === 0) return;
+		if (!confirm(`Remove all ${targets.length} feeding log${targets.length === 1 ? '' : 's'} for this meal?`)) return;
+		unmarkingAll = true;
+		try {
+			await Promise.all(targets.map(([dogId, log]) => deleteFeedingLog(dogId, log.id)));
+			await refreshLogs();
+			toast.success('Feeding logs removed for this meal.');
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to remove feeding logs.');
+		} finally {
+			unmarkingAll = false;
 		}
 	}
 
@@ -384,6 +454,15 @@
 				>
 					{markingAll ? 'Saving...' : 'Mark all as fed'}
 				</button>
+				{#if fedCount > 0}
+					<button
+						class="unmark-all-btn"
+						on:click={unmarkAllFed}
+						disabled={unmarkingAll}
+					>
+						{unmarkingAll ? 'Removing...' : 'Unmark all'}
+					</button>
+				{/if}
 			</div>
 		</div>
 
@@ -418,6 +497,9 @@
 										<span class="feeding-exception-tag feeding-exception-surgery">
 											{mealTime === 'am' ? 'Surgery today — do not feed' : 'Surgery today'}
 										</span>
+									{/if}
+									{#if entry.fasting}
+										<span class="feeding-exception-tag feeding-exception-surgery">{entry.fasting}</span>
 									{/if}
 									{#if entry.appetite}
 										<span class="feeding-exception-tag">{entry.appetite}</span>
@@ -455,8 +537,8 @@
 							{@const specialReasons = specialFeedingReasons(dog, mealTime)}
 							{@const fedLog = fedMap[dog.id]}
 							<article
-								class={`feeding-feed-row ${fedLog ? 'feeding-feed-row-fed' : ''} ${
-									isSurgeryBlocked(dog) ? 'feeding-feed-row-blocked' : isSurgeryDay(dog) ? 'feeding-feed-row-alert' : ''
+								class={`feeding-feed-row ${fedLog ? `feeding-feed-row-fed feeding-feed-row-fed-${fedLog.amountEaten}` : ''} ${
+									isDoNotFeed(dog) ? 'feeding-feed-row-blocked' : isSurgeryDay(dog) ? 'feeding-feed-row-alert' : ''
 								}`}
 							>
 								<div class="feeding-feed-order">{index + 1}</div>
@@ -470,6 +552,12 @@
 								<div class="feeding-feed-plan">
 									{#if isSurgeryBlocked(dog)}
 										<!-- no food info shown for do-not-feed dogs -->
+									{:else if isFastBlocked(dog) && editingFeedId !== dog.id}
+										<p class="feeding-feed-fasting">
+											<button class="feed-notes-edit-btn" on:click={() => startEditFeed(dog)}>
+												{fastingLabel(dog)}
+											</button>
+										</p>
 									{:else if editingFeedId === dog.id}
 										<div class="feed-edit-panel">
 											<div class="feed-edit-row">
@@ -518,6 +606,25 @@
 													<input type="checkbox" bind:checked={feedDraft.hasSupplements} />
 													Supplements
 												</label>
+												<label class="feed-edit-check feed-edit-check-fast">
+													<input type="checkbox" bind:checked={feedDraft.fasting} />
+													Fasting (do not feed)
+												</label>
+												{#if feedDraft.fasting}
+													<div class="feed-edit-row" style="padding-left: 1.2rem; margin-top: 0.2rem;">
+														<label class="feed-edit-label typewriter" for="feed-fast-until-{dog.id}">Until</label>
+														<input id="feed-fast-until-{dog.id}" class="feed-edit-input" type="date" bind:value={feedDraft.fastUntilDate} />
+														<select class="feed-edit-input" aria-label="Last meal to skip" bind:value={feedDraft.fastUntilMeal}>
+															<option value="am">through AM</option>
+															<option value="pm">through PM</option>
+															<option value="second">through 2nd</option>
+														</select>
+													</div>
+													<div class="feed-edit-row" style="padding-left: 1.2rem;">
+														<label class="feed-edit-label typewriter" for="feed-fast-reason-{dog.id}">Why</label>
+														<input id="feed-fast-reason-{dog.id}" class="feed-edit-input" type="text" bind:value={feedDraft.fastReason} placeholder="e.g. treatment starts tomorrow evening" />
+													</div>
+												{/if}
 												<label class="feed-edit-check">
 													<input type="checkbox" bind:checked={feedDraft.hasSecondMeal} />
 													Gets closing meal
@@ -571,6 +678,8 @@
 										{/if}
 										{#if isSurgeryBlocked(dog)}
 											<span class="surgery-pill">Do not feed</span>
+										{:else if isFastBlocked(dog)}
+											<span class="surgery-pill">Fasting — do not feed</span>
 										{:else if isSurgeryDay(dog)}
 											<span class="surgery-day-pill">Surgery day</span>
 										{/if}
@@ -588,9 +697,12 @@
 													{savingEdit ? '…' : 'Save'}
 												</button>
 												<button class="feeding-edit-cancel-btn" on:click={() => (editLog = null)}>Cancel</button>
+												<button class="feeding-edit-remove-btn" on:click={removeFeeding} disabled={savingEdit}>
+													Remove
+												</button>
 											</div>
 										{:else}
-											<div class="feeding-fed-summary">
+											<div class={`feeding-fed-summary feeding-fed-summary-${fedLog.amountEaten}`}>
 												<span class="feeding-fed-amount">{fedLog.amountEaten}</span>
 												{#if fedLog.notes}
 													<span class="feeding-fed-notes">{fedLog.notes}</span>
@@ -602,7 +714,7 @@
 									{:else}
 										<select
 											class="feeding-field"
-											disabled={isSurgeryBlocked(dog)}
+											disabled={isDoNotFeed(dog)}
 											on:change={(event) => handleAmountChange(dog, event)}
 										>
 											<option value="">Amount eaten</option>
@@ -708,7 +820,7 @@
 <Modal open={showDidntEatPanel} title="Who didn't eat?" onClose={() => (showDidntEatPanel = false)}>
 	<p class="didnt-eat-hint typewriter">Select dogs that didn't eat. Already-logged dogs can be updated.</p>
 	<div class="didnt-eat-list">
-		{#each displayDogs.filter((d) => !isSurgeryBlocked(d)) as dog}
+		{#each displayDogs.filter((d) => !isDoNotFeed(d)) as dog}
 			{@const existingLog = fedMap[dog.id]}
 			<label class="didnt-eat-item {existingLog && existingLog.amountEaten === 'none' ? 'didnt-eat-item-already-none' : ''}">
 				<input
@@ -896,6 +1008,26 @@
 	}
 
 	.mark-all-btn:disabled {
+		opacity: 0.6;
+	}
+
+	.unmark-all-btn {
+		min-height: 2.75rem;
+		border-radius: 0.24rem;
+		border: 1px solid #d5c6a0;
+		background: #fdf8ef;
+		padding: 0.28rem 0.62rem;
+		font-size: 0.88rem;
+		font-family: var(--font-typewriter);
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: #8a5a1c;
+		white-space: normal;
+		cursor: pointer;
+	}
+
+	.unmark-all-btn:disabled {
 		opacity: 0.6;
 	}
 
@@ -1325,9 +1457,31 @@
 		border-bottom: 2px solid rgba(26, 31, 40, 0.82);
 	}
 
+	/* Fed rows grade from green (ate all) toward red (ate none) so appetite
+	   problems jump out on the board. */
 	.feeding-feed-row-fed {
 		background: #f1fbf4;
 		box-shadow: inset 0 0 0 1px #b6d9c2;
+	}
+
+	.feeding-feed-row-fed-most {
+		background: #f6fae9;
+		box-shadow: inset 0 0 0 1px #ccd9a2;
+	}
+
+	.feeding-feed-row-fed-half {
+		background: #fdf8e6;
+		box-shadow: inset 0 0 0 1px #e2cc8b;
+	}
+
+	.feeding-feed-row-fed-little {
+		background: #fdf0e2;
+		box-shadow: inset 0 0 0 1px #e5b58c;
+	}
+
+	.feeding-feed-row-fed-none {
+		background: #fdeaea;
+		box-shadow: inset 0 0 0 1px #dfa3a3;
 	}
 
 	.feeding-feed-row-blocked {
@@ -1380,6 +1534,15 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: #4a6079;
+	}
+
+	.feeding-feed-fasting {
+		margin: 0;
+		font-size: 0.74rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #8b2020;
 	}
 
 	.feeding-feed-special {
@@ -1493,6 +1656,11 @@
 		font-size: 0.75rem;
 		color: #3f5568;
 		cursor: pointer;
+	}
+
+	.feed-edit-check-fast {
+		color: #8b2020;
+		font-weight: 700;
 	}
 
 	.feed-edit-actions {
@@ -1705,6 +1873,43 @@
 		text-transform: capitalize;
 	}
 
+	/* Amount-eaten scale: green → yellow-green → amber → orange → red */
+	.feeding-fed-summary-most {
+		border-color: #ccd9a2;
+		background: #f6fae9;
+	}
+
+	.feeding-fed-summary-most .feeding-fed-amount {
+		color: #55691c;
+	}
+
+	.feeding-fed-summary-half {
+		border-color: #e2cc8b;
+		background: #fdf8e6;
+	}
+
+	.feeding-fed-summary-half .feeding-fed-amount {
+		color: #8a6414;
+	}
+
+	.feeding-fed-summary-little {
+		border-color: #e5b58c;
+		background: #fdf0e2;
+	}
+
+	.feeding-fed-summary-little .feeding-fed-amount {
+		color: #9c531a;
+	}
+
+	.feeding-fed-summary-none {
+		border-color: #dfa3a3;
+		background: #fdeaea;
+	}
+
+	.feeding-fed-summary-none .feeding-fed-amount {
+		color: #8b2020;
+	}
+
 	.feeding-fed-notes {
 		font-size: 0.78rem;
 		color: #3a5a45;
@@ -1769,6 +1974,25 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--ink-soft);
+	}
+
+	.feeding-edit-remove-btn {
+		flex: 1;
+		min-height: 2rem;
+		border: 1px solid #e0a8a8;
+		border-radius: 0.22rem;
+		background: #fff5f5;
+		padding: 0.28rem 0.6rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.65rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: #8b2020;
+	}
+
+	.feeding-edit-remove-btn:disabled {
+		opacity: 0.6;
 	}
 
 	.feeding-reference summary {
@@ -1846,12 +2070,14 @@
 		}
 
 		.feeding-controls {
-			grid-template-columns: auto auto auto;
+			grid-auto-flow: column;
+			grid-auto-columns: auto;
 			align-items: end;
 		}
 
 		.meal-switch,
 		.mark-all-btn,
+		.unmark-all-btn,
 		.didnt-eat-btn {
 			min-height: 2.2rem;
 		}

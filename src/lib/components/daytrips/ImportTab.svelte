@@ -184,7 +184,6 @@
 						vaccineCount: 0,
 						vaccinatedDate: null,
 						dayTripStatus: 'eligible',
-						dayTripManagerOnly: false,
 						dayTripNotes: null,
 						handlingLevel: 'volunteer',
 						inFoster: false,

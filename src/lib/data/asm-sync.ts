@@ -26,6 +26,7 @@ const FIELD_LABELS: Record<string, string> = {
 	markings: 'Markings',
 	description: 'Notes',
 	hiddenComments: 'Hidden comments',
+	entryReason: 'Entry reason',
 	warningNotes: 'Warning',
 	healthProblems: 'Health',
 	isMicrochipped: 'Microchip',
@@ -58,7 +59,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 // Long-form or opaque fields where showing the value isn't useful
 const TEXT_ONLY_FIELDS = new Set([
-	'description', 'hiddenComments', 'warningNotes', 'markings', 'healthProblems', 'origin',
+	'description', 'hiddenComments', 'entryReason', 'warningNotes', 'markings', 'healthProblems', 'origin',
 	'microchipDate', 'fixedDate', 'vaccinatedDate', 'dateOfBirth',
 	'intakeDate', 'originalIntakeDate', 'photoUrl', 'asmShelterCode'
 ]);
@@ -136,6 +137,9 @@ interface AsmAnimal {
 	ISTRANSFER: number;
 	// "Transfer In", "Owner Surrender", "Stray", etc.
 	ENTRYTYPENAME: string | null;
+	// Free text on the intake: why the animal came in — for re-surrendered/returned dogs
+	// this is where staff record why they were returned.
+	REASONFORENTRY: string | null;
 	[key: string]: unknown;
 }
 
@@ -198,6 +202,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		markings: animal.MARKINGS ?? '',
 		description: animal.ANIMALCOMMENTS ?? '',
 		hiddenComments: animal.HIDDENANIMALDETAILS ?? '',
+		entryReason: (animal.REASONFORENTRY ?? '').trim(),
 		warningNotes: animal.POPUPWARNING ?? '',
 		healthProblems: animal.HEALTHPROBLEMS ?? '',
 		isMicrochipped: animal.IDENTICHIPPED === 1,
@@ -273,7 +278,6 @@ function defaultStoredFields(now: string) {
 		fortifloraDays: null,
 		dayTripStatus: 'eligible',
 		dayTripIneligibleReason: null,
-		dayTripManagerOnly: false,
 		dayTripManagerOnlyReason: null,
 		dayTripNotes: null,
 		handlingLevel: 'volunteer',
@@ -380,11 +384,14 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			} else {
 				const existing = existingDocs.get(docId);
 				const returningFromFoster = existing?.inFoster === true && asmFields.inFoster === false;
+				// Moving off Incoming also (re)starts the dog's shelter clock, so bath and
+				// enrichment overdue windows count from when the dog hit the floor.
+				const leavingIncoming = existing?.isIncoming === true && asmFields.isIncoming === false;
 				const intakeMs = asmFields.intakeDate ? new Date(asmFields.intakeDate).getTime() : 0;
 				const recentIntake = intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000;
 				const needsEvalFlag = existing?.awaitingEvaluation === undefined && recentIntake;
 				const extra = {
-					...(returningFromFoster ? { shelterSince: now } : {}),
+					...(returningFromFoster || leavingIncoming ? { shelterSince: now } : {}),
 					...(needsEvalFlag ? { awaitingEvaluation: true } : {})
 				};
 				batch.set(ref, Object.keys(extra).length ? { ...asmFields, ...extra } : asmFields, { merge: true });

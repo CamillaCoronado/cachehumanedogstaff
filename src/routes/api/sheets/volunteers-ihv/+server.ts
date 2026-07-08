@@ -1,8 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
-
-const SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
-const API_KEY = env.PUBLIC_FIREBASE_API_KEY ?? 'AIzaSyBYBJpvxuZ1XZjym7cu_nWG2SR-e-lmAZM';
+import { fetchGridRowData, fetchTabRows } from '$lib/server/googleSheets';
 
 interface CellColor { red: number; green: number; blue: number; }
 interface CellData { text: string; color: CellColor | null; }
@@ -35,25 +32,6 @@ export interface IHVSheetRow {
 	sheetNotes: string;
 	rsvpGroup?: string;
 	sourceSheet: string;
-}
-
-function parseCSVLine(line: string): string[] {
-	const fields: string[] = [];
-	let cur = '';
-	let inQuotes = false;
-	for (let i = 0; i < line.length; i++) {
-		const ch = line[i];
-		if (ch === '"') {
-			if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-			else inQuotes = !inQuotes;
-		} else if (ch === ',' && !inQuotes) {
-			fields.push(cur); cur = '';
-		} else {
-			cur += ch;
-		}
-	}
-	fields.push(cur);
-	return fields.map((f) => f.trim());
 }
 
 function isDateHeader(row: string[]): boolean {
@@ -89,16 +67,13 @@ function parseGroupDate(raw: string): string | null {
 
 // "In House Volunteers" — established active IHVs
 async function fetchActiveIHVs(): Promise<IHVSheetRow[]> {
-	const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=311017137`;
-	const res = await fetch(url, { redirect: 'follow' });
-	if (!res.ok) throw new Error(`In House Volunteers fetch failed: ${res.status}`);
-	const csv = await res.text();
-	const lines = csv.split(/\r?\n/).slice(2); // skip color-legend row + column-headers row
+	const allRows = await fetchTabRows('In House Volunteers', '311017137');
+	const dataRows = allRows.slice(2); // skip color-legend row + column-headers row
 
 	const rows: IHVSheetRow[] = [];
-	for (const line of lines) {
-		if (!line.trim()) continue;
-		const cols = parseCSVLine(line);
+	for (const rawCols of dataRows) {
+		if (rawCols.every((cell) => !cell.trim())) continue;
+		const cols = rawCols.map((cell) => cell.trim());
 		const firstName = cols[0] ?? '';
 		const lastName  = cols[1] ?? '';
 		const phone     = cols[2] ?? '';
@@ -123,15 +98,7 @@ async function fetchActiveIHVs(): Promise<IHVSheetRow[]> {
 
 // "IHV RSVP & Training" — reads via Sheets API to get per-cell colors
 async function fetchIHVTraining(): Promise<IHVSheetRow[]> {
-	const range = encodeURIComponent("'IHV RSVP & Training'!A:H");
-	const fields = encodeURIComponent('sheets(data(rowData(values(userEnteredFormat/backgroundColor,formattedValue))))');
-	const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?ranges=${range}&fields=${fields}&key=${API_KEY}`;
-
-	const res = await fetch(url);
-	if (!res.ok) throw new Error(`Sheets API ${res.status}`);
-	const data = await res.json();
-
-	const rawRows: unknown[] = data?.sheets?.[0]?.data?.[0]?.rowData ?? [];
+	const rawRows = await fetchGridRowData("'IHV RSVP & Training'!A:H");
 	const sheetRows: CellData[][] = (rawRows as Record<string, unknown>[]).map((row) => {
 		const values = (row?.values as Record<string, unknown>[] | undefined) ?? [];
 		return values.map((v) => ({
@@ -193,16 +160,13 @@ async function fetchIHVTraining(): Promise<IHVSheetRow[]> {
 
 // "Non Active Volunteers"
 async function fetchNonActiveVolunteers(): Promise<IHVSheetRow[]> {
-	const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=1188818996`;
-	const res = await fetch(url, { redirect: 'follow' });
-	if (!res.ok) throw new Error(`Non Active Volunteers fetch failed: ${res.status}`);
-	const csv = await res.text();
-	const lines = csv.split(/\r?\n/).slice(1); // skip header row
+	const allRows = await fetchTabRows('Non Active Volunteers', '1188818996');
+	const dataRows = allRows.slice(1); // skip header row
 
 	const rows: IHVSheetRow[] = [];
-	for (const line of lines) {
-		if (!line.trim()) continue;
-		const cols = parseCSVLine(line);
+	for (const rawCols of dataRows) {
+		if (rawCols.every((cell) => !cell.trim())) continue;
+		const cols = rawCols.map((cell) => cell.trim());
 
 		let name = '';
 		let phone = '';

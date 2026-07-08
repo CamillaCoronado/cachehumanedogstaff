@@ -51,10 +51,8 @@ const handlingRank: Record<DogHandlingLevel, number> = {
 };
 
 export function resolveDogHandlingLevel(
-	handlingLevel: DogHandlingLevel | null | undefined,
-	dayTripManagerOnly: boolean | null | undefined = false
+	handlingLevel: DogHandlingLevel | null | undefined
 ): DogHandlingLevel {
-	if (dayTripManagerOnly === true) return 'manager_only';
 	return handlingLevel ?? 'volunteer';
 }
 
@@ -63,7 +61,7 @@ export function canHandleDog(
 	handlingLevel: DogHandlingLevel | null | undefined
 ) {
 	const normalizedRole = role ?? 'volunteer';
-	const normalizedHandling = resolveDogHandlingLevel(handlingLevel, false);
+	const normalizedHandling = resolveDogHandlingLevel(handlingLevel);
 	return roleRank[normalizedRole] >= handlingRank[normalizedHandling];
 }
 

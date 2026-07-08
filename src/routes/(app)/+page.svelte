@@ -9,7 +9,7 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
-	import { getBathAttentionDogs, getCautionDogs, getOverdueDayTripDogs, getOverduePlaygroupDogs } from '$lib/utils/attention';
+	import { getBathAttentionDogs, getCautionDogs, getOverdueEnrichmentDogs } from '$lib/utils/attention';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import { subscribeHandoff, saveHandoff, type ShiftHandoff } from '$lib/data/handoff';
 	import type { CleaningShift } from '$lib/data/cleaning';
@@ -31,7 +31,7 @@
 	interface AttentionItem {
 		dogId: string;
 		dogName: string;
-		type: 'bath' | 'daytrip' | 'playgroup' | 'dogstest';
+		type: 'bath' | 'enrichment' | 'dogstest';
 		days: number;
 		isNewIntake?: boolean;
 	}
@@ -196,7 +196,7 @@
 	$: managerOnlyDogs = activeDogs
 		.filter(
 			(dog) =>
-				(dog.dayTripManagerOnly === true || dog.handlingLevel === 'manager_only') &&
+				dog.handlingLevel === 'manager_only' &&
 				dog.isolationStatus === 'none' &&
 				dog.isOutOnDayTrip === false
 		)
@@ -395,11 +395,8 @@
 		for (const { dog, days, isNewIntake } of getBathAttentionDogs(shelterDogs, today)) {
 			items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days, isNewIntake });
 		}
-		for (const { dog, days } of getOverdueDayTripDogs(shelterDogs, today)) {
-			items.push({ dogId: dog.id, dogName: dog.name, type: 'daytrip', days });
-		}
-		for (const { dog, days } of getOverduePlaygroupDogs(shelterDogs, sessions, today)) {
-			items.push({ dogId: dog.id, dogName: dog.name, type: 'playgroup', days });
+		for (const { dog, days } of getOverdueEnrichmentDogs(shelterDogs, sessions, today)) {
+			items.push({ dogId: dog.id, dogName: dog.name, type: 'enrichment', days });
 		}
 		for (const dog of getCautionDogs(shelterDogs, sessions)) {
 			const days = daysSince(dog.shelterSince ?? dog.intakeDate, today) ?? 0;
@@ -857,17 +854,15 @@
 						<a class="planner-row planner-row-link" href="/dogs/{item.dogId}">
 							<span class="planner-row-main">
 								<span class="planner-bullet">
-									{#if item.type === 'bath'}🛁{:else if item.type === 'daytrip'}🚗{:else if item.type === 'playgroup'}🐾{:else}🔍{/if}
+									{#if item.type === 'bath'}🛁{:else if item.type === 'enrichment'}🐾{:else}🔍{/if}
 								</span>
 								<span class="planner-row-text">{item.dogName}</span>
 							</span>
 							<span class="attention-tag attention-tag-{item.type}">
 								{#if item.type === 'bath'}
 									{item.isNewIntake ? `bath · new intake · ${item.days}d` : `bath · ${item.days}d overdue`}
-								{:else if item.type === 'daytrip'}
-									no trip · {dayGapLabel(item.days)}
-								{:else if item.type === 'playgroup'}
-									no group · {dayGapLabel(item.days)}
+								{:else if item.type === 'enrichment'}
+									no enrichment · {dayGapLabel(item.days)}
 								{:else}
 									test compatibility · {dayGapLabel(item.days)}
 								{/if}
@@ -1461,12 +1456,7 @@
 		color: #3a6090;
 	}
 
-	.attention-tag-daytrip {
-		background: rgba(180, 120, 40, 0.14);
-		color: #7a5010;
-	}
-
-	.attention-tag-playgroup {
+	.attention-tag-enrichment {
 		background: rgba(90, 150, 90, 0.14);
 		color: #3a6e3a;
 	}

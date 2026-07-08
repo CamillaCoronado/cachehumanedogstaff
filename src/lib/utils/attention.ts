@@ -8,7 +8,7 @@ export function isDayTripEligible(dog: Dog, today = new Date()): boolean {
 	if (dogStripeColor(dog) === 'red') return false;
 	return checkDayTripEligibility(
 		dog.intakeDate, dog.isVaccinated, dog.isFixed, dog.dayTripStatus,
-		dog.isolationStatus, dog.dayTripIneligibleReason, dog.dayTripManagerOnly,
+		dog.isolationStatus, dog.dayTripIneligibleReason,
 		dog.dayTripManagerOnlyReason, dog.dayTripNotes, dog.handlingLevel,
 		dog.surgeryDate, dog.surgeryRestDays, dog.awaitingEvaluation,
 		null, today, dog.dateOfBirth, dog.vaccineCount, dog.vaccinesOutstanding,
@@ -143,14 +143,28 @@ export function dogAgeWeeks(dog: Dog, today: Date): number | null {
 	return Math.floor((today.getTime() - dob.getTime()) / (7 * 86_400_000));
 }
 
+// Puppy playgroup vaccination gate: 2+ vaccine rounds AND last shot at least
+// 14 days ago (parvo immunity window).
+export function isPuppyVaccinated(dog: Dog): boolean {
+	if (dog.vaccineCount < 2) return false;
+	const vaccDate = toDate(dog.vaccinatedDate);
+	if (!vaccDate) return false;
+	return Math.floor((Date.now() - vaccDate.getTime()) / 86_400_000) >= 14;
+}
+
 export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
-	if (dog.goodWithDogs !== 'yes') return false;
-	if (!dog.isFixed) return false;
+	const ageWeeks = dogAgeWeeks(dog, today);
+	const isPuppyAge = ageWeeks !== null && ageWeeks < 26;
+	// Adults need a confirmed 'yes'; puppies can play (with each other or with
+	// puppy-experienced adults) as long as they're not marked 'no'.
+	if (dog.goodWithDogs === 'no') return false;
+	if (dog.goodWithDogs !== 'yes' && !isPuppyAge) return false;
+	if (!isPuppyAge && !dog.isFixed) return false;
 	if (dog.isolationStatus !== 'none') return false;
 	if (dog.awaitingEvaluation) return false;
 
-	const ageWeeks = dogAgeWeeks(dog, today);
-	if (ageWeeks !== null && ageWeeks < 26) return false;
+	// Puppies join playgroups once 12+ weeks old and through the vaccination window.
+	if (isPuppyAge && (ageWeeks < 12 || !isPuppyVaccinated(dog))) return false;
 
 	if (isSurgeryResting(dog, today)) return false;
 
@@ -160,61 +174,46 @@ export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
 	return today >= readyDate;
 }
 
-// ─── Day Trips ───────────────────────────────────────────────────────────────
+// ─── Enrichment ──────────────────────────────────────────────────────────────
+// Enrichment = day trip, playgroup, or yard time; any one of them resets the
+// clock. The clock runs from the dog's (re)arrival at the shelter — foster and
+// incoming dogs are excluded, so their clock effectively restarts when they
+// land on the floor. Dogs on medical rest, in isolation, or manager-only keep
+// their clock running but stay hidden until the restriction lifts.
 
-export interface DayTripAttentionItem {
+export const ENRICHMENT_OVERDUE_DAYS = 7;
+
+export interface EnrichmentAttentionItem {
 	dog: Dog;
 	days: number;
 }
 
-export function getOverdueDayTripDogs(dogs: Dog[], today: Date): DayTripAttentionItem[] {
-	const items: DayTripAttentionItem[] = [];
-	for (const dog of dogs) {
-		if (dog.inFoster) continue;
-		if (!isDayTripEligible(dog, today)) continue;
-		if (dog.isolationStatus !== 'none') continue;
-		if (dog.isOutOnDayTrip) continue;
-		if (isSurgeryResting(dog, today)) continue;
-
-		const sinceReturnDays = getDayTripGapDays(dog, today);
-		const daysAtShelter = daysSince(dog.shelterSince ?? dog.intakeDate, today) ?? 0;
-		const overdue = sinceReturnDays !== null ? sinceReturnDays >= DAYTRIP_OVERDUE_DAYS : daysAtShelter >= DAYTRIP_OVERDUE_DAYS;
-
-		if (overdue) {
-			items.push({ dog, days: sinceReturnDays ?? daysAtShelter });
-		}
-	}
-	return items;
-}
-
-// ─── Playgroups ───────────────────────────────────────────────────────────────
-
-export interface PlaygroupAttentionItem {
-	dog: Dog;
-	days: number;
-}
-
-export function getOverduePlaygroupDogs(
+export function getOverdueEnrichmentDogs(
 	dogs: Dog[],
 	sessions: PlaygroupSession[],
 	today: Date
-): PlaygroupAttentionItem[] {
+): EnrichmentAttentionItem[] {
 	const lastPgMap = buildLastPlaygroupMap(sessions);
 
-	const items: PlaygroupAttentionItem[] = [];
+	const items: EnrichmentAttentionItem[] = [];
 	for (const dog of dogs) {
-		if (!isPlaygroupEligible(dog, today)) continue;
+		if (dog.inFoster || dog.isIncoming) continue;
+		if (dog.isOutOnDayTrip) continue;
+		if (dog.isolationStatus !== 'none') continue;
+		if (isSurgeryResting(dog, today)) continue;
+		if (dog.handlingLevel === 'manager_only') continue;
 
 		const availableSince = dog.shelterSince ?? dog.intakeDate;
 		const availableMs = toDate(availableSince)?.getTime() ?? 0;
-		const readyDate = toDate(dog.playgroupReadyDate) ?? new Date(availableMs + 7 * 86_400_000);
 
-		const lastDate = lastPgMap[dog.id] ?? null;
-		const effectiveLastMs = lastDate !== null && lastDate.getTime() >= availableMs ? lastDate.getTime() : null;
-		const pgDays = effectiveLastMs !== null ? (daysSince(new Date(effectiveLastMs), today) ?? null) : null;
-		const readyDays = daysSince(readyDate, today) ?? 0;
-		const days = pgDays ?? readyDays;
-		if (days >= PLAYGROUP_OVERDUE_DAYS) {
+		const activityDates = [toDate(dog.lastDayTripDate), lastPgMap[dog.id] ?? null, toDate(dog.lastYardDate)];
+		const lastEnrichmentMs = activityDates.reduce((latest, date) => {
+			if (!date || date.getTime() < availableMs) return latest;
+			return Math.max(latest, date.getTime());
+		}, availableMs);
+
+		const days = daysSince(new Date(lastEnrichmentMs), today) ?? 0;
+		if (days >= ENRICHMENT_OVERDUE_DAYS) {
 			items.push({ dog, days });
 		}
 	}

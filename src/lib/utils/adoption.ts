@@ -38,7 +38,6 @@ export function getAdoptionAvailability(
 		| 'isFixed'
 		| 'dayTripStatus'
 		| 'dayTripIneligibleReason'
-		| 'dayTripManagerOnly'
 		| 'dayTripManagerOnlyReason'
 		| 'dayTripNotes'
 		| 'handlingLevel'
@@ -49,10 +48,7 @@ export function getAdoptionAvailability(
 	const missingMedicalRequirements = missingAdoptionMedicalRequirements(dog);
 	const note = dog.dayTripNotes?.trim() ?? '';
 	const withNote = (label: string) => (note ? `${label}: ${note}` : label);
-	const effectiveHandlingLevel = resolveDogHandlingLevel(
-		dog.handlingLevel,
-		dog.dayTripManagerOnly
-	);
+	const effectiveHandlingLevel = resolveDogHandlingLevel(dog.handlingLevel);
 
 	if (dog.notAdoptable) {
 		return {
@@ -91,15 +87,15 @@ export function getAdoptionAvailability(
 	}
 
 	if (effectiveHandlingLevel === 'manager_only') {
-		const managerOnlyReason = dog.dayTripManagerOnlyReason ?? 'other';
+		const managerOnlyReason = dog.dayTripManagerOnlyReason;
 		const holdReason =
-			dog.dayTripManagerOnly === true
-				? managerOnlyReason === 'behavior'
-					? withNote('manager-only behavior hold')
-					: managerOnlyReason === 'medical'
-						? withNote('manager-only medical hold')
-						: withNote('manager-only care hold')
-				: 'manager-only handling plan';
+			managerOnlyReason === 'behavior'
+				? withNote('manager-only behavior hold')
+				: managerOnlyReason === 'medical'
+					? withNote('manager-only medical hold')
+					: managerOnlyReason === 'other'
+						? withNote('manager-only care hold')
+						: 'manager-only handling plan';
 		return {
 			available: false,
 			state: 'handling_hold',

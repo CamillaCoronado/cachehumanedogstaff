@@ -49,7 +49,7 @@ export function handlingLabel(level: Dog['handlingLevel']) {
 }
 
 export function dogHandlingLevel(dog: Dog) {
-	return resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
+	return resolveDogHandlingLevel(dog.handlingLevel);
 }
 
 export function adoptionLabel(dog: Dog) {

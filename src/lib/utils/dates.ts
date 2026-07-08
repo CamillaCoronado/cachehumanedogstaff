@@ -130,7 +130,6 @@ export function checkDayTripEligibility(
 	dayTripStatus: DayTripStatus,
 	isolationStatus: IsolationStatus,
 	dayTripIneligibleReason: DayTripIneligibleReason | null | undefined,
-	dayTripManagerOnly: boolean | null | undefined,
 	dayTripManagerOnlyReason: DayTripIneligibleReason | null | undefined,
 	dayTripNotes: string | null,
 	handlingLevel: DogHandlingLevel | null | undefined,
@@ -149,9 +148,9 @@ export function checkDayTripEligibility(
 	const hasTripReason = trimmedTripNotes.length > 0;
 	const ineligibleReason = dayTripIneligibleReason ?? 'other';
 	const managerOnlyReason = dayTripManagerOnlyReason ?? 'other';
-	const requiresManagerOnly = dayTripManagerOnly === true;
+	const effectiveHandlingLevel = resolveDogHandlingLevel(handlingLevel);
+	const requiresManagerOnly = effectiveHandlingLevel === 'manager_only';
 	const manuallyBlocked = dayTripStatus === 'ineligible' && isolationStatus === 'none' && !requiresManagerOnly;
-	const effectiveHandlingLevel = resolveDogHandlingLevel(handlingLevel, dayTripManagerOnly);
 	const roleRestrictionReason = handlingRestrictionReason(effectiveHandlingLevel, actorRole);
 	const blockedByHandlingRole = Boolean(roleRestrictionReason);
 
@@ -294,6 +293,7 @@ export const TRIP_COLOR_REASONS: { value: TripColorReason; label: string }[] = [
 	{ value: 'isolation', label: 'Isolation' },
 	{ value: 'awaiting_eval', label: 'Awaiting evaluation' },
 	{ value: 'manager_only', label: 'Manager only' },
+	{ value: 'staff_only', label: 'Staff only' },
 	{ value: 'difficult', label: 'Difficult (adults only)' },
 	{ value: 'other', label: 'Other' }
 ];
@@ -307,13 +307,14 @@ export function tripColorReasonLabel(reason: TripColorReason | null | undefined)
 // explain it. Returns null for a green/eligible dog with nothing on record.
 export function dogColorReason(dog: Dog): TripColorReason | null {
 	if (dog.manualTripColorReason) return dog.manualTripColorReason;
-	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
+	const level = resolveDogHandlingLevel(dog.handlingLevel);
 	if (dog.isolationStatus !== 'none') return 'isolation';
-	if (level === 'manager_only' || level === 'staff_only') {
+	if (level === 'manager_only') {
 		if (dog.dayTripManagerOnlyReason === 'behavior') return 'behavior';
 		if (dog.dayTripManagerOnlyReason === 'medical') return 'medical';
 		return 'manager_only';
 	}
+	if (level === 'staff_only') return 'staff_only';
 	if (dog.awaitingEvaluation) return 'awaiting_eval';
 	if (dog.dayTripStatus === 'difficult') return 'difficult';
 	if (dog.dayTripStatus === 'ineligible') {
@@ -328,7 +329,7 @@ export function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
 	// Single source of truth: the dog's own color (set manually or synced from the sheet).
 	if (dog.manualTripColor) return dog.manualTripColor;
 	// Otherwise, a computed default from the dog's status.
-	const level = resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly);
+	const level = resolveDogHandlingLevel(dog.handlingLevel);
 	if (dog.isolationStatus !== 'none') return 'red';
 	if (level === 'manager_only' || level === 'staff_only') return 'red';
 	if (dog.awaitingEvaluation) return 'red';

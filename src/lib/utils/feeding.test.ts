@@ -8,6 +8,7 @@ import {
 	getAbnormalCount,
 	getFedMap,
 	getFeedingHistoryEntries,
+	isFastingMeal,
 	isSpecialFeeding,
 	secondMealAmountLabel,
 	specialFeedingReasons
@@ -148,5 +149,60 @@ describe('log aggregation', () => {
 				log({ id: 'refused', amountEaten: 'none', date: new Date(2026, 5, 12) })
 			])
 		).toBe("Didn't eat last meal");
+	});
+
+	it('appetiteRiskLabel ignores the current shift\'s own log', () => {
+		// A refusal logged for the meal being worked right now should not flag
+		// until the next shift.
+		const refusedNow = log({ id: 'now', amountEaten: 'none', mealTime: 'am' });
+		expect(appetiteRiskLabel([refusedNow], { day, mealTime: 'am' })).toBeNull();
+		// The same log DOES flag on a later shift…
+		expect(appetiteRiskLabel([refusedNow], { day, mealTime: 'pm' })).toBe("Didn't eat last meal");
+		// …and on the next day.
+		expect(appetiteRiskLabel([refusedNow], { day: new Date(2026, 5, 13), mealTime: 'am' })).toBe(
+			"Didn't eat last meal"
+		);
+		// With the current meal excluded, the previous meal still governs.
+		expect(
+			appetiteRiskLabel(
+				[
+					log({ id: 'prev', amountEaten: 'none', mealTime: 'am', createdAt: new Date(2026, 5, 12, 8) }),
+					log({ id: 'now', amountEaten: 'all', mealTime: 'pm', createdAt: new Date(2026, 5, 12, 17) })
+				],
+				{ day, mealTime: 'pm' }
+			)
+		).toBe("Didn't eat last meal");
+	});
+});
+
+describe('isFastingMeal', () => {
+	// "Fast tonight and tomorrow morning" → until tomorrow, through AM.
+	const tomorrow = new Date(2026, 6, 9);
+	const fasting = makeDog({ fastUntilDate: tomorrow, fastUntilMeal: 'am' });
+	const today = new Date(2026, 6, 8);
+
+	it('is off without a fast date', () => {
+		expect(isFastingMeal(makeDog(), today, 'am')).toBe(false);
+	});
+
+	it('blocks every meal on days before the until-date', () => {
+		expect(isFastingMeal(fasting, today, 'am')).toBe(true);
+		expect(isFastingMeal(fasting, today, 'pm')).toBe(true);
+		expect(isFastingMeal(fasting, today, 'second')).toBe(true);
+	});
+
+	it('blocks through the until-meal on the final day, then releases', () => {
+		expect(isFastingMeal(fasting, tomorrow, 'am')).toBe(true);
+		expect(isFastingMeal(fasting, tomorrow, 'pm')).toBe(false);
+		expect(isFastingMeal(fasting, tomorrow, 'second')).toBe(false);
+	});
+
+	it('is over on later days', () => {
+		expect(isFastingMeal(fasting, new Date(2026, 6, 10), 'am')).toBe(false);
+	});
+
+	it('treats a missing until-meal as the whole final day', () => {
+		const wholeDay = makeDog({ fastUntilDate: tomorrow });
+		expect(isFastingMeal(wholeDay, tomorrow, 'second')).toBe(true);
 	});
 });

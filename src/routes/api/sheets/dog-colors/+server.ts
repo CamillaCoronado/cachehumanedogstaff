@@ -1,9 +1,6 @@
 import { json, error } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
+import { fetchGridRowData } from '$lib/server/googleSheets';
 
-const API_KEY = env.PUBLIC_FIREBASE_API_KEY ?? 'AIzaSyBYBJpvxuZ1XZjym7cu_nWG2SR-e-lmAZM';
-
-const SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
 const SHEET_NAME = 'DT Numbers';
 
 function parseName(raw: string): string {
@@ -19,26 +16,12 @@ function classifyColor(r: number, g: number, b: number): 'green' | 'yellow' | 'r
 }
 
 export async function GET() {
-	if (!API_KEY) throw error(503, 'API key not configured');
-
-	const range = encodeURIComponent(`${SHEET_NAME}!A:A`);
-	const fields = encodeURIComponent('sheets(data(rowData(values(userEnteredFormat/backgroundColor,formattedValue))))');
-	const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?ranges=${range}&fields=${fields}&key=${API_KEY}`;
-
-	let res: Response;
+	let rows: unknown[];
 	try {
-		res = await fetch(url);
+		rows = await fetchGridRowData(`${SHEET_NAME}!A:A`);
 	} catch (e) {
 		throw error(502, `Sheets API error: ${e instanceof Error ? e.message : String(e)}`);
 	}
-
-	if (!res.ok) {
-		const body = await res.text().catch(() => '');
-		throw error(502, `Sheets API error ${res.status}: ${body.slice(0, 200)}`);
-	}
-
-	const data = await res.json();
-	const rows: unknown[] = data?.sheets?.[0]?.data?.[0]?.rowData ?? [];
 
 	const colors: Record<string, 'green' | 'yellow' | 'red'> = {};
 

@@ -1,11 +1,10 @@
 import { json } from '@sveltejs/kit';
-
-const SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
+import { fetchTabRows } from '$lib/server/googleSheets';
 
 const CHART_TABS = [
-	{ year: 2024, gid: '2048243758' },
-	{ year: 2025, gid: '1275517464' },
-	{ year: 2026, gid: '747552302' },
+	{ year: 2024, title: '2024 Day Trip Data Chart', gid: '2048243758' },
+	{ year: 2025, title: '2025 Day Trip Data Chart', gid: '1275517464' },
+	{ year: 2026, title: '2026 Day Trip Data Chart', gid: '747552302' },
 ] as const;
 
 const MONTH_NAMES = [
@@ -13,15 +12,8 @@ const MONTH_NAMES = [
 	'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-async function fetchChartTab(gid: string): Promise<{ name: string; hours: number; trips: number }[]> {
-	const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}`;
-	const res = await fetch(url, { redirect: 'follow' });
-	if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`);
-
-	const csv = await res.text();
-	const rows = csv.split(/\r?\n/).map((r) =>
-		r.split(',').map((cell) => cell.replace(/^"|"$/g, '').trim())
-	);
+async function fetchChartTab(title: string, gid: string): Promise<{ name: string; hours: number; trips: number }[]> {
+	const rows = (await fetchTabRows(title, gid)).map((row) => row.map((cell) => cell.trim()));
 
 	// Row 0 is the header; rows 1–12 are months
 	const results: { name: string; hours: number; trips: number }[] = [];
@@ -41,9 +33,9 @@ async function fetchChartTab(gid: string): Promise<{ name: string; hours: number
 
 export async function GET() {
 	const results = await Promise.all(
-		CHART_TABS.map(async ({ year, gid }) => {
+		CHART_TABS.map(async ({ year, title, gid }) => {
 			try {
-				const months = await fetchChartTab(gid);
+				const months = await fetchChartTab(title, gid);
 				const totalHours = months.reduce((s, m) => s + m.hours, 0);
 				const totalTrips = months.reduce((s, m) => s + m.trips, 0);
 				return { year, months, totalHours, totalTrips, error: null };

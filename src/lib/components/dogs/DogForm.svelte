@@ -7,6 +7,7 @@
 		DayTripStatus,
 		Dog,
 		DogHandlingLevel,
+		DogPlayStyle,
 		DogSex,
 		DogStatus,
 		EnergyLevel,
@@ -82,6 +83,19 @@
 			toneClass: 'form-choice-green'
 		}
 	];
+	const playStyleOptions: { value: DogPlayStyle; label: string }[] = [
+		{ value: 'rough_and_rowdy', label: 'Rough & Rowdy' },
+		{ value: 'gentle_and_dainty', label: 'Gentle & Dainty' },
+		{ value: 'solo', label: 'Solo Playtime' }
+	];
+
+	function togglePlayStyle(style: DogPlayStyle) {
+		const current = value.playStyles ?? [];
+		const next = current.includes(style) ? current.filter((s) => s !== style) : [...current, style];
+		value = { ...value, playStyles: next };
+		dispatch('change', { value, valid: true });
+	}
+
 	const dayTripStatuses: { value: DayTripStatus; label: string; description: string }[] = [
 		{ value: 'eligible', label: 'Eligible', description: 'Anyone can take on day trips' },
 		{ value: 'difficult', label: 'Difficult', description: 'Adults only' },
@@ -112,7 +126,7 @@
 	$: evalAvailableSince = value.shelterSince ?? value.intakeDate;
 	$: evalDaysAtShelter = Math.floor((Date.now() - (toDate(evalAvailableSince)?.getTime() ?? Date.now())) / 86_400_000);
 	$: canClearEval = evalDaysAtShelter >= 7;
-	$: isManagerOnly = value.dayTripManagerOnly === true && !isInIsolation;
+	$: isManagerOnly = value.handlingLevel === 'manager_only' && !isInIsolation;
 	$: isManualIneligible = value.dayTripStatus === 'ineligible' && !isInIsolation && !isManagerOnly;
 	$: selectedIneligibleReason = value.dayTripIneligibleReason ?? 'other';
 	$: selectedManagerOnlyReason = value.dayTripManagerOnlyReason ?? 'other';
@@ -194,7 +208,7 @@
 				dayTripStatus: nextStatus,
 				dayTripIneligibleReason:
 					nextStatus === 'ineligible'
-						? (value.dayTripManagerOnly ? null : (value.dayTripIneligibleReason ?? 'other'))
+						? (value.handlingLevel === 'manager_only' ? null : (value.dayTripIneligibleReason ?? 'other'))
 						: null
 			} as Dog;
 			dispatch('change', { value, valid: true });
@@ -309,24 +323,32 @@
 			: canvas.toDataURL(outputType, 0.82);
 	}
 
-	function handleManagerOnlyToggle(checked: boolean) {
-		const shouldRestoreEligible = !checked && value.dayTripStatus === 'ineligible' && value.dayTripIneligibleReason === null;
+	// handlingLevel is the single source of truth for manager-only: the "Manager only"
+	// checkbox in the day-trip section and the Handling Access buttons set the same field.
+	function applyHandlingLevel(level: DogHandlingLevel) {
+		const becomingManagerOnly = level === 'manager_only';
+		const wasAutoBlocked = value.dayTripStatus === 'ineligible' && value.dayTripIneligibleReason === null;
+		const shouldRestoreEligible = !becomingManagerOnly && value.handlingLevel === 'manager_only' && wasAutoBlocked;
 		const next: Dog = {
 			...value,
-			dayTripManagerOnly: checked,
-			dayTripManagerOnlyReason: checked ? (value.dayTripManagerOnlyReason ?? 'behavior') : null,
-			dayTripStatus: checked ? 'ineligible' : shouldRestoreEligible ? 'eligible' : value.dayTripStatus,
-			dayTripIneligibleReason: checked ? null : value.dayTripIneligibleReason,
-			handlingLevel: checked ? 'manager_only' : value.handlingLevel
+			handlingLevel: level,
+			dayTripManagerOnlyReason: becomingManagerOnly ? (value.dayTripManagerOnlyReason ?? 'behavior') : null,
+			dayTripStatus: becomingManagerOnly ? 'ineligible' : shouldRestoreEligible ? 'eligible' : value.dayTripStatus,
+			dayTripIneligibleReason: becomingManagerOnly ? null : value.dayTripIneligibleReason
 		};
 		value = next;
 		dispatch('change', { value, valid: true });
 	}
 
+	function handleManagerOnlyToggle(checked: boolean) {
+		// Unchecking steps down to the next-most-restrictive level; staff can lower it
+		// further with the Handling Access buttons.
+		applyHandlingLevel(checked ? 'manager_only' : 'staff_only');
+	}
+
 	function handleManagerOnlyReasonSelect(reason: DayTripIneligibleReason) {
 		const next: Dog = {
 			...value,
-			dayTripManagerOnly: true,
 			dayTripManagerOnlyReason: reason,
 			dayTripStatus: 'ineligible',
 			dayTripIneligibleReason: null,
@@ -569,6 +591,16 @@
 				></textarea>
 			</div>
 			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Reason for Entry (Staff)</label>
+				<textarea
+					class="form-textarea"
+					disabled={disabled}
+					placeholder="Why the dog came in or was returned (synced from ASM)."
+					value={value.entryReason ?? ''}
+					on:input={(event) => handleInput('entryReason', event.currentTarget.value)}
+				></textarea>
+			</div>
+			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Markings</label>
 				<textarea
 					class="form-textarea"
@@ -704,6 +736,24 @@
 						<option value={option.value}>{option.label}</option>
 					{/each}
 				</select>
+			</div>
+			<div class="form-field md:col-span-2">
+				<label class="form-label typewriter">Play Style (observed in play — a dog can have more than one)</label>
+				<div class="flex flex-wrap gap-2">
+					{#each playStyleOptions as option}
+						<button
+							type="button"
+							class={`form-choice-btn ${(value.playStyles ?? []).includes(option.value) ? 'form-choice-green' : ''}`}
+							disabled={disabled}
+							on:click={() => togglePlayStyle(option.value)}
+						>
+							{option.label}
+						</button>
+					{/each}
+				</div>
+				<p class="form-hint mt-1">
+					{(value.playStyles ?? []).length === 0 ? 'Not assessed yet — shows under Needs Assessment on the playgroups board.' : 'Used to build playgroup columns.'}
+				</p>
 			</div>
 			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Best Home Fit</label>
@@ -1194,7 +1244,7 @@
 							type="button"
 							class={`form-choice-btn ${value.handlingLevel === option.value ? option.toneClass : ''}`}
 							disabled={disabled}
-							on:click={() => handleSelect('handlingLevel', option.value)}
+							on:click={() => applyHandlingLevel(option.value)}
 						>
 							{option.label}
 						</button>

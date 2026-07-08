@@ -27,7 +27,6 @@ function makeDog(overrides: Partial<Dog> = {}): Dog {
 		crateTrained: 'yes',
 		energyLevel: 'medium',
 		handlingLevel: 'volunteer',
-		dayTripManagerOnly: false,
 		dayTripStatus: 'eligible',
 		isolationStatus: 'none',
 		isOutOnDayTrip: false,

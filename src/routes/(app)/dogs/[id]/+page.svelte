@@ -15,7 +15,10 @@
 		addFeedingLog,
 		addStoolLog,
 		deleteBathLog,
+		deleteYardLog,
 		listBathLogs,
+		listYardLogs,
+		logYardTime,
 		listBehavioralNotes,
 		listFeedingLogs,
 		listStoolLogs,
@@ -23,7 +26,7 @@
 		listDayTripLogs,
 		setDogTripStatus
 	} from '$lib/data/dogs';
-	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, FeedingLog, MealTime, StoolLog, UserRole } from '$lib/types';
+	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, FeedingLog, MealTime, StoolLog, UserRole, YardLog } from '$lib/types';
 	import {
 		formatAge,
 		bathEligible,
@@ -59,6 +62,7 @@
 	let saving = false;
 	let notes: BehavioralNote[] = [];
 	let bathLogs: BathLog[] = [];
+	let yardLogs: YardLog[] = [];
 	let feedingLogs: FeedingLog[] = [];
 	let stoolLogs: StoolLog[] = [];
 	let dayTripLogs: DayTripLog[] = [];
@@ -71,6 +75,9 @@
 
 	let newBathDate = todayStr();
 	let savingBath = false;
+	let newYardDate = todayStr();
+	let newYardMinutes = 30;
+	let savingYard = false;
 	let newFeedingDate = todayStr();
 	let newFeedingMealTime: MealTime = 'am';
 	let newFeedingAmount: AmountEaten = 'all';
@@ -104,7 +111,6 @@
 				dog.dayTripStatus,
 				dog.isolationStatus,
 				dog.dayTripIneligibleReason,
-				dog.dayTripManagerOnly,
 				dog.dayTripManagerOnlyReason,
 				dog.dayTripNotes,
 				dog.handlingLevel,
@@ -125,9 +131,7 @@
 			: dayTripEligibility.status === 'difficult'
 				? 'whiteboard-trip-pill-yellow'
 				: 'whiteboard-trip-pill-red';
-	$: effectiveHandlingLevel = dog
-		? resolveDogHandlingLevel(dog.handlingLevel, dog.dayTripManagerOnly)
-		: 'volunteer';
+	$: effectiveHandlingLevel = dog ? resolveDogHandlingLevel(dog.handlingLevel) : 'volunteer';
 	$: handlingLevelText = handlingLevelLabel(effectiveHandlingLevel);
 	$: isManagerHandlingOnly = effectiveHandlingLevel === 'manager_only';
 	$: isStaffHandlingOnly = effectiveHandlingLevel === 'staff_only';
@@ -166,7 +170,7 @@
 		dog.isolationStatus === 'none' &&
 		ineligibleReason === null;
 	$: managerOnlyReason = dog?.dayTripManagerOnlyReason ?? null;
-	$: isManagerOnly = Boolean(dog) && dog.dayTripManagerOnly === true && dog.isolationStatus === 'none';
+	$: isManagerOnly = Boolean(dog) && dog.handlingLevel === 'manager_only' && dog.isolationStatus === 'none';
 	$: dayTripReasonNote = dog?.dayTripNotes?.trim() ?? '';
 	$: primaryDayTripReason =
 		dayTripEligibility.status === 'ineligible'
@@ -327,9 +331,10 @@
 		photoLoadFailed = false;
 		dog = await getDog(dogId);
 		if (dog) {
-			[notes, bathLogs, feedingLogs, stoolLogs, dayTripLogs] = await Promise.all([
+			[notes, bathLogs, yardLogs, feedingLogs, stoolLogs, dayTripLogs] = await Promise.all([
 				listBehavioralNotes(dogId),
 				listBathLogs(dogId),
+				listYardLogs(dogId),
 				listFeedingLogs(dogId),
 				listStoolLogs(dogId),
 				listDayTripLogs(dogId)
@@ -337,6 +342,7 @@
 		} else {
 			notes = [];
 			bathLogs = [];
+			yardLogs = [];
 			feedingLogs = [];
 			stoolLogs = [];
 			dayTripLogs = [];
@@ -476,6 +482,27 @@
 			await loadAll();
 		} catch (e) { console.error(e); toast.error('Unable to log bath.'); }
 		finally { savingBath = false; }
+	}
+
+	async function handleSaveYard() {
+		if (!dog || !newYardDate || savingYard) return;
+		savingYard = true;
+		try {
+			const minutes = Number.isFinite(newYardMinutes) && newYardMinutes > 0 ? Math.round(newYardMinutes) : null;
+			await logYardTime(dog.id, minutes, $authProfile, new Date(newYardDate + 'T12:00:00'));
+			toast.success('Yard time logged.');
+			newYardDate = todayStr();
+			await loadAll();
+		} catch (e) { console.error(e); toast.error('Unable to log yard time.'); }
+		finally { savingYard = false; }
+	}
+
+	async function handleDeleteYardLog(logId: string) {
+		if (!dog) return;
+		await deleteYardLog(dog.id, logId);
+		yardLogs = yardLogs.filter((l) => l.id !== logId);
+		dog = (await getDog(dog.id)) ?? dog;
+		toast.success('Yard log deleted.');
 	}
 
 	async function handleDeleteBathLog(logId: string) {
@@ -730,6 +757,9 @@
 												<p><span>Hidden Comments:</span> <strong class="detail-note">{visibleComments}</strong></p>
 											{/if}
 										{/if}
+										{#if dog.entryReason}
+											<p><span>Reason for Entry:</span> <strong class="detail-note">{dog.entryReason}</strong></p>
+										{/if}
 										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
 										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
 										<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
@@ -905,6 +935,44 @@
 											<td class="py-2">{log.loggedByName}</td>
 											<td class="py-2 text-right">
 												<button class="text-ink-400 hover:text-red-500 transition-colors" on:click={() => handleDeleteBathLog(log.id)} title="Delete">✕</button>
+											</td>
+										</tr>
+									{/each}
+								{/if}
+							</tbody>
+						</table>
+					</div>
+				</div>
+				<div class="rounded-3xl bg-white p-6 shadow-card">
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Yard Time</h3>
+						<div class="flex items-center gap-2 text-xs">
+							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newYardDate} />
+							<input type="number" min="5" step="5" class="w-16 rounded-full border border-ink-100 px-3 py-1" bind:value={newYardMinutes} title="Minutes in the yard" />
+							<span class="text-ink-400">min</span>
+							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveYard} disabled={savingYard}>Save</button>
+						</div>
+					</div>
+					<div class="mt-4 overflow-x-auto">
+						<table class="min-w-full text-left text-xs">
+							<thead class="text-[11px] uppercase tracking-[0.2em] text-ink-400">
+								<tr>
+									<th class="py-2">Time</th>
+									<th class="py-2">Duration</th>
+									<th class="py-2">Logged By</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-ink-100">
+								{#if yardLogs.length === 0}
+									<tr><td colspan="4" class="py-3 text-xs text-ink-500">No yard time logged.</td></tr>
+								{:else}
+									{#each yardLogs as log}
+										<tr>
+											<td class="py-2">{formatDateTime(log.timestamp)}</td>
+											<td class="py-2">{log.durationMinutes ? `${log.durationMinutes} min` : '—'}</td>
+											<td class="py-2">{log.loggedByName}</td>
+											<td class="py-2 text-right">
+												<button class="text-ink-400 hover:text-red-500 transition-colors" on:click={() => handleDeleteYardLog(log.id)} title="Delete">✕</button>
 											</td>
 										</tr>
 									{/each}

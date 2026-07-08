@@ -1,8 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
-
-const API_KEY = env.PUBLIC_FIREBASE_API_KEY ?? 'AIzaSyBYBJpvxuZ1XZjym7cu_nWG2SR-e-lmAZM';
-const SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
+import { fetchGridRowData, fetchTabRows } from '$lib/server/googleSheets';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,15 +68,7 @@ function parseSheetDate(raw: string): string | null {
 }
 
 async function fetchSheetRows(sheetName: string): Promise<CellData[][]> {
-	const range = encodeURIComponent(`'${sheetName}'!A:O`);
-	const fields = encodeURIComponent('sheets(data(rowData(values(userEnteredFormat/backgroundColor,formattedValue))))');
-	const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?ranges=${range}&fields=${fields}&key=${API_KEY}`;
-
-	const res = await fetch(url);
-	if (!res.ok) throw new Error(`Sheets API ${res.status}`);
-	const data = await res.json();
-
-	const rowData: unknown[] = data?.sheets?.[0]?.data?.[0]?.rowData ?? [];
+	const rowData = await fetchGridRowData(`'${sheetName}'!A:O`);
 	return (rowData as Record<string, unknown>[]).map((row) => {
 		const values = (row?.values as Record<string, unknown>[] | undefined) ?? [];
 		return values.map((v) => {
@@ -118,44 +107,25 @@ export interface VolunteerSheetResponse {
 	diagnostics: VolunteerSheetDiagnostics;
 }
 
-// Proper RFC-4180 CSV field parser — handles quoted fields containing commas/newlines
-function parseCSVLine(line: string): string[] {
-	const fields: string[] = [];
-	let cur = '';
-	let inQuotes = false;
-	for (let i = 0; i < line.length; i++) {
-		const ch = line[i];
-		if (ch === '"') {
-			if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; } // escaped quote
-			else inQuotes = !inQuotes;
-		} else if (ch === ',' && !inQuotes) {
-			fields.push(cur); cur = '';
-		} else {
-			cur += ch;
-		}
-	}
-	fields.push(cur);
-	return fields;
-}
-
 async function fetchEstablishedVolunteers(): Promise<{ rows: EstablishedRow[]; skippedRows: SkippedSheetRow[]; rawDataRows: number; nonBlankRows: number }> {
-	const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=538722785`;
-	const res = await fetch(url, { redirect: 'follow' });
-	if (!res.ok) return { rows: [], skippedRows: [], rawDataRows: 0, nonBlankRows: 0 };
-	const csv = await res.text();
-	const lines = csv.split(/\r?\n/).slice(1); // skip header
+	let allRows: string[][];
+	try {
+		allRows = await fetchTabRows('Established DTVs', '538722785');
+	} catch {
+		return { rows: [], skippedRows: [], rawDataRows: 0, nonBlankRows: 0 };
+	}
+	const dataRows = allRows.slice(1); // skip header
 	const seen = new Set<string>();
 	const rows: EstablishedRow[] = [];
 	const skippedRows: SkippedSheetRow[] = [];
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
+	for (let i = 0; i < dataRows.length; i++) {
+		const parts = dataRows[i];
 		const rowNumber = i + 2;
-		if (!line.trim()) {
+		if (parts.every((cell) => !cell.trim())) {
 			skippedRows.push({ sheet: 'Established DTVs', rowNumber, reason: 'blank row' });
 			continue;
 		}
 		// columns: First name, Last Name, Email, Strikes
-		const parts = parseCSVLine(line);
 		const firstName = parts[0]?.trim() ?? '';
 		const lastName  = parts[1]?.trim() ?? '';
 		const email     = parts[2]?.trim().toLowerCase() ?? '';
@@ -176,8 +146,8 @@ async function fetchEstablishedVolunteers(): Promise<{ rows: EstablishedRow[]; s
 	return {
 		rows,
 		skippedRows,
-		rawDataRows: lines.length,
-		nonBlankRows: lines.filter((line) => line.trim()).length
+		rawDataRows: dataRows.length,
+		nonBlankRows: dataRows.filter((row) => row.some((cell) => cell.trim())).length
 	};
 }
 
@@ -192,8 +162,6 @@ function logSkippedSheetRows(skippedRows: SkippedSheetRow[]): void {
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
 export async function GET() {
-	if (!API_KEY) throw error(503, 'API key not configured');
-
 	let rows: CellData[][];
 	let establishedVolunteers: EstablishedRow[];
 	let establishedSkippedRows: SkippedSheetRow[];

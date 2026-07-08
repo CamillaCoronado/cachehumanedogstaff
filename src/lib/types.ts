@@ -32,8 +32,12 @@ export type TripColorReason =
 	| 'isolation'
 	| 'awaiting_eval'
 	| 'manager_only'
+	| 'staff_only'
 	| 'difficult'
 	| 'other';
+/** Observed play style — set by staff after watching the dog play, not derived
+ *  from energy or size. Unset means the dog still needs a play assessment. */
+export type DogPlayStyle = 'rough_and_rowdy' | 'gentle_and_dainty' | 'solo';
 export type IsolationStatus = 'none' | 'iso';
 export type IsolationReason = 'sick' | 'bite_quarantine';
 export type DogHandlingLevel = 'manager_only' | 'staff_only' | 'volunteer';
@@ -67,6 +71,8 @@ export interface Dog {
 	color?: string;
 	markings?: string;
 	hiddenComments?: string;
+	/** ASM's reason-for-entry free text — why the dog came in / was returned. Staff-only, like hiddenComments. */
+	entryReason?: string;
 	description?: string;
 	warningNotes?: string;
 	holdNotes?: string;
@@ -80,11 +86,16 @@ export interface Dog {
 	crateTrained?: Compatibility;
 	idealHome: string;
 	energyLevel: EnergyLevel;
+	/** Observed play styles (a dog can have more than one, e.g. rough with matched
+	 *  dogs and gentle with small ones). Empty/unset = needs a play assessment. */
+	playStyles?: DogPlayStyle[];
 	outdoorKennelAssignment: string;
 	microchipDate?: DateValue | null;
 	healthProblems?: string;
 	lastBathDate: DateValue | null;
 	lastBathBy: string | null;
+	/** Last logged yard time — counts as enrichment alongside day trips and playgroups. */
+	lastYardDate?: DateValue | null;
 	lastDayTripDate: DateValue | null;
 	// Whether the dog is currently out on a day trip
 	isOutOnDayTrip: boolean;
@@ -96,6 +107,11 @@ export interface Dog {
 	fortifloraDate: DateValue | null;
 	fortifloraDays: number | null;
 	fortifloraTime: 'am' | 'pm' | 'both' | null;
+	/** Vet-ordered fast: skip every meal through this date + meal (inclusive),
+	 *  e.g. "fast tonight and tomorrow morning" → tomorrow's date, meal 'am'. */
+	fastUntilDate?: DateValue | null;
+	fastUntilMeal?: MealTime | null;
+	fastReason?: string | null;
 	isMicrochipped: boolean;
 	isFixed: boolean;
 	fixedDate: DateValue | null;
@@ -107,7 +123,8 @@ export interface Dog {
 	allergyTypes?: string[];
 	dayTripStatus: DayTripStatus;
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
-	dayTripManagerOnly: boolean;
+	/** Why the dog is manager-only. Only meaningful when handlingLevel === 'manager_only'
+	 *  (the handling level is the single source of truth for manager-only status). */
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	/** The dog's day-trip color — the single source of truth. Set by a manager (Colors tab)
 	 *  or synced in from the sheet; `dogStripeColor` reads this, falling back to a computed
@@ -218,6 +235,14 @@ export type AmountEaten = 'all' | 'most' | 'half' | 'little' | 'none';
 export interface BathLog {
 	id: string;
 	timestamp: DateValue;
+	loggedBy: string;
+	loggedByName: string;
+}
+
+export interface YardLog {
+	id: string;
+	timestamp: DateValue;
+	durationMinutes: number | null;
 	loggedBy: string;
 	loggedByName: string;
 }

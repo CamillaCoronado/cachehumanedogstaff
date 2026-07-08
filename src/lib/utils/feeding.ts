@@ -214,13 +214,48 @@ export function isSpecialFeeding(dog: Dog) {
 	return specialFeedingReasons(dog).length > 0;
 }
 
+const MEAL_ORDER: Record<MealTime, number> = { am: 0, pm: 1, second: 2 };
+
+/**
+ * Vet-ordered fast: true when the given day + meal falls on or before the
+ * dog's fast-until date + meal. "Fast tonight and tomorrow morning" is stored
+ * as tomorrow's date with meal 'am', so tonight's PM/2nd and tomorrow's AM all
+ * block while tomorrow's PM is back to normal.
+ */
+export function isFastingMeal(dog: Dog, day: Date, meal: MealTime): boolean {
+	const until = toDate(dog.fastUntilDate ?? null);
+	if (!until) return false;
+	const dayKey = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+	const untilKey = new Date(until.getFullYear(), until.getMonth(), until.getDate()).getTime();
+	if (dayKey > untilKey) return false;
+	if (dayKey < untilKey) return true;
+	return MEAL_ORDER[meal] <= MEAL_ORDER[dog.fastUntilMeal ?? 'second'];
+}
+
+export function fastingLabel(dog: Dog): string {
+	const reason = dog.fastReason?.trim();
+	return reason ? `Fasting — ${reason}` : 'Fasting — do not feed';
+}
+
 /**
  * Appetite-risk flag: returns a label when the dog's most recent meal was
  * refused ('none') or barely eaten ('little'), null otherwise.
+ *
+ * Pass `currentMeal` to ignore the log for the meal being worked right now —
+ * a refusal logged this shift should surface as "didn't eat last meal" on the
+ * NEXT shift, not the one that just recorded it.
  */
-export function appetiteRiskLabel(logs: FeedingLog[]): string | null {
-	if (logs.length === 0) return null;
-	const latest = [...logs].sort((a, b) => {
+export function appetiteRiskLabel(
+	logs: FeedingLog[],
+	currentMeal?: { day: Date; mealTime: MealTime }
+): string | null {
+	const candidates = currentMeal
+		? logs.filter(
+				(log) => !(log.mealTime === currentMeal.mealTime && isSameCalendarDay(log.date, currentMeal.day))
+			)
+		: logs;
+	if (candidates.length === 0) return null;
+	const latest = [...candidates].sort((a, b) => {
 		const dateDiff = (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0);
 		if (dateDiff !== 0) return dateDiff;
 		return (toDate(b.createdAt)?.getTime() ?? 0) - (toDate(a.createdAt)?.getTime() ?? 0);

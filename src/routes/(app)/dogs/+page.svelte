@@ -61,17 +61,7 @@ const today = new Date();
 		expandedPill = expandedPill;
 	}
 	let stripeFilter: 'all' | 'green' | 'yellow' | 'red' = 'all';
-	let filterNoEnrichment = false;
 	let filterMedical = false;
-
-	// "No enrichment 3d+": no day trip and no playgroup within the window.
-	const NO_ENRICHMENT_DAYS = 3;
-	function hasNoRecentEnrichment(dog: Dog, lastPgByDog: Record<string, Date | null>) {
-		const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - NO_ENRICHMENT_DAYS);
-		const lastTrip = toDate(dog.lastDayTripDate);
-		const lastPg = lastPgByDog[dog.id] ?? null;
-		return (!lastTrip || lastTrip < cutoff) && (!lastPg || lastPg < cutoff);
-	}
 
 	// "Medical": in isolation, resting after surgery, or on an active treatment.
 	function isMedicalHold(dog: Dog) {
@@ -111,7 +101,6 @@ const today = new Date();
 		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
 		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
 		.filter((dog) => filterAdoptable ? getAdoptionAvailability(dog).available : true)
-		.filter((dog) => filterNoEnrichment ? hasNoRecentEnrichment(dog, lastPlaygroupByDogId) : true)
 		.filter((dog) => filterMedical ? isMedicalHold(dog) : true)
 		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
@@ -204,7 +193,6 @@ const today = new Date();
 			vaccinatedDate: null,
 			dayTripStatus: 'eligible',
 			dayTripIneligibleReason: null,
-			dayTripManagerOnly: false,
 			dayTripManagerOnlyReason: null,
 			dayTripNotes: null,
 			handlingLevel: 'volunteer',
@@ -293,7 +281,6 @@ const today = new Date();
 			dog.dayTripStatus,
 			dog.isolationStatus,
 			dog.dayTripIneligibleReason,
-			dog.dayTripManagerOnly,
 			dog.dayTripManagerOnlyReason,
 			dog.dayTripNotes,
 			dog.handlingLevel,
@@ -505,12 +492,6 @@ const today = new Date();
 				</div>
 				<div class="archived-filter-group" role="group" aria-label="Quick filters">
 					<button
-						class={`sort-chip ${filterNoEnrichment ? 'sort-chip-active' : ''}`}
-						on:click={() => (filterNoEnrichment = !filterNoEnrichment)}
-					>
-						no enrichment 3d+
-					</button>
-					<button
 						class={`sort-chip ${filterMedical ? 'sort-chip-active' : ''}`}
 						on:click={() => (filterMedical = !filterMedical)}
 					>
@@ -656,7 +637,7 @@ const today = new Date();
 									<p class={`card-pill-reason ${expandedPillType === 'handling' ? handlingColorClass(effectiveHandlingLevel) : expandedPillType === 'adoption' ? adoptionColorClass(dog) : tripColorClass(tripEligibility.status)}`}>
 										{#if expandedPillType === 'handling'}{handlingLabel(effectiveHandlingLevel)}
 										{:else if expandedPillType === 'adoption'}{adoptionLabel(dog)}
-										{:else}{tripLabel(tripEligibility.status, dog.dayTripNotes, dog.dayTripManagerOnly ?? false)}
+										{:else}{tripLabel(tripEligibility.status, dog.dayTripNotes, dog.handlingLevel === 'manager_only')}
 										{/if}
 									</p>
 								{/if}

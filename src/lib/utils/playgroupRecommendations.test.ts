@@ -26,6 +26,7 @@ function makeDog(overrides: Partial<Dog> = {}): Dog {
 		dateOfBirth: daysAgo(3 * 365),
 		weightLbs: 40,
 		energyLevel: 'medium',
+		playStyles: ['gentle_and_dainty'],
 		goodWithDogs: 'yes',
 		isolationStatus: 'none',
 		isolationReason: null,
@@ -173,13 +174,73 @@ describe('buildRecommendations', () => {
 		expect(groups).toHaveLength(0);
 		expect(swapIns).toHaveLength(0);
 	});
+
+	it('buckets groups by staff-tagged play style, not energy', () => {
+		const { groups } = buildRecommendations([
+			makeDog({ weightLbs: 40, energyLevel: 'very_high', playStyles: ['gentle_and_dainty'] }),
+			makeDog({ weightLbs: 41, energyLevel: 'very_high', playStyles: ['gentle_and_dainty'] }),
+			makeDog({ weightLbs: 42, energyLevel: 'low', playStyles: ['rough_and_rowdy'] }),
+			makeDog({ weightLbs: 43, energyLevel: 'low', playStyles: ['rough_and_rowdy'] })
+		]);
+		expect(groups.map((g) => g.title).sort()).toEqual(['Gentle & Dainty 1', 'Rough & Rowdy 1']);
+	});
+
+	it('a dog with both styles can fill either column but only one group', () => {
+		const { groups } = buildRecommendations([
+			makeDog({ name: 'Both', weightLbs: 40, playStyles: ['rough_and_rowdy', 'gentle_and_dainty'] }),
+			makeDog({ name: 'Rowdy', weightLbs: 41, playStyles: ['rough_and_rowdy'] })
+		]);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].playStyle).toBe('rough_and_rowdy');
+	});
+
+	it('untagged adults are returned as needing assessment, not grouped', () => {
+		const untagged = makeDog({ name: 'Mystery', playStyles: [] });
+		const { groups, needsAssessment } = buildRecommendations([untagged]);
+		expect(groups).toHaveLength(0);
+		expect(needsAssessment.map((d) => d.name)).toEqual(['Mystery']);
+	});
+
+	it('puppies default to rough & rowdy and group together, but not with inexperienced adults', () => {
+		const pupA = makeDog({ name: 'PupA', weightLbs: 20, playStyles: [], dateOfBirth: daysAgo(16 * 7) });
+		const pupB = makeDog({ name: 'PupB', weightLbs: 22, playStyles: [], dateOfBirth: daysAgo(18 * 7) });
+		const adult = makeDog({ name: 'Adult', weightLbs: 24, energyLevel: 'high', playStyles: ['rough_and_rowdy'] });
+		const { groups } = buildRecommendations([pupA, pupB, adult], [pupA, pupB, adult], []);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].dogs.map((d) => d.name)).toEqual(['PupA', 'PupB']);
+		expect(groups[0].reason).toContain('puppy group');
+	});
+
+	it('puppy-experienced, not-too-rough adults may join puppy groups', () => {
+		const pup = makeDog({ name: 'Pup', weightLbs: 20, playStyles: [], dateOfBirth: daysAgo(16 * 7) });
+		const gentleVet = makeDog({ name: 'Vet', weightLbs: 24, energyLevel: 'high', playStyles: ['rough_and_rowdy'] });
+		const tooRough = makeDog({ name: 'Wild', weightLbs: 23, energyLevel: 'very_high', playStyles: ['rough_and_rowdy'] });
+		// Vet and Wild both shared a successful session with a then-puppy.
+		const oldPup = makeDog({ name: 'OldPup', playStyles: [], dateOfBirth: daysAgo(30 * 7) });
+		const pastSession = {
+			id: 's1',
+			date: daysAgo(10 * 7), // OldPup was ~20 weeks old then
+			groupName: 'past',
+			dogIds: [gentleVet.id, tooRough.id, oldPup.id],
+			dogNames: [],
+			recommendationType: 'manual',
+			outcome: 'successful',
+			notes: null
+		} as unknown as import('$lib/types').PlaygroupSession;
+		const all = [pup, gentleVet, tooRough, oldPup];
+		const { groups } = buildRecommendations([pup, gentleVet, tooRough], all, [pastSession]);
+		expect(groups).toHaveLength(1);
+		// Vet (high energy, experienced) joins; Wild (very high) stays out as too rough.
+		expect(groups[0].dogs.map((d) => d.name).sort()).toEqual(['Pup', 'Vet']);
+	});
 });
 
 describe('buildTestSuggestions', () => {
 	it('suggests the energy-closest compatible ready group', () => {
 		const calmGroup = {
 			id: 'g1',
-			title: 'Ready Group 1',
+			title: 'Gentle & Dainty 1',
+			playStyle: 'gentle_and_dainty' as const,
 			dogs: [makeDog({ weightLbs: 40, energyLevel: 'low' }), makeDog({ weightLbs: 42, energyLevel: 'low' })],
 			dogIds: [],
 			reason: '',
@@ -189,7 +250,7 @@ describe('buildTestSuggestions', () => {
 		const wildGroup = {
 			...calmGroup,
 			id: 'g2',
-			title: 'Ready Group 2',
+			title: 'Rough & Rowdy 1',
 			dogs: [makeDog({ weightLbs: 40, energyLevel: 'very_high' }), makeDog({ weightLbs: 42, energyLevel: 'very_high' })]
 		};
 		const cautionDog = makeDog({ goodWithDogs: 'unknown', weightLbs: 41, energyLevel: 'very_high' });
@@ -201,7 +262,8 @@ describe('buildTestSuggestions', () => {
 	it('returns null group when nothing is size-compatible', () => {
 		const group = {
 			id: 'g1',
-			title: 'Ready Group 1',
+			title: 'Gentle & Dainty 1',
+			playStyle: 'gentle_and_dainty' as const,
 			dogs: [makeDog({ weightLbs: 100 }), makeDog({ weightLbs: 90 })],
 			dogIds: [],
 			reason: '',

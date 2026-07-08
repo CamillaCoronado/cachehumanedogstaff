@@ -1,7 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-
-const SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
-const GID = '1548223211';
+import { fetchTabRows } from '$lib/server/googleSheets';
 
 function parseDogName(raw: string): string {
 	return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
@@ -26,23 +24,12 @@ function parseSheetDate(raw: string): string | null {
 }
 
 export async function GET() {
-	const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
-
-	let res: Response;
+	let rows: string[][];
 	try {
-		res = await fetch(url, { redirect: 'follow' });
+		rows = await fetchTabRows('DT Numbers', '1548223211');
 	} catch (e) {
 		throw error(502, `Sheet fetch error: ${e instanceof Error ? e.message : String(e)}`);
 	}
-
-	if (!res.ok) {
-		throw error(502, `Sheet fetch failed: ${res.status}`);
-	}
-
-	const csv = await res.text();
-	const rows = csv.split(/\r?\n/).map((r) =>
-		r.split(',').map((cell) => cell.replace(/^"|"$/g, ''))
-	);
 
 	// Skip header row; each row is: Name, 1st Trip, 2nd Trip, ...
 	const data = rows

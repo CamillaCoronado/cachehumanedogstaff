@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Dog } from '$lib/types';
-import { getOverdueDayTripDogs } from './attention';
+import type { Dog, PlaygroupSession } from '$lib/types';
+import { getOverdueEnrichmentDogs } from './attention';
 
 function makeDog(overrides: Partial<Dog> = {}): Dog {
 	return {
@@ -43,7 +43,6 @@ function makeDog(overrides: Partial<Dog> = {}): Dog {
 		vaccinatedDate: null,
 		dayTripStatus: 'eligible',
 		dayTripIneligibleReason: null,
-		dayTripManagerOnly: false,
 		dayTripManagerOnlyReason: null,
 		dayTripNotes: null,
 		handlingLevel: 'volunteer',
@@ -58,15 +57,60 @@ function makeDog(overrides: Partial<Dog> = {}): Dog {
 	} as Dog;
 }
 
-describe('getOverdueDayTripDogs', () => {
-	it('does not flag puppies that are blocked by the day-trip puppy gate', () => {
-		const today = new Date(2026, 3, 10);
-		const dog = makeDog({
-			intakeDate: new Date(2026, 2, 25),
-			dateOfBirth: new Date(2026, 0, 15),
-			lastDayTripDate: null
-		});
+function makeSession(dogId: string, date: Date): PlaygroupSession {
+	return {
+		id: 'pg-1',
+		date,
+		groupName: 'Group A',
+		dogIds: [dogId],
+		dogNames: ['Pip'],
+		recommendationType: 'manual',
+		outcome: 'successful',
+		notes: null
+	} as PlaygroupSession;
+}
 
-		expect(getOverdueDayTripDogs([dog], today)).toEqual([]);
+describe('getOverdueEnrichmentDogs', () => {
+	const today = new Date(2026, 3, 10);
+
+	it('flags a dog with no day trip, playgroup, or yard time in 7+ days', () => {
+		const dog = makeDog({ intakeDate: new Date(2026, 2, 25) });
+		const items = getOverdueEnrichmentDogs([dog], [], today);
+		expect(items).toHaveLength(1);
+		expect(items[0].days).toBe(16);
+	});
+
+	it('any one activity inside the window resets the clock', () => {
+		const recent = new Date(2026, 3, 6);
+		expect(getOverdueEnrichmentDogs([makeDog({ lastDayTripDate: recent })], [], today)).toEqual([]);
+		expect(getOverdueEnrichmentDogs([makeDog({ lastYardDate: recent })], [], today)).toEqual([]);
+		expect(getOverdueEnrichmentDogs([makeDog()], [makeSession('dog-1', recent)], today)).toEqual([]);
+	});
+
+	it('ignores activity from before the dog (re)arrived at the shelter', () => {
+		const dog = makeDog({
+			shelterSince: new Date(2026, 2, 25),
+			lastYardDate: new Date(2026, 2, 20)
+		});
+		const items = getOverdueEnrichmentDogs([dog], [], today);
+		expect(items).toHaveLength(1);
+		expect(items[0].days).toBe(16);
+	});
+
+	it('excludes foster and incoming dogs', () => {
+		expect(getOverdueEnrichmentDogs([makeDog({ inFoster: true })], [], today)).toEqual([]);
+		expect(getOverdueEnrichmentDogs([makeDog({ isIncoming: true })], [], today)).toEqual([]);
+	});
+
+	it('hides dogs on medical rest or manager-only handling while the clock keeps running', () => {
+		const resting = makeDog({ surgeryDate: new Date(2026, 3, 8), surgeryRestDays: 7 });
+		expect(getOverdueEnrichmentDogs([resting], [], today)).toEqual([]);
+
+		const managerOnly = makeDog({ handlingLevel: 'manager_only' });
+		expect(getOverdueEnrichmentDogs([managerOnly], [], today)).toEqual([]);
+
+		// Once the restriction lifts, the accumulated gap shows immediately.
+		const lifted = makeDog({ handlingLevel: 'staff_only' });
+		expect(getOverdueEnrichmentDogs([lifted], [], today)).toHaveLength(1);
 	});
 });

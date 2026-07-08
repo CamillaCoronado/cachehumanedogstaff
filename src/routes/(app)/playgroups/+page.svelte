@@ -3,7 +3,8 @@
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
-	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
+	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs, patchDogInStore } from '$lib/stores/dogs';
+	import { updateDog } from '$lib/data/dogs';
 	import {
 		addPlaygroupSession,
 		deletePlaygroupSession,
@@ -15,7 +16,7 @@
 	import type { PendingPlaygroup } from '$lib/data/playgroups';
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
-	import { formatDateTime, toDate } from '$lib/utils/dates';
+	import { formatDateTime, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { getCautionDogs } from '$lib/utils/attention';
 	import {
@@ -31,7 +32,7 @@
 	import type { PlaygroupRecommendation } from '$lib/utils/playgroupRecommendations';
 	import { matchDogByName } from '$lib/utils/dogs';
 	import { canAccessPlaygroups, canEditPlaygroups, resolveRole } from '$lib/utils/permissions';
-	import type { Dog, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
+	import type { Dog, DogPlayStyle, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
 	import { syncVersion } from '$lib/stores/sync';
 
@@ -40,6 +41,7 @@
 	let loading = true;
 	let savingManual = false;
 	let loggingRecommendationId = '';
+	let quickLoggingId = '';
 	let search = '';
 
 	let manualGroupName = '';
@@ -69,10 +71,9 @@
 	let savingPending = false;
 
 	// Tabs
-	// Recommendations tab hidden 2026-07-05 (Camilla): the grouping suggestions
-	// aren't trustworthy yet. Flip this to true to bring the tab back — the
-	// engine ($lib/utils/playgroupRecommendations), markup, and tests are intact.
-	const SHOW_RECOMMENDATIONS = false;
+	// Re-enabled 2026-07-08 to review the play-style buckets (Rough & Rowdy /
+	// Gentle & Dainty / Solo Playtime / Needs Assessment) and puppy grouping.
+	const SHOW_RECOMMENDATIONS = true;
 	let activeTab: 'dogs' | 'recommendations' | 'history' = 'dogs';
 
 	// History editing
@@ -102,15 +103,28 @@
 	$: dogIdsWithHistory = new Set(sessions.flatMap((s) => s.dogIds));
 	$: readyDogs = activeDogs.filter((dog) => {
 		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no' || dog.awaitingEvaluation) return false;
+		if (getReadiness(dog) === 'hold') return false; // too-young/unvaccinated puppies, surgery rest
 		if (dog.goodWithDogs === 'yes' || isPuppy(dog)) return true;
 		return dogIdsWithHistory.has(dog.id);
 	});
+	// Solo Playtime: not dog-social or tagged solo-style — no groups, but they
+	// still get one-on-one yard time with a person.
+	$: soloPlaytimeDogs = activeDogs.filter(
+		(dog) =>
+			dog.isolationStatus === 'none' &&
+			(dog.goodWithDogs === 'no' || (dog.playStyles ?? []).includes('solo'))
+	);
 	$: cautionDogs = getCautionDogs(activeDogs, sessions);
 	$: holdDogs = activeDogs.filter((dog) => getReadiness(dog) === 'hold');
 	$: unknownWeightDogs = readyDogs.filter((d) => d.weightLbs === null || d.weightLbs === undefined);
-	$: ({ groups: readyGroups, swapIns } = buildRecommendations(readyDogs));
+	$: ({ groups: readyGroups, swapIns, needsAssessment } = buildRecommendations(readyDogs, activeDogs, sessions));
+	$: rowdyGroups = readyGroups.filter((g) => g.playStyle === 'rough_and_rowdy');
+	$: gentleGroups = readyGroups.filter((g) => g.playStyle === 'gentle_and_dainty');
 	$: testSuggestions = buildTestSuggestions(cautionDogs, readyGroups);
 	$: history = [...sessions].sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
+	$: playedTodayIds = new Set(
+		sessions.filter((s) => isSameCalendarDay(s.date, new Date())).flatMap((s) => s.dogIds)
+	);
 
 
 	function dateDayCount(value: Dog['intakeDate']) {
@@ -135,6 +149,37 @@
 			return;
 		}
 		manualDogIds = manualDogIds.filter((id) => id !== dogId);
+	}
+
+	// Tag-on-log: selected dogs with no play style yet get a quick tag row in the
+	// log modal. Already-tagged dogs aren't asked again.
+	let manualStyleTags: Record<string, DogPlayStyle[]> = {};
+	const playStyleOptions: { value: DogPlayStyle; label: string }[] = [
+		{ value: 'rough_and_rowdy', label: 'Rough & Rowdy' },
+		{ value: 'gentle_and_dainty', label: 'Gentle & Dainty' },
+		{ value: 'solo', label: 'Solo Playtime' }
+	];
+	$: untaggedSelectedDogs = activeDogs.filter(
+		(dog) => manualDogIds.includes(dog.id) && (dog.playStyles ?? []).length === 0
+	);
+
+	function toggleStyleTag(dogId: string, style: DogPlayStyle) {
+		const current = manualStyleTags[dogId] ?? [];
+		manualStyleTags = {
+			...manualStyleTags,
+			[dogId]: current.includes(style) ? current.filter((s) => s !== style) : [...current, style]
+		};
+	}
+
+	async function saveStyleTags() {
+		const tagged = untaggedSelectedDogs
+			.map((dog) => ({ dog, styles: manualStyleTags[dog.id] ?? [] }))
+			.filter(({ styles }) => styles.length > 0);
+		for (const { dog, styles } of tagged) {
+			await updateDog(dog.id, { playStyles: styles });
+			patchDogInStore(dog.id, { playStyles: styles });
+		}
+		manualStyleTags = {};
 	}
 
 	$: if ($syncVersion > 0) void refreshData();
@@ -308,6 +353,36 @@
 		}
 	}
 
+	// Quick per-dog log for when staff saw a dog out in playgroup but nobody had
+	// time to record the full group. Counts toward playgroup/enrichment history
+	// via a single-dog session; the real group can still be logged later.
+	async function quickLogPlaygroup(dog: Dog) {
+		if (quickLoggingId) return;
+		quickLoggingId = dog.id;
+		try {
+			await addPlaygroupSession(
+				{
+					date: new Date(),
+					groupName: 'Quick log',
+					dogIds: [dog.id],
+					dogNames: [dog.name],
+					recommendationType: 'manual',
+					outcome: 'successful',
+					notes: 'Quick log — in playgroup today, group not recorded',
+					durationMinutes: null
+				},
+				$authProfile
+			);
+			sessions = await listPlaygroupSessions();
+			toast.success(`${dog.name} marked as in playgroup today.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to log playgroup.');
+		} finally {
+			quickLoggingId = '';
+		}
+	}
+
 	async function saveManualSession() {
 		const selectedDogs = activeDogs.filter((dog) => manualDogIds.includes(dog.id));
 		const extraNames = manualExtraNames.split(',').map((n) => n.trim()).filter(Boolean);
@@ -340,6 +415,7 @@
 				},
 				$authProfile
 			);
+			await saveStyleTags();
 			sessions = await listPlaygroupSessions();
 			manualGroupName = '';
 			manualOutcome = 'successful';
@@ -664,6 +740,20 @@
 								{#if guidanceForDog(dog)}
 									<p class="dog-card-guidance">{guidanceForDog(dog)}</p>
 								{/if}
+								{#if canEdit}
+									{#if playedTodayIds.has(dog.id)}
+										<span class="quick-played-chip typewriter">✓ In playgroup today</span>
+									{:else}
+										<button
+											class="quick-play-btn typewriter"
+											type="button"
+											disabled={quickLoggingId === dog.id}
+											on:click={() => quickLogPlaygroup(dog)}
+										>
+											{quickLoggingId === dog.id ? 'Saving…' : 'Played today'}
+										</button>
+									{/if}
+								{/if}
 							</div>
 						{/each}
 					</div>
@@ -678,6 +768,9 @@
 									<th>Kennel</th>
 									<th>In Shelter</th>
 									<th>Guidance</th>
+									{#if canEdit}
+										<th>Today</th>
+									{/if}
 								</tr>
 							</thead>
 							<tbody>
@@ -698,6 +791,22 @@
 										<td>{dog.outdoorKennelAssignment || 'Unassigned'}</td>
 										<td>{dateDayCount(dog.intakeDate) ?? '—'} days</td>
 										<td>{guidanceForDog(dog)}</td>
+										{#if canEdit}
+											<td>
+												{#if playedTodayIds.has(dog.id)}
+													<span class="quick-played-chip typewriter">✓ Played</span>
+												{:else}
+													<button
+														class="quick-play-btn typewriter"
+														type="button"
+														disabled={quickLoggingId === dog.id}
+														on:click={() => quickLogPlaygroup(dog)}
+													>
+														{quickLoggingId === dog.id ? '…' : 'Played today'}
+													</button>
+												{/if}
+											</td>
+										{/if}
 									</tr>
 								{/each}
 							</tbody>
@@ -709,44 +818,106 @@
 			<section class="panel">
 				<div class="panel-head">
 					<h3>Recommended Playgroups</h3>
-					<p class="panel-note">Auto-suggested from readiness + size compatibility. Up to 4 dogs per group.</p>
+					<p class="panel-note">Auto-suggested from readiness + size compatibility. Up to 4 dogs per group, sorted into play-style columns.</p>
 				</div>
-				{#if readyGroups.length === 0}
-					<p class="empty-line">No recommendations yet. Mark more dogs as good with dogs to generate groups.</p>
-				{:else}
-					<div class="recommendation-grid">
-						{#each readyGroups as recommendation}
-							<article class="recommendation-card">
-								<div class="recommendation-head">
-									<h4>{recommendation.title}</h4>
-									<span class="priority-chip">{recommendation.dogs.length} dogs</span>
+				<div class="playstyle-board">
+					{#each [
+						{ name: 'Rough & Rowdy', note: 'High energy play', groups: rowdyGroups },
+						{ name: 'Gentle & Dainty', note: 'Calm, easy play', groups: gentleGroups }
+					] as column}
+						<div class="playstyle-col">
+							<div class="playstyle-col-head">
+								<h4 class="playstyle-col-title">{column.name}</h4>
+								<p class="playstyle-col-note">{column.note}</p>
+							</div>
+							{#if column.groups.length === 0}
+								<p class="empty-line">No groups yet.</p>
+							{:else}
+								{#each column.groups as recommendation}
+									<article class="recommendation-card">
+										<div class="recommendation-head">
+											<h4>{recommendation.title}</h4>
+											<span class="priority-chip">{recommendation.dogs.length} dogs</span>
+										</div>
+										<div class="dog-chip-row">
+											{#each recommendation.dogs as dog}
+												<a href={`/dogs/${dog.id}`} class="dog-chip">
+													{dog.name}
+													<span class="size-badge size-badge-{sizeCategory(dog)}">{sizeLabelShort(dog)}</span>
+												</a>
+											{/each}
+										</div>
+										{#if recommendation.dogs.some((d) => sizeCategory(d) === 'unknown')}
+											<p class="size-unknown-note">⚠ Some dogs have no weight recorded — size compatibility unverified.</p>
+										{/if}
+										<p class="recommendation-reason">{recommendation.reason}</p>
+										{#if canEdit}
+										<button
+											class="recommendation-log-btn typewriter"
+											type="button"
+											on:click={() => logRecommendation(recommendation)}
+											disabled={loggingRecommendationId === recommendation.id}
+										>
+											{loggingRecommendationId === recommendation.id ? 'Saving...' : 'Log to history'}
+										</button>
+										{/if}
+									</article>
+								{/each}
+							{/if}
+						</div>
+					{/each}
+
+					<div class="playstyle-col">
+						<div class="playstyle-col-head">
+							<h4 class="playstyle-col-title">Needs Assessment</h4>
+							<p class="playstyle-col-note">Play style or compatibility unknown — watch them play, then tag</p>
+						</div>
+						{#if needsAssessment.length === 0 && testSuggestions.length === 0}
+							<p class="empty-line">No dogs to assess.</p>
+						{:else}
+							{#each needsAssessment as dog}
+								<div class="test-card">
+									<div class="test-card-top">
+										<a href={`/dogs/${dog.id}`} class="dog-link">{dog.name}</a>
+										<span class="readiness-pill readiness-caution">No play style</span>
+									</div>
+									<p class="test-reason">Play style not tagged yet — log a playgroup and tag how they played.</p>
 								</div>
-								<div class="dog-chip-row">
-									{#each recommendation.dogs as dog}
-										<a href={`/dogs/${dog.id}`} class="dog-chip">
-											{dog.name}
-											<span class="size-badge size-badge-{sizeCategory(dog)}">{sizeLabelShort(dog)}</span>
-										</a>
-									{/each}
+							{/each}
+							{#each testSuggestions as suggestion}
+								<div class="test-card">
+									<div class="test-card-top">
+										<a href={`/dogs/${suggestion.dog.id}`} class="dog-link">{suggestion.dog.name}</a>
+										<span class="readiness-pill readiness-caution">Unknown</span>
+									</div>
+									<p class="test-reason">{suggestion.reason}</p>
+									{#if suggestion.suggestedGroup}
+										<p class="test-suggested">
+											Try with: <strong>{suggestion.suggestedGroup.title}</strong>
+											({suggestion.suggestedGroup.dogs.map((d) => d.name).join(', ')})
+										</p>
+									{/if}
 								</div>
-								{#if recommendation.dogs.some((d) => sizeCategory(d) === 'unknown')}
-									<p class="size-unknown-note">⚠ Some dogs have no weight recorded — size compatibility unverified.</p>
-								{/if}
-								<p class="recommendation-reason">{recommendation.reason}</p>
-								{#if canEdit}
-								<button
-									class="recommendation-log-btn typewriter"
-									type="button"
-									on:click={() => logRecommendation(recommendation)}
-									disabled={loggingRecommendationId === recommendation.id}
-								>
-									{loggingRecommendationId === recommendation.id ? 'Saving...' : 'Log to history'}
-								</button>
-								{/if}
-							</article>
-						{/each}
+							{/each}
+						{/if}
 					</div>
-				{/if}
+
+					<div class="playstyle-col">
+						<div class="playstyle-col-head">
+							<h4 class="playstyle-col-title">Solo Playtime</h4>
+							<p class="playstyle-col-note">Not dog-social — one-on-one people time</p>
+						</div>
+						{#if soloPlaytimeDogs.length === 0}
+							<p class="empty-line">No solo dogs.</p>
+						{:else}
+							<div class="dog-chip-row">
+								{#each soloPlaytimeDogs as dog}
+									<a href={`/dogs/${dog.id}`} class="dog-chip">{dog.name}</a>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				</div>
 
 				{#if unknownWeightDogs.length > 0}
 					<div class="unknown-weight-section">
@@ -778,32 +949,6 @@
 										</p>
 									{:else}
 										<p class="test-reason">No current group is size-compatible — may need their own intro session.</p>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					</div>
-				{/if}
-
-				{#if testSuggestions.length > 0}
-					<div class="test-section">
-						<div class="test-section-head">
-							<h4 class="test-section-title">Dogs to Test</h4>
-							<p class="test-section-note">Unknown compatibility — introduce to an established ready group to evaluate.</p>
-						</div>
-						<div class="test-grid">
-							{#each testSuggestions as suggestion}
-								<div class="test-card">
-									<div class="test-card-top">
-										<a href={`/dogs/${suggestion.dog.id}`} class="dog-link">{suggestion.dog.name}</a>
-										<span class="readiness-pill readiness-caution">Unknown</span>
-									</div>
-									<p class="test-reason">{suggestion.reason}</p>
-									{#if suggestion.suggestedGroup}
-										<p class="test-suggested">
-											Try with: <strong>{suggestion.suggestedGroup.title}</strong>
-											({suggestion.suggestedGroup.dogs.map((d) => d.name).join(', ')})
-										</p>
 									{/if}
 								</div>
 							{/each}
@@ -957,6 +1102,29 @@
 								{/each}
 							</div>
 						</div>
+
+						{#if untaggedSelectedDogs.length > 0}
+							<div class="manual-dogs">
+								<p class="manual-dogs-label">Tag play styles (first playgroup for these dogs)</p>
+								{#each untaggedSelectedDogs as dog (dog.id)}
+									<div class="style-tag-row">
+										<span class="style-tag-name">{dog.name}</span>
+										<div class="style-tag-chips">
+											{#each playStyleOptions as option}
+												<button
+													type="button"
+													class={`style-tag-chip ${(manualStyleTags[dog.id] ?? []).includes(option.value) ? 'style-tag-chip-active' : ''}`}
+													on:click={() => toggleStyleTag(dog.id, option.value)}
+												>
+													{option.label}
+												</button>
+											{/each}
+										</div>
+									</div>
+								{/each}
+								<p class="style-tag-hint">Optional — leave blank to keep the dog in Needs Assessment.</p>
+							</div>
+						{/if}
 
 						<label class="form-field">
 							<span>Add dogs not at shelter</span>
@@ -1160,6 +1328,43 @@
 		color: #3a5069;
 	}
 
+	.quick-play-btn {
+		margin-top: 0.34rem;
+		min-height: 1.9rem;
+		border: 1px solid #b8cee6;
+		border-radius: 0.22rem;
+		background: #eaf4ff;
+		padding: 0.16rem 0.56rem;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #285c8e;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.quick-play-btn:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.quick-played-chip {
+		display: inline-flex;
+		align-items: center;
+		margin-top: 0.34rem;
+		border: 1px solid #b6d9c2;
+		border-radius: 0.22rem;
+		background: #eaf8ee;
+		padding: 0.18rem 0.5rem;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #266741;
+		white-space: nowrap;
+	}
+
 	.list-wrap {
 		display: none;
 		margin-top: 0.52rem;
@@ -1248,6 +1453,93 @@
 		margin-top: 0.52rem;
 		display: grid;
 		gap: 0.48rem;
+	}
+
+	.playstyle-board {
+		margin-top: 0.52rem;
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.6rem;
+		align-items: start;
+	}
+
+	@media (max-width: 1100px) {
+		.playstyle-board {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 600px) {
+		.playstyle-board {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	.playstyle-col {
+		border: 1px solid #c6d4e4;
+		background: #f4f8fc;
+		padding: 0.52rem;
+		display: grid;
+		gap: 0.48rem;
+		align-content: start;
+	}
+
+	.playstyle-col-head {
+		border-bottom: 1px solid #c6d4e4;
+		padding-bottom: 0.35rem;
+	}
+
+	.playstyle-col-title {
+		font-size: 0.78rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+
+	.playstyle-col-note {
+		font-size: 0.68rem;
+		color: #5a6b7d;
+		margin-top: 0.12rem;
+	}
+
+	.style-tag-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.25rem 0;
+	}
+
+	.style-tag-name {
+		font-size: 0.74rem;
+		font-weight: 600;
+		min-width: 6.5rem;
+	}
+
+	.style-tag-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+
+	.style-tag-chip {
+		border: 1px solid #c6d4e4;
+		background: #fff;
+		font-size: 0.68rem;
+		padding: 0.18rem 0.5rem;
+		border-radius: 999px;
+		cursor: pointer;
+	}
+
+	.style-tag-chip-active {
+		background: #016aa5;
+		border-color: #016aa5;
+		color: #fff;
+	}
+
+	.style-tag-hint {
+		font-size: 0.66rem;
+		color: #5a6b7d;
 	}
 
 	.recommendation-card {
