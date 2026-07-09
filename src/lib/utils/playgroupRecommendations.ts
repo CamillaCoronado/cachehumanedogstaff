@@ -5,18 +5,6 @@ import { dogAgeWeeks, isPuppyVaccinated, isSurgeryResting } from '$lib/utils/att
 export { isPuppyVaccinated };
 
 export type DogReadiness = 'ready' | 'caution' | 'hold';
-export type RecommendationPriority = 'high' | 'medium';
-
-export interface PlaygroupRecommendation {
-	id: string;
-	title: string;
-	playStyle: DogPlayStyle;
-	dogs: Dog[];
-	dogIds: string[];
-	reason: string;
-	recommendationType: PlaygroupSession['recommendationType'];
-	priority: RecommendationPriority;
-}
 
 export const PLAY_STYLE_LABELS: Record<DogPlayStyle, string> = {
 	rough_and_rowdy: 'Rough & Rowdy',
@@ -40,63 +28,12 @@ export function needsPlayAssessment(dog: Dog): boolean {
 export interface TestSuggestion {
 	id: string;
 	dog: Dog;
-	suggestedGroup: PlaygroupRecommendation | null;
 	reason: string;
-}
-
-export interface SwapInSuggestion {
-	dog: Dog;
-	compatibleGroups: PlaygroupRecommendation[];
 }
 
 export function isPuppy(dog: Dog): boolean {
 	const weeks = dogAgeWeeks(dog, new Date());
 	return weeks !== null && weeks < 26;
-}
-
-// A dog counted as a puppy (under 26 weeks) at a given past date.
-function wasPuppyAt(dog: Dog, date: Date): boolean {
-	const dob = toDate(dog.dateOfBirth);
-	if (!dob) return false;
-	return Math.floor((date.getTime() - dob.getTime()) / (7 * 86_400_000)) < 26;
-}
-
-// Adults earn puppy experience by having shared a successful playgroup with a
-// dog that was a puppy at the time. Until then, pairing them with a puppy is
-// something to evaluate, not assume.
-export function hasPuppyExperience(dog: Dog, allDogs: Dog[], sessions: PlaygroupSession[]): boolean {
-	const byId = new Map(allDogs.map((d) => [d.id, d]));
-	for (const session of sessions) {
-		if (session.outcome !== 'successful') continue;
-		if (!session.dogIds.includes(dog.id)) continue;
-		const date = toDate(session.date);
-		if (!date) continue;
-		const playedWithPuppy = session.dogIds.some((id) => {
-			if (id === dog.id) return false;
-			const other = byId.get(id);
-			return other ? wasPuppyAt(other, date) : false;
-		});
-		if (playedWithPuppy) return true;
-	}
-	return false;
-}
-
-// Puppies play rough — so a group with a puppy takes other puppies, or adults
-// that are puppy-experienced and not TOO rough (very-high energy is out).
-export function puppyCompatible(
-	group: Dog[],
-	candidate: Dog,
-	puppyExperienced: (dog: Dog) => boolean
-): boolean {
-	const members = [...group, candidate];
-	if (!members.some(isPuppy)) return true;
-	return members.every((d) => isPuppy(d) || (puppyExperienced(d) && dogEnergyRank(d) <= 3));
-}
-
-export function intactConflict(dogs: Dog[]): boolean {
-	const hasIntactMale = dogs.some((d) => !d.isFixed && d.sex === 'male');
-	const hasIntactFemale = dogs.some((d) => !d.isFixed && d.sex === 'female');
-	return hasIntactMale && hasIntactFemale;
 }
 
 export function getReadiness(dog: Dog): DogReadiness {
@@ -149,40 +86,12 @@ export function guidanceForDog(dog: Dog) {
 	return 'Eligible for standard playgroup rotation.';
 }
 
-export function energyRank(value: Dog['energyLevel']) {
-	if (value === 'low') return 1;
-	if (value === 'medium') return 2;
-	if (value === 'high') return 3;
-	if (value === 'very_high') return 4;
-	return 2;
-}
-
-export function dogEnergyRank(dog: Dog): number {
-	return isPuppy(dog) ? 3 : energyRank(dog.energyLevel);
-}
-
 export function sizeCategory(dog: Dog): 'tiny' | 'small' | 'medium' | 'large' | 'unknown' {
 	if (dog.weightLbs === null || dog.weightLbs === undefined) return 'unknown';
 	if (dog.weightLbs < 15) return 'tiny';
 	if (dog.weightLbs < 30) return 'small';
 	if (dog.weightLbs <= 55) return 'medium';
 	return 'large';
-}
-
-export function sizeRank(dog: Dog): number {
-	return dog.weightLbs ?? 30;
-}
-
-export function sizeCompatible(dogs: Dog[]): boolean {
-	const known = dogs.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined);
-	if (known.length === 0) return true;
-	const hasTiny = known.some((d) => sizeCategory(d) === 'tiny');
-	const hasNonTiny = known.some((d) => sizeCategory(d) !== 'tiny');
-	if (hasTiny && hasNonTiny) return false;
-	const weights = known.map((d) => d.weightLbs as number);
-	const min = Math.min(...weights);
-	const max = Math.max(...weights);
-	return max <= min * 2;
 }
 
 export function sizeLabelShort(dog: Dog): string {
@@ -194,153 +103,141 @@ export function sizeLabelShort(dog: Dog): string {
 	return 'L';
 }
 
-// Energy is a hard constraint like size: all members must be within one
-// energy level of each other (puppies count as high).
-export function energyCompatible(group: Dog[], candidate: Dog): boolean {
-	const ranks = [...group.map(dogEnergyRank), dogEnergyRank(candidate)];
-	return Math.max(...ranks) - Math.min(...ranks) <= 1;
+// Dogs sorted into play-style buckets — purely from staff-assessed tags, no
+// size/energy grouping. A dog tagged both rough & gentle lands in `both`
+// (shown between the two single-style columns) instead of appearing twice.
+// Solo-tagged dogs are excluded here; they live in the dedicated Solo column.
+export interface PlayStyleBuckets {
+	roughOnly: Dog[];
+	both: Dog[];
+	gentleOnly: Dog[];
+	unassessed: Dog[];
 }
 
-const ENERGY_LABELS: Record<number, string> = { 1: 'low', 2: 'medium', 3: 'high', 4: 'very high' };
+export function bucketByPlayStyle(ready: Dog[]): PlayStyleBuckets {
+	const roughOnly: Dog[] = [];
+	const both: Dog[] = [];
+	const gentleOnly: Dog[] = [];
+	const unassessed: Dog[] = [];
 
-// Human-readable rationale for a group card: actual size range, energy band,
-// and whether an intact male/female was deliberately kept out.
-function groupReason(group: Dog[], heldOutForIntact: number): string {
-	const weights = group.map((d) => d.weightLbs as number);
-	const minW = Math.min(...weights);
-	const maxW = Math.max(...weights);
-	const ranks = group.map(dogEnergyRank);
-	const minR = Math.min(...ranks);
-	const maxR = Math.max(...ranks);
-	const parts = [
-		minW === maxW ? `${minW} lbs` : `${minW}–${maxW} lbs`,
-		`${minR === maxR ? ENERGY_LABELS[minR] : `${ENERGY_LABELS[minR]}–${ENERGY_LABELS[maxR]}`} energy`
-	];
-	if (group.some(isPuppy)) parts.push('puppy group — puppy-experienced adults only');
-	if (heldOutForIntact > 0) parts.push('intact M/F kept separate');
-	return parts.join(' · ');
+	for (const dog of ready) {
+		const styles = dogPlayStyles(dog);
+		if (styles.includes('solo')) continue;
+		const hasRough = styles.includes('rough_and_rowdy');
+		const hasGentle = styles.includes('gentle_and_dainty');
+		if (hasRough && hasGentle) both.push(dog);
+		else if (hasRough) roughOnly.push(dog);
+		else if (hasGentle) gentleOnly.push(dog);
+		else unassessed.push(dog);
+	}
+
+	const byName = (a: Dog, b: Dog) => a.name.localeCompare(b.name);
+	return {
+		roughOnly: roughOnly.sort(byName),
+		both: both.sort(byName),
+		gentleOnly: gentleOnly.sort(byName),
+		unassessed: unassessed.sort(byName)
+	};
 }
 
-export function buildRecommendations(
-	ready: Dog[],
-	allDogs: Dog[] = [],
-	sessions: PlaygroupSession[] = []
-): { groups: PlaygroupRecommendation[]; swapIns: SwapInSuggestion[]; needsAssessment: Dog[] } {
-	const groups: PlaygroupRecommendation[] = [];
-	const groupedIds = new Set<string>();
+export function buildTestSuggestions(caution: Dog[]): TestSuggestion[] {
+	return caution.map((dog) => ({
+		id: `test-${dog.id}`,
+		dog,
+		reason: guidanceForDog(dog)
+	}));
+}
 
-	// Puppy experience is derived from history once per build.
-	const experiencedIds = new Set(
-		ready.filter((d) => !isPuppy(d) && hasPuppyExperience(d, allDogs, sessions)).map((d) => d.id)
-	);
-	const puppyExperienced = (dog: Dog) => experiencedIds.has(dog.id);
+// ─── Selection-time assist ──────────────────────────────────────────────────
+// Two kinds of help for staff building a session by hand, replacing the old
+// auto-grouping engine: (1) flag facts that are objectively true and unsafe
+// to ignore — not judgment calls; (2) surface pairs with a real track record
+// together, pulled from actual outcomes rather than inferred from energy/size.
 
-	// Play style is the bucket, staff-assessed (never derived from energy/size).
-	// Untagged dogs can't be grouped — they surface as needing assessment.
-	const needsAssessment = ready.filter(needsPlayAssessment);
-	const styleNumbers: Record<DogPlayStyle, number> = { rough_and_rowdy: 1, gentle_and_dainty: 1, solo: 1 };
+export interface SelectionWarning {
+	id: string;
+	message: string;
+}
 
-	for (const style of ['rough_and_rowdy', 'gentle_and_dainty'] as const) {
-		const bucket = ready.filter(
-			(d) =>
-				!groupedIds.has(d.id) &&
-				dogPlayStyles(d).includes(style) &&
-				d.weightLbs !== null &&
-				d.weightLbs !== undefined
-		);
-		const sorted = [...bucket].sort(
-			(a, b) => sizeRank(a) - sizeRank(b) || dogEnergyRank(a) - dogEnergyRank(b) || a.name.localeCompare(b.name)
-		);
+export function checkSelectionWarnings(selected: Dog[]): SelectionWarning[] {
+	const warnings: SelectionWarning[] = [];
 
-		// Repeatedly seed a group with the lightest ungrouped dog. Dogs that don't
-		// fit (size window, energy band, puppy rules, or an intact conflict) stay in
-		// the pool and get their own chance to anchor a later group — a single
-		// mismatch no longer discards everyone around it.
-		let remaining = sorted;
-		while (remaining.length > 0) {
-			const [anchor, ...rest] = remaining;
-			const group: Dog[] = [anchor];
-			const leftover: Dog[] = [];
-			let heldOutForIntact = 0;
-			for (const candidate of rest) {
-				// Anchor is the group's lightest dog, so pairwise size check with it
-				// bounds the whole group's spread.
-				if (
-					group.length >= 4 ||
-					!sizeCompatible([anchor, candidate]) ||
-					!energyCompatible(group, candidate) ||
-					!puppyCompatible(group, candidate, puppyExperienced)
-				) {
-					leftover.push(candidate);
-					continue;
-				}
-				if (intactConflict([...group, candidate])) {
-					heldOutForIntact++;
-					leftover.push(candidate);
-					continue;
-				}
-				group.push(candidate);
-			}
-			remaining = leftover;
-			if (group.length < 2) continue; // ungrouped anchor becomes a swap-in below
-			groups.push({
-				id: `ready-${group.map((d) => d.id).join('-')}`,
-				title: `${PLAY_STYLE_LABELS[style]} ${styleNumbers[style]++}`,
-				playStyle: style,
-				dogs: group,
-				dogIds: group.map((d) => d.id),
-				reason: groupReason(group, heldOutForIntact),
-				recommendationType: 'ready_group',
-				priority: 'high'
-			});
-			group.forEach((d) => groupedIds.add(d.id));
+	for (const dog of selected) {
+		if (dog.isolationStatus !== 'none') {
+			warnings.push({ id: `iso-${dog.id}`, message: `${dog.name} is in isolation.` });
+		} else if (isSurgeryResting(dog, new Date())) {
+			warnings.push({ id: `med-${dog.id}`, message: `${dog.name} is on medical/surgery rest.` });
 		}
 	}
 
-	// Style-tagged dogs with known weight that didn't land in any group
-	const swapIns: SwapInSuggestion[] = ready
-		.filter(
-			(d) =>
-				!groupedIds.has(d.id) &&
-				!needsPlayAssessment(d) &&
-				!dogPlayStyles(d).every((s) => s === 'solo') &&
-				d.weightLbs !== null &&
-				d.weightLbs !== undefined
-		)
-		.map((dog) => ({
-			dog,
-			compatibleGroups: groups.filter(
-				(g) =>
-					dogPlayStyles(dog).includes(g.playStyle) &&
-					sizeCompatible([...g.dogs, dog]) &&
-					energyCompatible(g.dogs, dog) &&
-					puppyCompatible(g.dogs, dog, puppyExperienced) &&
-					!intactConflict([...g.dogs, dog])
-			)
-		}));
-
-	return { groups, swapIns, needsAssessment };
-}
-
-export function buildTestSuggestions(caution: Dog[], readyGroups: PlaygroupRecommendation[]): TestSuggestion[] {
-	return caution.map((dog) => {
-		const dogEnergy = dogEnergyRank(dog);
-		const compatible = readyGroups.filter((g) => {
-			if (intactConflict([dog, ...g.dogs])) return false;
-			if (!sizeCompatible([dog, ...g.dogs])) return false;
-			return true;
+	const intactMales = selected.filter((d) => !d.isFixed && d.sex === 'male');
+	const intactFemales = selected.filter((d) => !d.isFixed && d.sex === 'female');
+	if (intactMales.length > 0 && intactFemales.length > 0) {
+		warnings.push({
+			id: 'intact-conflict',
+			message: `Intact male (${intactMales.map((d) => d.name).join(', ')}) and intact female (${intactFemales.map((d) => d.name).join(', ')}) together — keep separate.`
 		});
-		const match = compatible.sort((a, b) => {
-			const avgA = a.dogs.reduce((s, d) => s + dogEnergyRank(d), 0) / a.dogs.length;
-			const avgB = b.dogs.reduce((s, d) => s + dogEnergyRank(d), 0) / b.dogs.length;
-			return Math.abs(avgA - dogEnergy) - Math.abs(avgB - dogEnergy);
-		})[0] ?? null;
-		return {
-			id: `test-${dog.id}`,
-			dog,
-			suggestedGroup: match,
-			reason: guidanceForDog(dog)
-		};
-	});
+	}
+
+	const known = selected.filter((d) => d.weightLbs !== null && d.weightLbs !== undefined);
+	if (known.length >= 2) {
+		const hasTiny = known.some((d) => sizeCategory(d) === 'tiny');
+		const hasNonTiny = known.some((d) => sizeCategory(d) !== 'tiny');
+		const weights = known.map((d) => d.weightLbs as number);
+		const min = Math.min(...weights);
+		const max = Math.max(...weights);
+		if ((hasTiny && hasNonTiny) || max > min * 2) {
+			warnings.push({
+				id: 'size-mismatch',
+				message: `Wide size spread (${min}–${max} lbs) — double check this pairing.`
+			});
+		}
+	}
+
+	return warnings;
 }
 
+export interface KnownPairHint {
+	dogIds: [string, string];
+	count: number;
+	lastDate: Date;
+}
+
+// Pairs among the currently-selected dogs that have actually played together
+// successfully before, newest/most-frequent first. Names are deliberately not
+// included here — dogNames on older sessions can be positionally misaligned
+// with dogIds (see the History-edit off-roster-name fix), so callers should
+// resolve display names from the live dog list instead.
+export function findKnownGoodPairs(selectedDogIds: string[], sessions: PlaygroupSession[]): KnownPairHint[] {
+	const selectedSet = new Set(selectedDogIds);
+	const pairMap = new Map<string, { count: number; lastDate: Date }>();
+
+	for (const session of sessions) {
+		if (session.outcome !== 'successful') continue;
+		const relevant = session.dogIds.filter((id) => selectedSet.has(id));
+		if (relevant.length < 2) continue;
+		const date = toDate(session.date);
+		if (!date) continue;
+
+		for (let i = 0; i < relevant.length; i++) {
+			for (let j = i + 1; j < relevant.length; j++) {
+				const [a, b] = [relevant[i], relevant[j]].sort();
+				const key = `${a}|${b}`;
+				const existing = pairMap.get(key);
+				if (existing) {
+					existing.count++;
+					if (date.getTime() > existing.lastDate.getTime()) existing.lastDate = date;
+				} else {
+					pairMap.set(key, { count: 1, lastDate: date });
+				}
+			}
+		}
+	}
+
+	return Array.from(pairMap.entries())
+		.map(([key, v]) => {
+			const [a, b] = key.split('|');
+			return { dogIds: [a, b] as [string, string], count: v.count, lastDate: v.lastDate };
+		})
+		.sort((a, b) => b.count - a.count || b.lastDate.getTime() - a.lastDate.getTime());
+}

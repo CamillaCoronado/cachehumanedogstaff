@@ -75,7 +75,20 @@ export async function POST({ request }) {
 	const rawText = String(event.text ?? '').trim();
 	if (!rawText) return json({ ok: true });
 
-	const parsed = parsePlaygroupMessage(rawText);
+	// Cross-check parsed entries against the real roster so a sentence like
+	// "everyone is out" or a mentioned volunteer's name doesn't get treated as
+	// a dog. Best-effort: if the roster fetch fails, fall back to parsing blind
+	// rather than dropping the message.
+	let knownDogNames: string[] = [];
+	try {
+		const adminDb = getAdminDb();
+		const snapshot = await adminDb.collection('dogs').select('name').get();
+		knownDogNames = snapshot.docs.map((d) => (d.data().name as string | undefined) ?? '').filter(Boolean);
+	} catch (e) {
+		console.error('[Slack webhook] Roster fetch failed, parsing without it:', e);
+	}
+
+	const parsed = parsePlaygroupMessage(rawText, knownDogNames);
 
 	// Only queue if we parsed at least one dog name
 	if (parsed.dogNames.length === 0) return json({ ok: true });

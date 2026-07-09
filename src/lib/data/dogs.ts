@@ -122,6 +122,8 @@ interface StoredDog {
 	asmId?: number | null;
 	asmShelterCode?: string;
 	isIncoming?: boolean;
+	notAdoptable?: boolean;
+	notAdoptableReason?: string | null;
 	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
 	isolationReason?: 'sick' | 'bite_quarantine' | null;
 	isolationUntilDate?: string | null;
@@ -408,6 +410,8 @@ function serializeDog(dog: Dog): StoredDog {
 		evaluationAutoCleared: dog.evaluationAutoCleared ?? false,
 		asmId: typeof dog.asmId === 'number' ? dog.asmId : null,
 		asmShelterCode: dog.asmShelterCode ?? '',
+		notAdoptable: dog.notAdoptable ?? false,
+		notAdoptableReason: dog.notAdoptable ? (dog.notAdoptableReason ?? null) : null,
 		isolationStatus: dog.isolationStatus,
 		isolationReason: dog.isolationReason ?? null,
 		isolationUntilDate: toDateString(dog.isolationUntilDate),
@@ -574,6 +578,8 @@ function deserializeDog(stored: StoredDog): Dog {
 		asmId: typeof stored.asmId === 'number' ? stored.asmId : null,
 		asmShelterCode: stored.asmShelterCode ?? '',
 		isIncoming: stored.isIncoming ?? false,
+		notAdoptable: stored.notAdoptable ?? false,
+		notAdoptableReason: stored.notAdoptable ? (stored.notAdoptableReason ?? null) : null,
 		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
 		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
 		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,

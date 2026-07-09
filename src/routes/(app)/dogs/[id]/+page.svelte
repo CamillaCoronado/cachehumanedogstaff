@@ -52,6 +52,7 @@
 		return { destroy() { node.remove(); } };
 	}
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+	import { PLAY_STYLE_LABELS } from '$lib/utils/playgroupRecommendations';
 	import { syncVersion } from '$lib/stores/sync';
 
 	let dog: Dog | null = null;
@@ -614,6 +615,12 @@
 					<div class="kennel-clip" aria-hidden="true"></div>
 					<div class="kennel-sheet-inner">
 						<p class="kennel-name kennel-name-top">{dog.name}</p>
+						{#if dog.warningNotes}
+							<div class="dog-warning-banner" role="alert">
+								<span class="dog-warning-icon" aria-hidden="true">⚠</span>
+								<p>{dog.warningNotes}</p>
+							</div>
+						{/if}
 						<div class="kennel-photo">
 							<div class="kennel-photo-frame">
 								<div class={`photo-corner-stripe ${whiteboardStatusTagClass}`} aria-hidden="true"></div>
@@ -712,10 +719,14 @@
 										<p><span>Estimated Birthday:</span> <strong class="detail-value">{formatDate(dog.dateOfBirth)}</strong></p>
 										<p><span>Age:</span> <strong class="detail-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
 										<p><span>Color:</span> <strong class="detail-value">{dog.color || '—'}</strong></p>
+										<p><span>Markings:</span> <strong class="detail-value">{dog.markings || '—'}</strong></p>
 										<p><span>Sex:</span> <strong class="detail-value">{sexLabel(dog.sex)}</strong></p>
 										<p><span>Weight:</span> <strong class="detail-value">{dog.weightLbs ? `${dog.weightLbs} lbs` : 'Unknown'}</strong></p>
 										<p><span>Energy:</span> <strong class="detail-value">{energyLabel(dog.energyLevel)}</strong></p>
-										<p><span>Microchipped:</span> <strong class="detail-value">{dog.isMicrochipped ? 'Yes' : 'No'}</strong></p>
+										<p>
+											<span>Microchipped:</span>
+											<strong class="detail-value">{dog.isMicrochipped ? `Yes (${formatDate(dog.microchipDate)})` : 'No'}</strong>
+										</p>
 									</div>
 								</details>
 
@@ -729,6 +740,15 @@
 										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
 										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
 										<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : 'Adopted'}</strong></p>
+										{#if dog.notAdoptable}
+											<p><span>Adoptability:</span> <strong class="detail-note">Not adoptable{dog.notAdoptableReason ? ` — ${dog.notAdoptableReason}` : ''}</strong></p>
+										{/if}
+										{#if dog.shelterSince}
+											<p><span>Current Stay Since:</span> <strong class="detail-value">{formatDate(dog.shelterSince)}</strong></p>
+										{/if}
+										{#if dog.leftShelterDate}
+											<p><span>Left Shelter:</span> <strong class="detail-value">{formatDate(dog.leftShelterDate)}</strong></p>
+										{/if}
 									</div>
 								</details>
 
@@ -743,6 +763,15 @@
 												<span>Transition to Hills:</span>
 												<strong class="detail-value">{dog.transitionToHills === true ? 'Yes' : dog.transitionToHills === false ? 'No' : 'Not set'}</strong>
 											</p>
+										{/if}
+										<p>
+											<span>Second Meal:</span>
+											<strong class="detail-value">{dog.hasSecondMeal ? `Yes (${dog.secondMealAmount || 'amount TBD'})` : 'No'}</strong>
+										</p>
+										<p><span>Satin Balls:</span> <strong class="detail-value">{dog.satinBalls ? 'Yes' : 'No'}</strong></p>
+										<p><span>Allergies:</span> <strong class="detail-value">{dog.allergyTypes?.length ? dog.allergyTypes.join(', ') : 'None recorded'}</strong></p>
+										{#if dog.dietaryNotes}
+											<p><span>Dietary Notes:</span> <strong class="detail-note">{dog.dietaryNotes}</strong></p>
 										{/if}
 									</div>
 								</details>
@@ -760,10 +789,30 @@
 										{#if dog.entryReason}
 											<p><span>Reason for Entry:</span> <strong class="detail-note">{dog.entryReason}</strong></p>
 										{/if}
+										{#if dog.holdNotes}
+											<p><span>Hold Notes:</span> <strong class="detail-note">{dog.holdNotes}</strong></p>
+										{/if}
+										{#if dog.healthProblems}
+											<p><span>Health Problems:</span> <strong class="detail-note">{dog.healthProblems}</strong></p>
+										{/if}
 										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
 										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
 										<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
+										<p><span>Good with Elderly:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithElderly)}</strong></p>
+										<p><span>Good on Lead:</span> <strong class="detail-value">{compatibilityLabel(dog.goodOnLead)}</strong></p>
+										<p><span>Good Traveller:</span> <strong class="detail-value">{compatibilityLabel(dog.goodTraveller)}</strong></p>
+										<p><span>Crate Trained:</span> <strong class="detail-value">{compatibilityLabel(dog.crateTrained)}</strong></p>
 										<p><span>Housetrained:</span> <strong class="detail-value">{pottyLabel(dog.pottyTrained)}</strong></p>
+										<p>
+											<span>Play Style:</span>
+											<strong class="detail-value">{dog.playStyles?.length ? dog.playStyles.map((s) => PLAY_STYLE_LABELS[s]).join(', ') : 'Not yet assessed'}</strong>
+										</p>
+										{#if dog.playgroupReadyDate}
+											<p><span>Playgroup Ready From:</span> <strong class="detail-value">{formatDate(dog.playgroupReadyDate)}</strong></p>
+										{/if}
+										{#if dog.evaluationNotes}
+											<p><span>Evaluation Notes:</span> <strong class="detail-note">{dog.evaluationNotes}</strong></p>
+										{/if}
 										<p><span>Best Home Fit:</span> <strong class="detail-value">{dog.idealHome || 'Not yet documented'}</strong></p>
 									</div>
 								</details>
@@ -780,7 +829,12 @@
 				<dl class="whiteboard-facts typewriter">
 					<div>
 						<dt>Isolation</dt>
-						<dd>{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : 'ISO'}</dd>
+						<dd>
+							{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : 'ISO'}
+							{#if dog.isolationStatus !== 'none' && dog.isolationUntilDate}
+								(until {formatDate(dog.isolationUntilDate)})
+							{/if}
+						</dd>
 					</div>
 					<div>
 						<dt>Treatments</dt>
@@ -817,13 +871,18 @@
 					</div>
 					<div>
 						<dt>Day Trips</dt>
-						<dd>{thisMonthTrips} trip(s), {thisMonthHours.toFixed(1)} hr</dd>
+						<dd>
+							{thisMonthTrips} trip(s), {thisMonthHours.toFixed(1)} hr
+							{#if daysSinceLastTrip !== null}
+								· last trip {daysSinceLastTrip}d ago
+							{/if}
+						</dd>
 					</div>
 					<div>
 						<dt>Current Trip</dt>
 						<dd>
 							{#if dog.isOutOnDayTrip}
-								Out on day trip
+								Out on day trip{#if dog.currentDayTripStartedAt} (since {formatDateTime(dog.currentDayTripStartedAt)}){/if}
 							{:else}
 								In shelter
 							{/if}
@@ -1662,6 +1721,34 @@
 		background: #edf2f8;
 		border-color: #c3ccdb;
 		color: #3f506b;
+	}
+
+	.dog-warning-banner {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		margin: 0.3rem 0 0.6rem;
+		padding: 0.6rem 0.75rem;
+		background: #fdeaea;
+		border: 1.5px solid #d98a8a;
+		border-radius: 0.35rem;
+		text-align: left;
+	}
+
+	.dog-warning-icon {
+		flex-shrink: 0;
+		font-size: 1.1rem;
+		line-height: 1.3;
+		color: #b32525;
+	}
+
+	.dog-warning-banner p {
+		margin: 0;
+		font-family: var(--font-ui);
+		font-weight: 700;
+		font-size: 0.88rem;
+		line-height: 1.3;
+		color: #7a1f1f;
 	}
 
 	.whiteboard-note {

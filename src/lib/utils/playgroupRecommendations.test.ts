@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { Dog } from '$lib/types';
+import type { Dog, PlaygroupSession } from '$lib/types';
 import {
-	buildRecommendations,
+	bucketByPlayStyle,
 	buildTestSuggestions,
+	checkSelectionWarnings,
+	findKnownGoodPairs,
 	getReadiness,
-	intactConflict,
 	isPuppy,
 	isPuppyVaccinated,
-	sizeCategory,
-	sizeCompatible
+	sizeCategory
 } from './playgroupRecommendations';
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
@@ -53,17 +53,6 @@ describe('isPuppy / isPuppyVaccinated', () => {
 	});
 });
 
-describe('intactConflict', () => {
-	it('flags intact male + intact female together', () => {
-		const intactMale = makeDog({ isFixed: false, sex: 'male' });
-		const intactFemale = makeDog({ isFixed: false, sex: 'female' });
-		const fixedFemale = makeDog({ isFixed: true, sex: 'female' });
-		expect(intactConflict([intactMale, intactFemale])).toBe(true);
-		expect(intactConflict([intactMale, fixedFemale])).toBe(false);
-		expect(intactConflict([intactMale])).toBe(false);
-	});
-});
-
 describe('getReadiness', () => {
 	it('holds isolated, not-dog-social, and post-surgery dogs', () => {
 		expect(getReadiness(makeDog({ isolationStatus: 'iso' }))).toBe('hold');
@@ -86,7 +75,7 @@ describe('getReadiness', () => {
 	});
 });
 
-describe('sizeCategory / sizeCompatible', () => {
+describe('sizeCategory', () => {
 	it('buckets by weight', () => {
 		expect(sizeCategory(makeDog({ weightLbs: 10 }))).toBe('tiny');
 		expect(sizeCategory(makeDog({ weightLbs: 20 }))).toBe('small');
@@ -94,184 +83,150 @@ describe('sizeCategory / sizeCompatible', () => {
 		expect(sizeCategory(makeDog({ weightLbs: 56 }))).toBe('large');
 		expect(sizeCategory(makeDog({ weightLbs: null }))).toBe('unknown');
 	});
-
-	it('rejects tiny with non-tiny and >2x weight spread', () => {
-		expect(sizeCompatible([makeDog({ weightLbs: 10 }), makeDog({ weightLbs: 40 })])).toBe(false);
-		expect(sizeCompatible([makeDog({ weightLbs: 20 }), makeDog({ weightLbs: 45 })])).toBe(false);
-		expect(sizeCompatible([makeDog({ weightLbs: 30 }), makeDog({ weightLbs: 55 })])).toBe(true);
-		expect(sizeCompatible([makeDog({ weightLbs: null }), makeDog({ weightLbs: null })])).toBe(true);
-	});
 });
 
-describe('buildRecommendations', () => {
-	it('groups 2-4 size-compatible dogs and lists leftovers as swap-ins', () => {
-		const dogs = [
-			makeDog({ name: 'A', weightLbs: 30 }),
-			makeDog({ name: 'B', weightLbs: 35 }),
-			makeDog({ name: 'C', weightLbs: 40 }),
-			makeDog({ name: 'D', weightLbs: 45 }),
-			// 100 lbs can't pair with anyone ≤50: ends up a swap-in candidate
-			makeDog({ name: 'Solo', weightLbs: 100 })
-		];
-		const { groups, swapIns } = buildRecommendations(dogs);
-		expect(groups).toHaveLength(1);
-		expect(groups[0].dogs.map((d) => d.name)).toEqual(['A', 'B', 'C', 'D']);
-		expect(groups[0].recommendationType).toBe('ready_group');
-		expect(swapIns.map((s) => s.dog.name)).toEqual(['Solo']);
-		expect(swapIns[0].compatibleGroups).toHaveLength(0);
+describe('bucketByPlayStyle', () => {
+	it('sorts single-tagged dogs into their own column', () => {
+		const rowdy = makeDog({ name: 'Rowdy', playStyles: ['rough_and_rowdy'] });
+		const gentle = makeDog({ name: 'Gentle', playStyles: ['gentle_and_dainty'] });
+		const buckets = bucketByPlayStyle([rowdy, gentle]);
+		expect(buckets.roughOnly.map((d) => d.name)).toEqual(['Rowdy']);
+		expect(buckets.gentleOnly.map((d) => d.name)).toEqual(['Gentle']);
+		expect(buckets.both).toHaveLength(0);
 	});
 
-	it('splits an intact male/female conflict out instead of discarding the group', () => {
-		const dogs = [
-			makeDog({ name: 'M', weightLbs: 30, isFixed: false, sex: 'male' }),
-			makeDog({ name: 'F', weightLbs: 32, isFixed: false, sex: 'female' }),
-			makeDog({ name: 'X', weightLbs: 34 }),
-			makeDog({ name: 'Y', weightLbs: 36 })
-		];
-		const { groups, swapIns } = buildRecommendations(dogs);
-		expect(groups).toHaveLength(1);
-		expect(groups[0].dogs.map((d) => d.name)).toEqual(['M', 'X', 'Y']);
-		expect(groups[0].reason).toContain('intact M/F kept separate');
-		// F can't join the group that holds the intact male…
-		expect(swapIns.map((s) => s.dog.name)).toEqual(['F']);
-		expect(swapIns[0].compatibleGroups).toHaveLength(0);
+	it('a dog tagged both styles lands in "both", not in either single column', () => {
+		const dual = makeDog({ name: 'Dual', playStyles: ['rough_and_rowdy', 'gentle_and_dainty'] });
+		const buckets = bucketByPlayStyle([dual]);
+		expect(buckets.both.map((d) => d.name)).toEqual(['Dual']);
+		expect(buckets.roughOnly).toHaveLength(0);
+		expect(buckets.gentleOnly).toHaveLength(0);
 	});
 
-	it('still produces no group when an intact pair is all there is', () => {
-		const { groups } = buildRecommendations([
-			makeDog({ name: 'M', weightLbs: 30, isFixed: false, sex: 'male' }),
-			makeDog({ name: 'F', weightLbs: 32, isFixed: false, sex: 'female' })
-		]);
-		expect(groups).toHaveLength(0);
-	});
-
-	it('keeps energy within one level and regroups the skipped dogs', () => {
-		const dogs = [
-			makeDog({ name: 'CalmA', weightLbs: 40, energyLevel: 'low' }),
-			makeDog({ name: 'CalmB', weightLbs: 41, energyLevel: 'low' }),
-			makeDog({ name: 'WildA', weightLbs: 42, energyLevel: 'very_high' }),
-			makeDog({ name: 'WildB', weightLbs: 43, energyLevel: 'very_high' })
-		];
-		const { groups } = buildRecommendations(dogs);
-		expect(groups).toHaveLength(2);
-		expect(groups[0].dogs.map((d) => d.name)).toEqual(['CalmA', 'CalmB']);
-		expect(groups[1].dogs.map((d) => d.name)).toEqual(['WildA', 'WildB']);
-	});
-
-	it('explains each group with its size range and energy band', () => {
-		const { groups } = buildRecommendations([
-			makeDog({ weightLbs: 30, energyLevel: 'medium' }),
-			makeDog({ weightLbs: 45, energyLevel: 'high' })
-		]);
-		expect(groups[0].reason).toBe('30–45 lbs · medium–high energy');
-	});
-
-	it('ignores dogs with unknown weight', () => {
-		const { groups, swapIns } = buildRecommendations([
-			makeDog({ weightLbs: null }),
-			makeDog({ weightLbs: null })
-		]);
-		expect(groups).toHaveLength(0);
-		expect(swapIns).toHaveLength(0);
-	});
-
-	it('buckets groups by staff-tagged play style, not energy', () => {
-		const { groups } = buildRecommendations([
-			makeDog({ weightLbs: 40, energyLevel: 'very_high', playStyles: ['gentle_and_dainty'] }),
-			makeDog({ weightLbs: 41, energyLevel: 'very_high', playStyles: ['gentle_and_dainty'] }),
-			makeDog({ weightLbs: 42, energyLevel: 'low', playStyles: ['rough_and_rowdy'] }),
-			makeDog({ weightLbs: 43, energyLevel: 'low', playStyles: ['rough_and_rowdy'] })
-		]);
-		expect(groups.map((g) => g.title).sort()).toEqual(['Gentle & Dainty 1', 'Rough & Rowdy 1']);
-	});
-
-	it('a dog with both styles can fill either column but only one group', () => {
-		const { groups } = buildRecommendations([
-			makeDog({ name: 'Both', weightLbs: 40, playStyles: ['rough_and_rowdy', 'gentle_and_dainty'] }),
-			makeDog({ name: 'Rowdy', weightLbs: 41, playStyles: ['rough_and_rowdy'] })
-		]);
-		expect(groups).toHaveLength(1);
-		expect(groups[0].playStyle).toBe('rough_and_rowdy');
-	});
-
-	it('untagged adults are returned as needing assessment, not grouped', () => {
+	it('untagged adults land in unassessed', () => {
 		const untagged = makeDog({ name: 'Mystery', playStyles: [] });
-		const { groups, needsAssessment } = buildRecommendations([untagged]);
-		expect(groups).toHaveLength(0);
-		expect(needsAssessment.map((d) => d.name)).toEqual(['Mystery']);
+		const buckets = bucketByPlayStyle([untagged]);
+		expect(buckets.unassessed.map((d) => d.name)).toEqual(['Mystery']);
 	});
 
-	it('puppies default to rough & rowdy and group together, but not with inexperienced adults', () => {
-		const pupA = makeDog({ name: 'PupA', weightLbs: 20, playStyles: [], dateOfBirth: daysAgo(16 * 7) });
-		const pupB = makeDog({ name: 'PupB', weightLbs: 22, playStyles: [], dateOfBirth: daysAgo(18 * 7) });
-		const adult = makeDog({ name: 'Adult', weightLbs: 24, energyLevel: 'high', playStyles: ['rough_and_rowdy'] });
-		const { groups } = buildRecommendations([pupA, pupB, adult], [pupA, pupB, adult], []);
-		expect(groups).toHaveLength(1);
-		expect(groups[0].dogs.map((d) => d.name)).toEqual(['PupA', 'PupB']);
-		expect(groups[0].reason).toContain('puppy group');
+	it('untagged puppies default to rough & rowdy, not unassessed', () => {
+		const pup = makeDog({ name: 'Pup', playStyles: [], dateOfBirth: daysAgo(16 * 7) });
+		const buckets = bucketByPlayStyle([pup]);
+		expect(buckets.roughOnly.map((d) => d.name)).toEqual(['Pup']);
+		expect(buckets.unassessed).toHaveLength(0);
 	});
 
-	it('puppy-experienced, not-too-rough adults may join puppy groups', () => {
-		const pup = makeDog({ name: 'Pup', weightLbs: 20, playStyles: [], dateOfBirth: daysAgo(16 * 7) });
-		const gentleVet = makeDog({ name: 'Vet', weightLbs: 24, energyLevel: 'high', playStyles: ['rough_and_rowdy'] });
-		const tooRough = makeDog({ name: 'Wild', weightLbs: 23, energyLevel: 'very_high', playStyles: ['rough_and_rowdy'] });
-		// Vet and Wild both shared a successful session with a then-puppy.
-		const oldPup = makeDog({ name: 'OldPup', playStyles: [], dateOfBirth: daysAgo(30 * 7) });
-		const pastSession = {
-			id: 's1',
-			date: daysAgo(10 * 7), // OldPup was ~20 weeks old then
-			groupName: 'past',
-			dogIds: [gentleVet.id, tooRough.id, oldPup.id],
-			dogNames: [],
-			recommendationType: 'manual',
-			outcome: 'successful',
-			notes: null
-		} as unknown as import('$lib/types').PlaygroupSession;
-		const all = [pup, gentleVet, tooRough, oldPup];
-		const { groups } = buildRecommendations([pup, gentleVet, tooRough], all, [pastSession]);
-		expect(groups).toHaveLength(1);
-		// Vet (high energy, experienced) joins; Wild (very high) stays out as too rough.
-		expect(groups[0].dogs.map((d) => d.name).sort()).toEqual(['Pup', 'Vet']);
+	it('solo-tagged dogs are excluded (they belong in the Solo Playtime column)', () => {
+		const solo = makeDog({ name: 'Solo', playStyles: ['solo'] });
+		const buckets = bucketByPlayStyle([solo]);
+		expect(buckets.roughOnly).toHaveLength(0);
+		expect(buckets.gentleOnly).toHaveLength(0);
+		expect(buckets.both).toHaveLength(0);
+		expect(buckets.unassessed).toHaveLength(0);
 	});
 });
 
 describe('buildTestSuggestions', () => {
-	it('suggests the energy-closest compatible ready group', () => {
-		const calmGroup = {
-			id: 'g1',
-			title: 'Gentle & Dainty 1',
-			playStyle: 'gentle_and_dainty' as const,
-			dogs: [makeDog({ weightLbs: 40, energyLevel: 'low' }), makeDog({ weightLbs: 42, energyLevel: 'low' })],
-			dogIds: [],
-			reason: '',
-			recommendationType: 'ready_group' as const,
-			priority: 'high' as const
-		};
-		const wildGroup = {
-			...calmGroup,
-			id: 'g2',
-			title: 'Rough & Rowdy 1',
-			dogs: [makeDog({ weightLbs: 40, energyLevel: 'very_high' }), makeDog({ weightLbs: 42, energyLevel: 'very_high' })]
-		};
-		const cautionDog = makeDog({ goodWithDogs: 'unknown', weightLbs: 41, energyLevel: 'very_high' });
-		const [suggestion] = buildTestSuggestions([cautionDog], [calmGroup, wildGroup]);
-		expect(suggestion.suggestedGroup?.id).toBe('g2');
+	it('returns a caution reason per dog, without any group matching', () => {
+		const cautionDog = makeDog({ name: 'Caution', goodWithDogs: 'unknown' });
+		const [suggestion] = buildTestSuggestions([cautionDog]);
+		expect(suggestion.dog.name).toBe('Caution');
 		expect(suggestion.reason).toContain('controlled intro');
 	});
+});
 
-	it('returns null group when nothing is size-compatible', () => {
-		const group = {
-			id: 'g1',
-			title: 'Gentle & Dainty 1',
-			playStyle: 'gentle_and_dainty' as const,
-			dogs: [makeDog({ weightLbs: 100 }), makeDog({ weightLbs: 90 })],
+describe('checkSelectionWarnings', () => {
+	it('flags a dog in isolation', () => {
+		const dog = makeDog({ name: 'Sick', isolationStatus: 'iso' });
+		const warnings = checkSelectionWarnings([dog, makeDog()]);
+		expect(warnings.some((w) => w.message.includes('Sick is in isolation'))).toBe(true);
+	});
+
+	it('flags a dog on post-surgery rest', () => {
+		const dog = makeDog({ name: 'Recovering', surgeryDate: daysAgo(2), surgeryRestDays: 10 });
+		const warnings = checkSelectionWarnings([dog, makeDog()]);
+		expect(warnings.some((w) => w.message.includes('Recovering is on medical'))).toBe(true);
+	});
+
+	it('flags an intact male + intact female together', () => {
+		const male = makeDog({ name: 'Buck', isFixed: false, sex: 'male' });
+		const female = makeDog({ name: 'Doe', isFixed: false, sex: 'female' });
+		const warnings = checkSelectionWarnings([male, female]);
+		expect(warnings.some((w) => w.id === 'intact-conflict')).toBe(true);
+	});
+
+	it('does not flag two intact males together', () => {
+		const a = makeDog({ isFixed: false, sex: 'male' });
+		const b = makeDog({ isFixed: false, sex: 'male' });
+		expect(checkSelectionWarnings([a, b]).some((w) => w.id === 'intact-conflict')).toBe(false);
+	});
+
+	it('flags a wide size spread', () => {
+		const tiny = makeDog({ weightLbs: 8 });
+		const large = makeDog({ weightLbs: 70 });
+		const warnings = checkSelectionWarnings([tiny, large]);
+		expect(warnings.some((w) => w.id === 'size-mismatch')).toBe(true);
+	});
+
+	it('does not flag a reasonable size spread', () => {
+		const a = makeDog({ weightLbs: 30 });
+		const b = makeDog({ weightLbs: 45 });
+		expect(checkSelectionWarnings([a, b]).some((w) => w.id === 'size-mismatch')).toBe(false);
+	});
+
+	it('returns no warnings for a clean selection', () => {
+		expect(checkSelectionWarnings([makeDog(), makeDog()])).toEqual([]);
+	});
+});
+
+describe('findKnownGoodPairs', () => {
+	function makeSession(overrides: Partial<PlaygroupSession> = {}): PlaygroupSession {
+		return {
+			id: 'session-1',
+			date: daysAgo(5),
+			groupName: 'Group',
 			dogIds: [],
-			reason: '',
-			recommendationType: 'ready_group' as const,
-			priority: 'high' as const
-		};
-		const tinyDog = makeDog({ goodWithDogs: 'unknown', weightLbs: 10 });
-		const [suggestion] = buildTestSuggestions([tinyDog], [group]);
-		expect(suggestion.suggestedGroup).toBeNull();
+			dogNames: [],
+			recommendationType: 'manual',
+			outcome: 'successful',
+			notes: null,
+			durationMinutes: null,
+			loggedBy: 'u1',
+			loggedByName: 'Staff',
+			createdAt: daysAgo(5),
+			...overrides
+		} as PlaygroupSession;
+	}
+
+	it('surfaces a pair that played successfully together before', () => {
+		const sessions = [makeSession({ dogIds: ['a', 'b', 'c'] })];
+		const pairs = findKnownGoodPairs(['a', 'b'], sessions);
+		expect(pairs).toHaveLength(1);
+		expect(pairs[0].dogIds.sort()).toEqual(['a', 'b']);
+		expect(pairs[0].count).toBe(1);
+	});
+
+	it('ignores cancelled and incident sessions', () => {
+		const sessions = [
+			makeSession({ dogIds: ['a', 'b'], outcome: 'cancelled' }),
+			makeSession({ dogIds: ['a', 'b'], outcome: 'incident' })
+		];
+		expect(findKnownGoodPairs(['a', 'b'], sessions)).toEqual([]);
+	});
+
+	it('only counts a pair when both dogs are in the current selection', () => {
+		const sessions = [makeSession({ dogIds: ['a', 'b'] })];
+		expect(findKnownGoodPairs(['a', 'c'], sessions)).toEqual([]);
+	});
+
+	it('counts repeat pairings and tracks the most recent date', () => {
+		const recent = daysAgo(2);
+		const sessions = [
+			makeSession({ dogIds: ['a', 'b'], date: daysAgo(20) }),
+			makeSession({ dogIds: ['a', 'b'], date: recent })
+		];
+		const [pair] = findKnownGoodPairs(['a', 'b'], sessions);
+		expect(pair.count).toBe(2);
+		expect(pair.lastDate.getTime()).toBe(recent.getTime());
 	});
 });

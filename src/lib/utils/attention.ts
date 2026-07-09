@@ -21,9 +21,11 @@ export function isDayTripEligible(dog: Dog, today = new Date()): boolean {
 // history at all (sessions from any stay, including before foster, count).
 
 export function getCautionDogs(dogs: Dog[], sessions: PlaygroupSession[]): Dog[] {
-	// Build a map of dogId → most recent session date (ms)
+	// Build a map of dogId → most recent session date (ms). A cancelled session
+	// means no play actually happened, so it shouldn't count as an assessment.
 	const lastSessionMs: Record<string, number> = {};
 	for (const s of sessions) {
+		if (s.outcome === 'cancelled') continue;
 		const t = toDate(s.date)?.getTime();
 		if (!t) continue;
 		for (const id of s.dogIds) {
@@ -113,6 +115,9 @@ export function getDayTripGapDays(dog: Dog, today: Date): number | null {
 export function buildLastPlaygroupMap(sessions: PlaygroupSession[]): Record<string, Date> {
 	const map: Record<string, Date> = {};
 	for (const s of sessions) {
+		// A cancelled session means the dog didn't actually get playgroup time —
+		// it shouldn't reset the enrichment clock.
+		if (s.outcome === 'cancelled') continue;
 		const d = toDate(s.date);
 		if (!d) continue;
 		for (const id of s.dogIds) {

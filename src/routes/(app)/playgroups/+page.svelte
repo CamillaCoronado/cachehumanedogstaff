@@ -16,20 +16,20 @@
 	import type { PendingPlaygroup } from '$lib/data/playgroups';
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
-	import { formatDateTime, isSameCalendarDay, toDate } from '$lib/utils/dates';
+	import { formatDate, formatDateTime, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import Modal from '$lib/components/ui/Modal.svelte';
+	import PlayStyleMoveRow from '$lib/components/playgroups/PlayStyleMoveRow.svelte';
 	import { getCautionDogs } from '$lib/utils/attention';
 	import {
-		buildRecommendations,
+		bucketByPlayStyle,
 		buildTestSuggestions,
+		checkSelectionWarnings,
+		findKnownGoodPairs,
 		getReadiness,
 		guidanceForDog,
 		isPuppy,
-		readinessLabel,
-		sizeCategory,
-		sizeLabelShort
+		readinessLabel
 	} from '$lib/utils/playgroupRecommendations';
-	import type { PlaygroupRecommendation } from '$lib/utils/playgroupRecommendations';
 	import { matchDogByName } from '$lib/utils/dogs';
 	import { canAccessPlaygroups, canEditPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, DogPlayStyle, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
@@ -40,7 +40,6 @@
 	let sessions: PlaygroupSession[] = [];
 	let loading = true;
 	let savingManual = false;
-	let loggingRecommendationId = '';
 	let quickLoggingId = '';
 	let search = '';
 
@@ -49,7 +48,15 @@
 	let manualOutcome: PlaygroupOutcome = 'successful';
 	let manualDuration = '';
 	let manualNotes = '';
-	let manualDogIds: string[] = [];
+	// The real workflow is a rotation, not a one-shot pick: dogs go in, some come
+	// back out, others go in to take their place. `yardDogIds` is who's in the
+	// yard right now (drives live warnings/hints); `everInYardIds` is everyone
+	// who was in at any point this session (what actually gets saved).
+	let yardDogIds: string[] = [];
+	let everInYardIds: string[] = [];
+	let takeOutNotes: Record<string, string> = {};
+	let takeOutNoteDrafts: Record<string, string> = {};
+	let yardSearch = '';
 	let manualExtraNames = '';
 	let showManualModal = false;
 	let playgroupsLoaded = false;
@@ -83,6 +90,7 @@
 	let editOutcome: PlaygroupOutcome = 'successful';
 	let editNotes = '';
 	let editDogIds: string[] = [];
+	let editExtraNames = '';
 	let savingEdit = false;
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
@@ -116,14 +124,13 @@
 	);
 	$: cautionDogs = getCautionDogs(activeDogs, sessions);
 	$: holdDogs = activeDogs.filter((dog) => getReadiness(dog) === 'hold');
-	$: unknownWeightDogs = readyDogs.filter((d) => d.weightLbs === null || d.weightLbs === undefined);
-	$: ({ groups: readyGroups, swapIns, needsAssessment } = buildRecommendations(readyDogs, activeDogs, sessions));
-	$: rowdyGroups = readyGroups.filter((g) => g.playStyle === 'rough_and_rowdy');
-	$: gentleGroups = readyGroups.filter((g) => g.playStyle === 'gentle_and_dainty');
-	$: testSuggestions = buildTestSuggestions(cautionDogs, readyGroups);
+	$: playStyleBuckets = bucketByPlayStyle(readyDogs);
+	$: testSuggestions = buildTestSuggestions(cautionDogs);
 	$: history = [...sessions].sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
 	$: playedTodayIds = new Set(
-		sessions.filter((s) => isSameCalendarDay(s.date, new Date())).flatMap((s) => s.dogIds)
+		sessions
+			.filter((s) => s.outcome !== 'cancelled' && isSameCalendarDay(s.date, new Date()))
+			.flatMap((s) => s.dogIds)
 	);
 
 
@@ -143,12 +150,33 @@
 		return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 	}
 
-	function toggleManualDog(dogId: string, checked: boolean) {
-		if (checked) {
-			if (!manualDogIds.includes(dogId)) manualDogIds = [...manualDogIds, dogId];
-			return;
+	function addToYard(dogId: string) {
+		if (!yardDogIds.includes(dogId)) yardDogIds = [...yardDogIds, dogId];
+		if (!everInYardIds.includes(dogId)) everInYardIds = [...everInYardIds, dogId];
+		// Re-adding a dog that was taken out earlier this session clears any
+		// earlier out-note so it doesn't misleadingly attach if taken out again.
+		if (takeOutNotes[dogId]) {
+			const { [dogId]: _removed, ...rest } = takeOutNotes;
+			takeOutNotes = rest;
 		}
-		manualDogIds = manualDogIds.filter((id) => id !== dogId);
+	}
+
+	function takeOutOfYard(dogId: string) {
+		yardDogIds = yardDogIds.filter((id) => id !== dogId);
+		const note = (takeOutNoteDrafts[dogId] ?? '').trim();
+		if (note) takeOutNotes = { ...takeOutNotes, [dogId]: note };
+		if (takeOutNoteDrafts[dogId] !== undefined) {
+			const { [dogId]: _removed, ...rest } = takeOutNoteDrafts;
+			takeOutNoteDrafts = rest;
+		}
+	}
+
+	function resetYard() {
+		yardDogIds = [];
+		everInYardIds = [];
+		takeOutNotes = {};
+		takeOutNoteDrafts = {};
+		yardSearch = '';
 	}
 
 	// Tag-on-log: selected dogs with no play style yet get a quick tag row in the
@@ -160,8 +188,22 @@
 		{ value: 'solo', label: 'Solo Playtime' }
 	];
 	$: untaggedSelectedDogs = activeDogs.filter(
-		(dog) => manualDogIds.includes(dog.id) && (dog.playStyles ?? []).length === 0
+		(dog) => everInYardIds.includes(dog.id) && (dog.playStyles ?? []).length === 0
 	);
+
+	// Selection-time assist: hard-constraint warnings and known-good-together
+	// pairs, computed off who's in the yard RIGHT NOW — not the whole session's
+	// history — since that's what a swap-in actually needs to be checked against.
+	$: yardDogs = activeDogs.filter((dog) => yardDogIds.includes(dog.id));
+	$: manualWarnings = checkSelectionWarnings(yardDogs);
+	$: manualKnownPairs = findKnownGoodPairs(yardDogIds, sessions);
+	$: availableToAdd = activeDogs
+		.filter((dog) => !yardDogIds.includes(dog.id))
+		.filter((dog) => dog.name.toLowerCase().includes(yardSearch.toLowerCase()));
+
+	function dogNameById(id: string) {
+		return dogs.find((d) => d.id === id)?.name ?? id;
+	}
 
 	function toggleStyleTag(dogId: string, style: DogPlayStyle) {
 		const current = manualStyleTags[dogId] ?? [];
@@ -169,6 +211,16 @@
 			...manualStyleTags,
 			[dogId]: current.includes(style) ? current.filter((s) => s !== style) : [...current, style]
 		};
+	}
+
+	// Board-level move: sets the dog's play style bucket directly. "Both" tags
+	// the dog with both rough & gentle in one step (it then shows in the Both
+	// column); "Needs Assessment" clears its tags back to untagged.
+	async function movePlayStyle(dog: Dog, target: DogPlayStyle | 'both' | 'unassessed') {
+		const nextStyles: DogPlayStyle[] =
+			target === 'unassessed' ? [] : target === 'both' ? ['rough_and_rowdy', 'gentle_and_dainty'] : [target];
+		await updateDog(dog.id, { playStyles: nextStyles });
+		patchDogInStore(dog.id, { playStyles: nextStyles });
 	}
 
 	async function saveStyleTags() {
@@ -326,33 +378,6 @@
 		if (activePending?.id === id) clearImport();
 	}
 
-	async function logRecommendation(recommendation: PlaygroupRecommendation) {
-		if (loggingRecommendationId) return;
-		loggingRecommendationId = recommendation.id;
-		try {
-			await addPlaygroupSession(
-				{
-					date: new Date(),
-					groupName: recommendation.title,
-					dogIds: recommendation.dogIds,
-					dogNames: recommendation.dogs.map((dog) => dog.name),
-					recommendationType: recommendation.recommendationType,
-					outcome: 'successful',
-					notes: recommendation.reason,
-					durationMinutes: null
-				},
-				$authProfile
-			);
-			sessions = await listPlaygroupSessions();
-			toast.success('Playgroup added to history.');
-		} catch (error) {
-			console.error(error);
-			toast.error('Unable to save playgroup history.');
-		} finally {
-			loggingRecommendationId = '';
-		}
-	}
-
 	// Quick per-dog log for when staff saw a dog out in playgroup but nobody had
 	// time to record the full group. Counts toward playgroup/enrichment history
 	// via a single-dog session; the real group can still be logged later.
@@ -384,10 +409,10 @@
 	}
 
 	async function saveManualSession() {
-		const selectedDogs = activeDogs.filter((dog) => manualDogIds.includes(dog.id));
+		const selectedDogs = activeDogs.filter((dog) => everInYardIds.includes(dog.id));
 		const extraNames = manualExtraNames.split(',').map((n) => n.trim()).filter(Boolean);
 		if (selectedDogs.length + extraNames.length < 2) {
-			toast.error('Select at least 2 dogs.');
+			toast.error('At least 2 dogs must have been in the yard.');
 			return;
 		}
 		let durationMinutes: number | null = null;
@@ -400,6 +425,11 @@
 			durationMinutes = Math.round(parsed);
 		}
 
+		const outNoteLines = Object.entries(takeOutNotes).map(
+			([dogId, note]) => `${dogNameById(dogId)}: ${note}`
+		);
+		const combinedNotes = [manualNotes.trim(), ...outNoteLines].filter(Boolean).join('\n');
+
 		savingManual = true;
 		try {
 			await addPlaygroupSession(
@@ -410,7 +440,7 @@
 					dogNames: [...selectedDogs.map((dog) => dog.name), ...extraNames],
 					recommendationType: 'manual',
 					outcome: manualOutcome,
-					notes: manualNotes.trim() || null,
+					notes: combinedNotes || null,
 					durationMinutes
 				},
 				$authProfile
@@ -421,7 +451,7 @@
 			manualOutcome = 'successful';
 			manualDuration = '';
 			manualNotes = '';
-			manualDogIds = [];
+			resetYard();
 			manualExtraNames = '';
 			manualDate = format(new Date(), 'yyyy-MM-dd');
 			showManualModal = false;
@@ -441,6 +471,16 @@
 		editOutcome = session.outcome;
 		editNotes = session.notes ?? '';
 		editDogIds = [...session.dogIds];
+		// dogNames can include off-roster/unmatched names with no dogId behind
+		// them (extra names typed at log time, or an import that never matched
+		// a profile). Keep those as editable free text instead of silently
+		// dropping them the moment someone edits the session.
+		const matchedNames = new Set(
+			session.dogIds
+				.map((id) => dogs.find((d) => d.id === id)?.name)
+				.filter((n): n is string => Boolean(n))
+		);
+		editExtraNames = session.dogNames.filter((n) => !matchedNames.has(n)).join(', ');
 	}
 
 	function cancelEdit() {
@@ -452,13 +492,14 @@
 		savingEdit = true;
 		try {
 			const editSelectedDogs = dogs.filter((d) => editDogIds.includes(d.id));
+			const extraNames = editExtraNames.split(',').map((n) => n.trim()).filter(Boolean);
 			await updatePlaygroupSession(editingSessionId, {
 				date: parseInputDate(editDate),
 				groupName: editGroupName.trim(),
 				outcome: editOutcome,
 				notes: editNotes.trim() || null,
 				dogIds: editSelectedDogs.map((d) => d.id),
-				dogNames: editSelectedDogs.map((d) => d.name)
+				dogNames: [...editSelectedDogs.map((d) => d.name), ...extraNames]
 			});
 			sessions = await listPlaygroupSessions();
 			editingSessionId = null;
@@ -817,86 +858,99 @@
 			{:else if activeTab === 'recommendations'}
 			<section class="panel">
 				<div class="panel-head">
-					<h3>Recommended Playgroups</h3>
-					<p class="panel-note">Auto-suggested from readiness + size compatibility. Up to 4 dogs per group, sorted into play-style columns.</p>
+					<h3>Play Styles</h3>
+					<p class="panel-note">Staff-tagged play style, not auto-grouped. Move a dog between columns any time — a dog tagged with both styles shows once, in the middle Both column.</p>
 				</div>
 				<div class="playstyle-board">
-					{#each [
-						{ name: 'Rough & Rowdy', note: 'High energy play', groups: rowdyGroups },
-						{ name: 'Gentle & Dainty', note: 'Calm, easy play', groups: gentleGroups }
-					] as column}
-						<div class="playstyle-col">
-							<div class="playstyle-col-head">
-								<h4 class="playstyle-col-title">{column.name}</h4>
-								<p class="playstyle-col-note">{column.note}</p>
-							</div>
-							{#if column.groups.length === 0}
-								<p class="empty-line">No groups yet.</p>
-							{:else}
-								{#each column.groups as recommendation}
-									<article class="recommendation-card">
-										<div class="recommendation-head">
-											<h4>{recommendation.title}</h4>
-											<span class="priority-chip">{recommendation.dogs.length} dogs</span>
-										</div>
-										<div class="dog-chip-row">
-											{#each recommendation.dogs as dog}
-												<a href={`/dogs/${dog.id}`} class="dog-chip">
-													{dog.name}
-													<span class="size-badge size-badge-{sizeCategory(dog)}">{sizeLabelShort(dog)}</span>
-												</a>
-											{/each}
-										</div>
-										{#if recommendation.dogs.some((d) => sizeCategory(d) === 'unknown')}
-											<p class="size-unknown-note">⚠ Some dogs have no weight recorded — size compatibility unverified.</p>
-										{/if}
-										<p class="recommendation-reason">{recommendation.reason}</p>
-										{#if canEdit}
-										<button
-											class="recommendation-log-btn typewriter"
-											type="button"
-											on:click={() => logRecommendation(recommendation)}
-											disabled={loggingRecommendationId === recommendation.id}
-										>
-											{loggingRecommendationId === recommendation.id ? 'Saving...' : 'Log to history'}
-										</button>
-										{/if}
-									</article>
-								{/each}
-							{/if}
+					<div class="playstyle-col">
+						<div class="playstyle-col-head">
+							<h4 class="playstyle-col-title">Rough & Rowdy</h4>
+							<p class="playstyle-col-note">High energy play</p>
 						</div>
-					{/each}
+						{#if playStyleBuckets.roughOnly.length === 0}
+							<p class="empty-line">No dogs yet.</p>
+						{:else}
+							<div class="playstyle-move-list">
+								{#each playStyleBuckets.roughOnly as dog (dog.id)}
+									<PlayStyleMoveRow
+										{dog}
+										value="rough_and_rowdy"
+										editable={canEdit}
+										on:move={(e) => movePlayStyle(dog, e.detail)}
+									/>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<div class="playstyle-col playstyle-col-both">
+						<div class="playstyle-col-head">
+							<h4 class="playstyle-col-title">Both</h4>
+							<p class="playstyle-col-note">Plays both ways</p>
+						</div>
+						{#if playStyleBuckets.both.length === 0}
+							<p class="empty-line">No dogs yet.</p>
+						{:else}
+							<div class="playstyle-move-list">
+								{#each playStyleBuckets.both as dog (dog.id)}
+									<PlayStyleMoveRow
+										{dog}
+										value="both"
+										editable={canEdit}
+										on:move={(e) => movePlayStyle(dog, e.detail)}
+									/>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<div class="playstyle-col">
+						<div class="playstyle-col-head">
+							<h4 class="playstyle-col-title">Gentle & Dainty</h4>
+							<p class="playstyle-col-note">Calm, easy play</p>
+						</div>
+						{#if playStyleBuckets.gentleOnly.length === 0}
+							<p class="empty-line">No dogs yet.</p>
+						{:else}
+							<div class="playstyle-move-list">
+								{#each playStyleBuckets.gentleOnly as dog (dog.id)}
+									<PlayStyleMoveRow
+										{dog}
+										value="gentle_and_dainty"
+										editable={canEdit}
+										on:move={(e) => movePlayStyle(dog, e.detail)}
+									/>
+								{/each}
+							</div>
+						{/if}
+					</div>
 
 					<div class="playstyle-col">
 						<div class="playstyle-col-head">
 							<h4 class="playstyle-col-title">Needs Assessment</h4>
 							<p class="playstyle-col-note">Play style or compatibility unknown — watch them play, then tag</p>
 						</div>
-						{#if needsAssessment.length === 0 && testSuggestions.length === 0}
+						{#if playStyleBuckets.unassessed.length === 0 && testSuggestions.length === 0}
 							<p class="empty-line">No dogs to assess.</p>
 						{:else}
-							{#each needsAssessment as dog}
+							{#each playStyleBuckets.unassessed as dog (dog.id)}
 								<div class="test-card">
-									<div class="test-card-top">
-										<a href={`/dogs/${dog.id}`} class="dog-link">{dog.name}</a>
-										<span class="readiness-pill readiness-caution">No play style</span>
-									</div>
-									<p class="test-reason">Play style not tagged yet — log a playgroup and tag how they played.</p>
+									<PlayStyleMoveRow
+										{dog}
+										value="unassessed"
+										editable={canEdit}
+										on:move={(e) => movePlayStyle(dog, e.detail)}
+									/>
+									<p class="test-reason">Play style not tagged yet — log a playgroup and tag how they played, or move them directly.</p>
 								</div>
 							{/each}
-							{#each testSuggestions as suggestion}
+							{#each testSuggestions as suggestion (suggestion.id)}
 								<div class="test-card">
 									<div class="test-card-top">
 										<a href={`/dogs/${suggestion.dog.id}`} class="dog-link">{suggestion.dog.name}</a>
 										<span class="readiness-pill readiness-caution">Unknown</span>
 									</div>
 									<p class="test-reason">{suggestion.reason}</p>
-									{#if suggestion.suggestedGroup}
-										<p class="test-suggested">
-											Try with: <strong>{suggestion.suggestedGroup.title}</strong>
-											({suggestion.suggestedGroup.dogs.map((d) => d.name).join(', ')})
-										</p>
-									{/if}
 								</div>
 							{/each}
 						{/if}
@@ -910,51 +964,21 @@
 						{#if soloPlaytimeDogs.length === 0}
 							<p class="empty-line">No solo dogs.</p>
 						{:else}
-							<div class="dog-chip-row">
-								{#each soloPlaytimeDogs as dog}
-									<a href={`/dogs/${dog.id}`} class="dog-chip">{dog.name}</a>
+							<div class="playstyle-move-list">
+								{#each soloPlaytimeDogs as dog (dog.id)}
+									<PlayStyleMoveRow
+										{dog}
+										value="solo"
+										editable={canEdit}
+										locked={dog.goodWithDogs === 'no'}
+										lockedNote="Not dog-social"
+										on:move={(e) => movePlayStyle(dog, e.detail)}
+									/>
 								{/each}
 							</div>
 						{/if}
 					</div>
 				</div>
-
-				{#if unknownWeightDogs.length > 0}
-					<div class="unknown-weight-section">
-						<p class="unknown-weight-title">Weight unknown</p>
-						<div class="unknown-weight-list">
-							{#each unknownWeightDogs as dog}
-								<a href={`/dogs/${dog.id}`} class="unknown-weight-chip">{dog.name}</a>
-							{/each}
-						</div>
-					</div>
-				{/if}
-
-				{#if swapIns.length > 0}
-					<div class="test-section">
-						<div class="test-section-head">
-							<h4 class="test-section-title">Dogs to Rotate In</h4>
-							<p class="test-section-note">Ready dogs that didn't fit neatly into a group — swap one in to replace or add to an existing group.</p>
-						</div>
-						<div class="test-grid">
-							{#each swapIns as s}
-								<div class="test-card">
-									<div class="test-card-top">
-										<a href={`/dogs/${s.dog.id}`} class="dog-link">{s.dog.name}</a>
-										<span class="size-badge size-badge-{sizeCategory(s.dog)}">{sizeLabelShort(s.dog)}</span>
-									</div>
-									{#if s.compatibleGroups.length > 0}
-										<p class="test-suggested">
-											Fits in: {s.compatibleGroups.map((g) => g.title).join(', ')}
-										</p>
-									{:else}
-										<p class="test-reason">No current group is size-compatible — may need their own intro session.</p>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					</div>
-				{/if}
 			</section>
 			{:else}
 			<section class="panel panel-history">
@@ -1015,6 +1039,14 @@
 												</label>
 											{/each}
 										</div>
+										<label class="form-field">
+											<span>Off-roster names (not in the system)</span>
+											<input
+												type="text"
+												bind:value={editExtraNames}
+												placeholder="e.g. Buddy, Rosie (comma-separated)"
+											/>
+										</label>
 										<textarea bind:value={editNotes} placeholder="Notes" rows={3}></textarea>
 										<div class="history-edit-actions">
 											<button class="btn-save-edit" on:click={saveEdit} disabled={savingEdit}>
@@ -1088,20 +1120,69 @@
 						</div>
 
 						<div class="manual-dogs">
-							<p class="manual-dogs-label">Select dogs for this session</p>
-							<div class="manual-dog-list">
-								{#each activeDogs as dog}
-									<label class="manual-dog-option">
-										<input
-											type="checkbox"
-											checked={manualDogIds.includes(dog.id)}
-											on:change={(event) => toggleManualDog(dog.id, event.currentTarget.checked)}
-										/>
-										<span>{dog.name}</span>
-									</label>
+							<p class="manual-dogs-label">In the yard now ({yardDogs.length})</p>
+							{#if yardDogs.length === 0}
+								<p class="yard-empty">No dogs in the yard yet — add one below.</p>
+							{:else}
+								<div class="yard-list">
+									{#each yardDogs as dog (dog.id)}
+										<div class="yard-item">
+											<span class="yard-item-name">{dog.name}</span>
+											<input
+												type="text"
+												class="yard-out-note"
+												placeholder="Note (optional)"
+												value={takeOutNoteDrafts[dog.id] ?? ''}
+												on:input={(e) => (takeOutNoteDrafts = { ...takeOutNoteDrafts, [dog.id]: e.currentTarget.value })}
+											/>
+											<button type="button" class="yard-take-out-btn" on:click={() => takeOutOfYard(dog.id)}>
+												Take out
+											</button>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+
+						<div class="manual-dogs">
+							<p class="manual-dogs-label">Add a dog to the yard</p>
+							<input
+								type="text"
+								class="yard-search"
+								placeholder="Search dogs…"
+								bind:value={yardSearch}
+							/>
+							<div class="yard-add-list">
+								{#each availableToAdd as dog (dog.id)}
+									<button type="button" class="yard-add-btn" on:click={() => addToYard(dog.id)}>
+										+ {dog.name}
+									</button>
 								{/each}
+								{#if availableToAdd.length === 0}
+									<p class="yard-empty">No matching dogs.</p>
+								{/if}
 							</div>
 						</div>
+
+						{#if everInYardIds.length > 0}
+							<p class="yard-history-note">
+								This session so far: {everInYardIds.map(dogNameById).join(', ')}
+							</p>
+						{/if}
+
+						{#if manualWarnings.length > 0 || manualKnownPairs.length > 0}
+							<div class="compat-check">
+								{#each manualWarnings as w (w.id)}
+									<p class="compat-warning">⚠ {w.message}</p>
+								{/each}
+								{#each manualKnownPairs as p (p.dogIds.join('-'))}
+									<p class="compat-hint">
+										✓ {dogNameById(p.dogIds[0])} &amp; {dogNameById(p.dogIds[1])} played well together
+										({p.count}× · last {formatDate(p.lastDate)})
+									</p>
+								{/each}
+							</div>
+						{/if}
 
 						{#if untaggedSelectedDogs.length > 0}
 							<div class="manual-dogs">
@@ -1458,18 +1539,24 @@
 	.playstyle-board {
 		margin-top: 0.52rem;
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: 0.6rem;
 		align-items: start;
 	}
 
-	@media (max-width: 1100px) {
+	@media (max-width: 1300px) {
+		.playstyle-board {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 760px) {
 		.playstyle-board {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 	}
 
-	@media (max-width: 600px) {
+	@media (max-width: 460px) {
 		.playstyle-board {
 			grid-template-columns: 1fr;
 		}
@@ -1482,6 +1569,11 @@
 		display: grid;
 		gap: 0.48rem;
 		align-content: start;
+	}
+
+	.playstyle-col-both {
+		background: #f7f2fb;
+		border-color: #d8c3ea;
 	}
 
 	.playstyle-col-head {
@@ -1542,127 +1634,11 @@
 		color: #5a6b7d;
 	}
 
-	.recommendation-card {
-		border: 1px solid #c6d4e4;
-		background: #fbfdff;
-		padding: 0.52rem;
-	}
-
-	.recommendation-head {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 0.5rem;
-	}
-
-	.recommendation-head h4 {
-		margin: 0;
-		font-size: 0.95rem;
-		color: #223951;
-	}
-
-	.priority-chip {
-		border: 1px solid #c3d2e3;
-		border-radius: 999px;
-		padding: 0.12rem 0.42rem;
-		font-size: 0.56rem;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: #3f5e80;
-		background: #f4f9ff;
-	}
-
-	.dog-chip-row {
+	.playstyle-move-list {
 		margin-top: 0.36rem;
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.26rem;
-	}
-
-	.dog-chip {
-		border: 1px solid #b8cde5;
-		border-radius: 999px;
-		padding: 0.12rem 0.42rem;
-		font-size: 0.66rem;
-		font-weight: 700;
-		text-decoration: none;
-		color: #284c6f;
-		background: #f2f8ff;
-	}
-
-	.size-badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 1.1em;
-		height: 1.1em;
-		border-radius: 50%;
-		font-size: 0.55em;
-		font-weight: 900;
-		margin-left: 0.22em;
-		vertical-align: middle;
-		line-height: 1;
-	}
-
-	.size-badge-tiny {
-		background: #fce8e8;
-		color: #8a3e3c;
-		border: 1px solid #e6b8b8;
-	}
-
-	.size-badge-small {
-		background: #fdf3e3;
-		color: #7a4f10;
-		border: 1px solid #f0c87a;
-	}
-
-	.size-badge-medium {
-		background: #e8f4fc;
-		color: #016aa5;
-		border: 1px solid #b0d4ee;
-	}
-
-	.size-badge-large {
-		background: #ede8fc;
-		color: #5a3a8a;
-		border: 1px solid #c5b4e8;
-	}
-
-	.size-badge-unknown {
-		background: #f0f2f5;
-		color: #7a8fa6;
-		border: 1px solid #c8d3df;
-	}
-
-	.size-unknown-note {
-		margin: 0.3rem 0 0;
-		font-size: 0.66rem;
-		color: #816829;
-	}
-
-	.recommendation-reason {
-		margin: 0.4rem 0 0;
-		font-size: 0.78rem;
-		color: #334f6c;
-	}
-
-	.recommendation-log-btn {
-		margin-top: 0.46rem;
-		min-height: 1.95rem;
-		border: 1px solid #d5e0ea;
-		border-radius: 0.42rem;
-		padding: 0.18rem 0.52rem;
-		font-size: 0.58rem;
-		letter-spacing: 0.09em;
-		text-transform: uppercase;
-		font-weight: 700;
-		background: #dff0ff;
-		color: #1c3f63;
-	}
-
-	.recommendation-log-btn:disabled {
-		opacity: 0.6;
+		flex-direction: column;
+		gap: 0.1rem;
 	}
 
 	.panel-history {
@@ -1719,19 +1695,116 @@
 		color: #4d637d;
 	}
 
-	.manual-dog-list {
-		margin-top: 0.3rem;
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.26rem;
+	.yard-empty {
+		margin: 0.3rem 0 0;
+		font-size: 0.7rem;
+		color: #7a8fa6;
 	}
 
-	.manual-dog-option {
-		display: inline-flex;
+	.yard-list {
+		margin-top: 0.3rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.28rem;
+	}
+
+	.yard-item {
+		display: flex;
 		align-items: center;
-		gap: 0.34rem;
+		gap: 0.4rem;
+		border: 1px solid #d5e0ea;
+		border-radius: 0.3rem;
+		padding: 0.3rem 0.4rem;
+		background: #f7fafd;
+	}
+
+	.yard-item-name {
+		font-size: 0.74rem;
+		font-weight: 700;
+		color: #22384f;
+		flex-shrink: 0;
+		min-width: 5rem;
+	}
+
+	.yard-out-note {
+		flex: 1;
+		min-width: 0;
+		border: 1px solid #d5e0ea;
+		border-radius: 0.24rem;
+		padding: 0.22rem 0.4rem;
+		font-size: 0.7rem;
+	}
+
+	.yard-take-out-btn {
+		flex-shrink: 0;
+		border: 1px solid #e0b8b8;
+		border-radius: 0.3rem;
+		padding: 0.24rem 0.5rem;
+		font-size: 0.66rem;
+		font-weight: 700;
+		background: #fdf0f0;
+		color: #8a3e3c;
+	}
+
+	.yard-search {
+		margin-top: 0.3rem;
+		width: 100%;
+		border: 1px solid #d5e0ea;
+		border-radius: 0.3rem;
+		padding: 0.3rem 0.5rem;
+		font-size: 0.74rem;
+	}
+
+	.yard-add-list {
+		margin-top: 0.3rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.28rem;
+		max-height: 8rem;
+		overflow-y: auto;
+	}
+
+	.yard-add-btn {
+		border: 1px solid #b8cde5;
+		border-radius: 999px;
+		padding: 0.18rem 0.5rem;
+		font-size: 0.7rem;
+		font-weight: 700;
+		background: #f2f8ff;
+		color: #284c6f;
+	}
+
+	.yard-history-note {
+		margin-top: 0.4rem;
+		font-size: 0.68rem;
+		color: #5a6b7d;
+	}
+
+	.compat-check {
+		margin-top: 0.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.22rem;
+	}
+
+	.compat-warning {
+		margin: 0;
 		font-size: 0.72rem;
-		color: #304a66;
+		color: #92400e;
+		background: #fef3e3;
+		border: 1px solid #f0c87a;
+		border-radius: 0.3rem;
+		padding: 0.32rem 0.5rem;
+	}
+
+	.compat-hint {
+		margin: 0;
+		font-size: 0.72rem;
+		color: #175c3f;
+		background: #e9f7ef;
+		border: 1px solid #b0dfc4;
+		border-radius: 0.3rem;
+		padding: 0.32rem 0.5rem;
 	}
 
 	.manual-save-btn {
@@ -1985,12 +2058,6 @@
 
 		.manual-grid {
 			grid-template-columns: repeat(4, minmax(0, 1fr));
-		}
-	}
-
-	@media (max-width: 680px) {
-		.manual-dog-list {
-			grid-template-columns: 1fr;
 		}
 	}
 
@@ -2269,72 +2336,6 @@
 		cursor: default;
 	}
 
-	.unknown-weight-section {
-		margin-top: 1rem;
-		border-top: 1px solid #d5e0ea;
-		padding-top: 0.6rem;
-	}
-
-	.unknown-weight-title {
-		margin: 0 0 0.4rem;
-		font-size: 0.58rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: #7a8fa6;
-	}
-
-	.unknown-weight-list {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.28rem;
-	}
-
-	.unknown-weight-chip {
-		border: 1px solid #c8d3df;
-		border-radius: 999px;
-		padding: 0.12rem 0.42rem;
-		font-size: 0.66rem;
-		font-weight: 700;
-		text-decoration: none;
-		color: #7a8fa6;
-		background: #f0f2f5;
-	}
-
-	.unknown-weight-chip:hover {
-		background: #e4e8ed;
-	}
-
-	.test-section {
-		margin-top: 1.2rem;
-		border-top: 1px solid #d5e0ea;
-		padding-top: 0.8rem;
-	}
-
-	.test-section-head {
-		margin-bottom: 0.52rem;
-	}
-
-	.test-section-title {
-		margin: 0 0 0.18rem;
-		font-size: 0.9rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: #816829;
-	}
-
-	.test-section-note {
-		margin: 0;
-		font-size: 0.68rem;
-		color: #4f6681;
-	}
-
-	.test-grid {
-		display: grid;
-		gap: 0.42rem;
-	}
-
 	.test-card {
 		border: 1px solid #e3cf97;
 		background: #fffdf0;
@@ -2355,19 +2356,4 @@
 		color: #3a5069;
 	}
 
-	.test-suggested {
-		margin: 0;
-		font-size: 0.72rem;
-		color: #5a6e84;
-	}
-
-	.test-suggested strong {
-		color: #22384f;
-	}
-
-	@media (min-width: 620px) {
-		.test-grid {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
 </style>

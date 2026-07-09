@@ -13,31 +13,94 @@ export interface ParsedPlaygroupMessage {
 	outcome: PlaygroupOutcome; // inferred from keywords
 }
 
+// Dog names are essentially always 1–3 words ("Rex", "T Rex", "Chunky Monkey").
+// Bounding the capture stops a whole sentence ending in "in"/"out" — e.g.
+// "everyone is out" — from being swallowed whole as one "dog name".
+const NAME_WORD = `[A-Za-z][A-Za-z'-]*`;
+const NAME_GROUP = `(?:${NAME_WORD}\\s+){0,2}${NAME_WORD}`;
 // Strict: Name + action only, no trailing text (used when matching comma-split parts)
-const SIMPLE_RE = /^([A-Za-z][A-Za-z\s'-]+?)\s+(in|out)$/i;
+const SIMPLE_RE = new RegExp(`^(${NAME_GROUP})\\s+(in|out)$`, 'i');
 // Full: Name + action + optional colon/comma notes (used when matching a whole segment)
-const FULL_RE = /^([A-Za-z][A-Za-z\s'-]+?)\s+(in|out)(?:[,:]\s*(.+))?$/i;
+const FULL_RE = new RegExp(`^(${NAME_GROUP})\\s+(in|out)(?:[,:]\\s*(.+))?$`, 'i');
 // Bare name: 1–2 words, no action verb — used for "Birdie, Rosie, Dexter in" pattern
 const NAME_LIKE_RE = /^[A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*)?$/;
 
-const INCIDENT_WORDS = /\b(airhorn|scuffle|fight|broke[\s-]?up|bite|biting|bit\b|blood)\b/i;
+// "bit" is guarded against "a bit" (= "a little") via a negative lookbehind —
+// otherwise "a bit nervous today" reads as an incident report instead of mixed.
+const INCIDENT_WORDS = /\b(airhorn|scuffle|fight|broke[\s-]?up|bite|biting|blood)\b|(?<!\ba\s)\bbit\b/i;
 const MIXED_WORDS =
 	/\b(tense|nervous|warning|rude|growl|growling|wasn[''`]?t\s+having|was not having)\b/i;
 
-function parseLine(line: string): { entries: ParsedEntry[]; freeform: string | null } {
+// Common words that show up right before "in"/"out" in ordinary chat but are
+// never dog names ("everyone's out", "back in", "heading out"). Shared by the
+// entry parser (single-word guard) and the freeform capitalized-word scanner.
+const STOP_WORDS = new Set([
+	'i', 'she', 'he', 'they', 'we', 'you', 'it', 'her', 'him', 'his', 'their', 'our', 'my', 'its',
+	'the', 'a', 'an', 'and', 'but', 'or', 'so', 'for', 'nor', 'yet', 'with', 'from', 'to', 'at',
+	'in', 'out', 'on', 'up', 'of', 'by', 'as', 'no', 'not', 'this', 'that', 'these', 'those',
+	'was', 'were', 'is', 'are', 'has', 'had', 'have', 'been', 'be', 'got', 'did', 'do', 'does',
+	'after', 'before', 'during', 'while', 'when', 'then', 'than', 'also', 'just', 'still', 'even',
+	'all', 'some', 'both', 'each', 'other', 'another', 'ok', 'okay', 'yes', 'yeah', 'good', 'great',
+	'well', 'nice', 'very', 'really', 'super', 'little', 'big',
+	'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+	'group', 'session', 'playgroup', 'yard', 'kennel', 'staff', 'volunteer', 'handler', 'run',
+	'everyone', 'everybody', 'anyone', 'somebody', 'someone', 'nobody', 'back', 'done', 'ready',
+	'here', 'now', 'today', 'again', 'later', 'home', 'away', 'inside', 'outside',
+	// Incident/mixed vocabulary — "a fight broke out" shouldn't parse as a dog
+	// named "a fight broke".
+	'airhorn', 'scuffle', 'fight', 'broke', 'bite', 'biting', 'bit', 'blood',
+	'tense', 'nervous', 'warning', 'rude', 'growl', 'growling'
+]);
+
+function normalizeForCompare(s: string): string {
+	return s.toLowerCase().replace(/[^a-z]/g, '');
+}
+
+// Any capture containing an obvious filler/incident word is ordinary prose,
+// not a name ("back in", "everyone's out", "a fight broke out") — regardless
+// of word count or whether a roster was supplied. Past that screen: a
+// single-word capture is accepted on its own (a real dog may legitimately not
+// be in the roster yet — foster, visiting dog); a multi-word capture needs a
+// roster hit when a roster is available, and is accepted permissively when
+// none was supplied (the word-count cap above is the only guard in that case).
+function isPlausibleName(name: string, knownNameSet: Set<string> | null): boolean {
+	const words = name.trim().split(/\s+/);
+	if (words.some((w) => STOP_WORDS.has(w.toLowerCase()))) return false;
+	if (words.length === 1) return true;
+	if (!knownNameSet) return true;
+	return knownNameSet.has(normalizeForCompare(name));
+}
+
+function parseLine(
+	line: string,
+	knownNameSet: Set<string> | null
+): { entries: ParsedEntry[]; freeform: string | null } {
 	const parts = line.split(',').map((p) => p.trim()).filter(Boolean);
 	const foundEntries: ParsedEntry[] = [];
 	const nameQueue: string[] = []; // bare names waiting for an action word
 	const noteParts: string[] = []; // trailing text after entries (becomes notes)
+
+	const flushQueue = (action: 'in' | 'out') => {
+		for (const name of nameQueue) {
+			if (isPlausibleName(name, knownNameSet)) foundEntries.push({ name, action, notes: null });
+			else noteParts.push(name);
+		}
+		nameQueue.length = 0;
+	};
 
 	for (const part of parts) {
 		// Simple match: "Birdie in" — most common case, unambiguous
 		const simple = SIMPLE_RE.exec(part);
 		if (simple) {
 			const action = simple[2].toLowerCase() as 'in' | 'out';
-			for (const name of nameQueue) foundEntries.push({ name, action, notes: null });
-			nameQueue.length = 0;
-			foundEntries.push({ name: simple[1].trim(), action, notes: null });
+			const name = simple[1].trim();
+			flushQueue(action);
+			if (isPlausibleName(name, knownNameSet)) {
+				foundEntries.push({ name, action, notes: null });
+				continue;
+			}
+			// Not a recognizable name (and not single-word) — treat as prose, not an entry.
+			noteParts.push(part);
 			continue;
 		}
 
@@ -46,9 +109,13 @@ function parseLine(line: string): { entries: ParsedEntry[]; freeform: string | n
 		if (full) {
 			const action = full[2].toLowerCase() as 'in' | 'out';
 			const notes = full[3]?.trim() ?? null;
-			for (const name of nameQueue) foundEntries.push({ name, action, notes: null });
-			nameQueue.length = 0;
-			foundEntries.push({ name: full[1].trim(), action, notes });
+			const name = full[1].trim();
+			flushQueue(action);
+			if (isPlausibleName(name, knownNameSet)) {
+				foundEntries.push({ name, action, notes });
+				continue;
+			}
+			noteParts.push(part);
 			continue;
 		}
 
@@ -85,12 +152,13 @@ export function parsePlaygroupMessage(
 ): ParsedPlaygroupMessage {
 	const entries: ParsedEntry[] = [];
 	const freeformLines: string[] = [];
+	const knownNameSet = knownDogNames.length > 0 ? new Set(knownDogNames.map(normalizeForCompare)) : null;
 
 	for (const raw of text.split('\n')) {
 		const line = raw.trim();
 		if (!line) continue;
 
-		const result = parseLine(line);
+		const result = parseLine(line, knownNameSet);
 		entries.push(...result.entries);
 		if (result.freeform) freeformLines.push(result.freeform);
 	}
@@ -115,17 +183,6 @@ export function parsePlaygroupMessage(
 
 	// Scan freeform lines and entry notes for any capitalized word that looks like a name.
 	// This catches dogs mentioned in notes that are no longer in the shelter roster.
-	const STOP_WORDS = new Set([
-		'i', 'she', 'he', 'they', 'we', 'you', 'it', 'her', 'him', 'his', 'their', 'our', 'my', 'its',
-		'the', 'a', 'an', 'and', 'but', 'or', 'so', 'for', 'nor', 'yet', 'with', 'from', 'to', 'at',
-		'in', 'out', 'on', 'up', 'of', 'by', 'as', 'no', 'not', 'this', 'that', 'these', 'those',
-		'was', 'were', 'is', 'are', 'has', 'had', 'have', 'been', 'be', 'got', 'did', 'do', 'does',
-		'after', 'before', 'during', 'while', 'when', 'then', 'than', 'also', 'just', 'still', 'even',
-		'all', 'some', 'both', 'each', 'other', 'another', 'ok', 'okay', 'yes', 'yeah', 'good', 'great',
-		'well', 'nice', 'very', 'really', 'super', 'little', 'big',
-		'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
-		'group', 'session', 'playgroup', 'yard', 'kennel', 'staff', 'volunteer', 'handler', 'run',
-	]);
 	const capitalWordRe = /\b([A-Z][a-z']{1,})\b/g;
 	const scanTexts = [
 		...freeformLines,
