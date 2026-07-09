@@ -8,6 +8,8 @@ export interface UserProfile {
 	email: string;
 	displayName: string;
 	role: UserRole;
+	// E.164 (e.g. +14355550134) — the phone-inbox allowlist (docs/phone-inbox-plan.md)
+	phoneNumber?: string | null;
 	createdAt: DateValue;
 	updatedAt: DateValue;
 }

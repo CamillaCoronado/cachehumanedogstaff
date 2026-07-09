@@ -2,6 +2,7 @@
 	import toast from 'svelte-french-toast';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { listUserProfiles, updateUserProfile } from '$lib/data/users';
+	import { formatPhoneNumber, normalizePhoneNumber } from '$lib/utils/phone';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import type { DayTripLog, Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDateTime, toDate, toDateString } from '$lib/utils/dates';
@@ -16,6 +17,7 @@
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
 		draftRole: UserRole;
+		draftPhone: string;
 	};
 
 	const roleOptions: UserRole[] = ['admin', 'manager', 'coordinator', 'staff', 'volunteer'];
@@ -139,16 +141,18 @@
 			...user,
 			displayName,
 			draftDisplayName: displayName,
-			draftRole: user.role
+			draftRole: user.role,
+			draftPhone: formatPhoneNumber(user.phoneNumber)
 		};
 	}
 
 	function hasPendingChanges(user: EditableUser) {
 		const nextName = user.draftDisplayName.trim() || user.email || 'Staff Member';
-		return nextName !== user.displayName || user.draftRole !== user.role;
+		const nextPhone = user.draftPhone.trim() ? normalizePhoneNumber(user.draftPhone) : null;
+		return nextName !== user.displayName || user.draftRole !== user.role || nextPhone !== (user.phoneNumber ?? null);
 	}
 
-	function updateDraft(userId: string, field: 'draftDisplayName' | 'draftRole', value: string) {
+	function updateDraft(userId: string, field: 'draftDisplayName' | 'draftRole' | 'draftPhone', value: string) {
 		users = users.map((user) =>
 			user.uid === userId
 				? {
@@ -197,11 +201,20 @@
 			return;
 		}
 
+		// Phone is optional, but if provided it must normalize — it's the
+		// phone-inbox allowlist, so a malformed number would never match.
+		const phoneNumber = user.draftPhone.trim() ? normalizePhoneNumber(user.draftPhone) : null;
+		if (user.draftPhone.trim() && !phoneNumber) {
+			toast.error('That phone number doesn\'t look valid — use e.g. (435) 555-0134.');
+			return;
+		}
+
 		savingUserId = user.uid;
 		try {
 			await updateUserProfile(user.uid, {
 				displayName,
-				role: user.draftRole
+				role: user.draftRole,
+				phoneNumber
 			});
 
 			const updatedAt = new Date();
@@ -211,8 +224,10 @@
 							...entry,
 							displayName,
 							role: user.draftRole,
+							phoneNumber,
 							draftDisplayName: displayName,
 							draftRole: user.draftRole,
+							draftPhone: formatPhoneNumber(phoneNumber),
 							updatedAt
 						}
 					: entry
@@ -781,6 +796,18 @@
 													<option value={role}>{role}</option>
 												{/each}
 											</select>
+										</label>
+
+										<label class="field">
+											<span class="field-label">Phone (update line)</span>
+											<input
+												class="field-input"
+												type="tel"
+												placeholder="(435) 555-0134"
+												value={user.draftPhone}
+												on:input={(event) => updateDraft(user.uid, 'draftPhone', event.currentTarget.value)}
+												disabled={savingUserId === user.uid}
+											/>
 										</label>
 									</div>
 
