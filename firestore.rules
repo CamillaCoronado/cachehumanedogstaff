@@ -107,6 +107,12 @@ service cloud.firestore {
       allow create, update, delete: if canEditPlaygroups();
     }
 
+    // Expected-dog placeholders on the kennels board (dogs not yet in ASM).
+    match /kennelPlaceholders/{placeholderId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if canEditDogs();
+    }
+
     match /pendingPlaygroups/{docId} {
       // Read and mark-processed by managers/admins only
       allow read, update: if canEditDogs();

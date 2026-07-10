@@ -8,6 +8,14 @@
 	import type { Dog, UserRole } from '$lib/types';
 	import { dogs as dogsStore, dogsLoaded, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { dogAgeWeeks } from '$lib/utils/attention';
+	import {
+		addKennelPlaceholder,
+		deleteKennelPlaceholder,
+		isPlaceholderId,
+		listKennelPlaceholders,
+		setKennelPlaceholderRun,
+		type KennelPlaceholder
+	} from '$lib/data/kennelPlaceholders';
 
 	import {
 		kennelCells,
@@ -24,6 +32,10 @@
 
 	$: dogs = $dogsStore;
 	$: loading = !$dogsLoaded;
+	// Expected dogs — placeholders for arrivals not yet in ASM.
+	let placeholders: KennelPlaceholder[] = [];
+	let newPlaceholderName = '';
+	let addingPlaceholder = false;
 	let draggingId: string | null = null;
 	let hoveredRun: RunId | null = null;
 	let hoveredUnassigned = false;
@@ -36,6 +48,7 @@
 
 	onMount(() => {
 		void ensureDogsLoaded();
+		void listKennelPlaceholders().then((list) => (placeholders = list));
 
 		const handlePointerMove = (event: PointerEvent) => {
 			handleTouchPointerMove(event);
@@ -75,14 +88,31 @@
 	$: selectedDog = selectedDogId
 		? kennelEligibleDogs.find((dog) => dog.id === selectedDogId) ?? null
 		: null;
+	$: selectedPlaceholder = selectedDogId
+		? placeholders.find((p) => p.id === selectedDogId) ?? null
+		: null;
+
+	// Placeholder run parsing reuses the dog logic — `run` uses the same format
+	// as outdoorKennelAssignment, and getDogRun only reads that one field.
+	function placeholderRun(p: KennelPlaceholder): RunId | null {
+		return getDogRun({ outdoorKennelAssignment: p.run } as Dog);
+	}
+
+	$: placeholdersByRun = placeholders.reduce<Record<string, KennelPlaceholder[]>>((map, p) => {
+		const key = runIdToKey(placeholderRun(p));
+		if (!key) return map;
+		(map[key] ??= []).push(p);
+		return map;
+	}, {});
+	$: unassignedPlaceholders = placeholders.filter((p) => placeholderRun(p) === null);
 
 	// Dog data, the ASM-sync re-fetch, and post-mutation refreshes all flow through
 	// the shared dog store ($lib/stores/dogs); `refreshDogs` is its force-refresh.
 
-	function handleDragStart(event: DragEvent, dog: Dog) {
+	function handleDragStart(event: DragEvent, item: { id: string; name: string }) {
 		if (!canEdit) return;
-		draggingId = dog.id;
-		event.dataTransfer?.setData('text/plain', dog.id);
+		draggingId = item.id;
+		event.dataTransfer?.setData('text/plain', item.id);
 		event.dataTransfer?.setDragImage?.(event.currentTarget as Element, 20, 20);
 	}
 
@@ -129,11 +159,11 @@
 		hoveredUnassigned = false;
 	}
 
-	function handleTouchDragStart(event: PointerEvent, dog: Dog) {
+	function handleTouchDragStart(event: PointerEvent, item: { id: string; name: string }) {
 		if (!canEdit || event.pointerType !== 'touch') return;
 		touchPointerId = event.pointerId;
-		touchDraggingId = dog.id;
-		touchDragName = dog.name;
+		touchDraggingId = item.id;
+		touchDragName = item.name;
 		touchDragX = event.clientX;
 		touchDragY = event.clientY;
 		updateTouchHover(event.clientX, event.clientY);
@@ -151,11 +181,16 @@
 	async function handleTouchPointerUp(event: PointerEvent) {
 		if (touchPointerId === null || event.pointerId !== touchPointerId) return;
 		const target = updateTouchHover(event.clientX, event.clientY);
-		const dogId = touchDraggingId;
-		const dog = dogId ? dogs.find((item) => item.id === dogId) : null;
+		const draggedId = touchDraggingId;
 		resetTouchDragState();
-		if (!dog || target === undefined) return;
-		await assignDog(dog, target);
+		if (!draggedId || target === undefined) return;
+		if (isPlaceholderId(draggedId)) {
+			const placeholder = placeholders.find((p) => p.id === draggedId);
+			if (placeholder) await assignPlaceholder(placeholder, target);
+			return;
+		}
+		const dog = dogs.find((item) => item.id === draggedId);
+		if (dog) await assignDog(dog, target);
 	}
 
 	function handleTouchPointerCancel(event: PointerEvent) {
@@ -163,9 +198,9 @@
 		resetTouchDragState();
 	}
 
-	function toggleSelect(dog: Dog) {
+	function toggleSelect(item: { id: string }) {
 		if (!canEdit) return;
-		selectedDogId = selectedDogId === dog.id ? null : dog.id;
+		selectedDogId = selectedDogId === item.id ? null : item.id;
 	}
 
 	const PUPPY_MAX_WEEKS = 26; // under ~6 months — the intact-sex kennel rule doesn't apply to puppies
@@ -220,31 +255,90 @@
 		}
 	}
 
+	async function assignPlaceholder(placeholder: KennelPlaceholder, runId: RunId | null) {
+		if (!canEdit) return;
+		if (placeholderRun(placeholder) === runId) return;
+		const run = runIdToAssignment(runId);
+		placeholders = placeholders.map((p) => (p.id === placeholder.id ? { ...p, run } : p));
+		try {
+			await setKennelPlaceholderRun(placeholder.id, run);
+			toast.success(runId ? `${placeholder.name} (expected) assigned to ${runIdToLabel(runId)}.` : `${placeholder.name} (expected) unassigned.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to move placeholder.');
+			placeholders = await listKennelPlaceholders();
+		}
+	}
+
+	async function handleAddPlaceholder() {
+		const name = newPlaceholderName.trim();
+		if (!name || addingPlaceholder) return;
+		addingPlaceholder = true;
+		try {
+			const entry = await addKennelPlaceholder(name, $authProfile?.displayName ?? 'Staff');
+			placeholders = [...placeholders, entry].sort((a, b) => a.name.localeCompare(b.name));
+			newPlaceholderName = '';
+			toast.success(`${entry.name} added as expected dog — drag them onto a run.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to add expected dog.');
+		} finally {
+			addingPlaceholder = false;
+		}
+	}
+
+	async function removePlaceholder(placeholder: KennelPlaceholder) {
+		if (!canEdit) return;
+		try {
+			await deleteKennelPlaceholder(placeholder.id);
+			placeholders = placeholders.filter((p) => p.id !== placeholder.id);
+			toast.success(`${placeholder.name} (expected) removed.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to remove placeholder.');
+		}
+	}
+
 	async function handleDrop(event: DragEvent, runId: RunId | null) {
 		event.preventDefault();
 		if (!canEdit) return;
 		const id = draggingId ?? event.dataTransfer?.getData('text/plain');
+		if (!id) return;
+		if (isPlaceholderId(id)) {
+			const placeholder = placeholders.find((p) => p.id === id);
+			if (placeholder) await assignPlaceholder(placeholder, runId);
+			return;
+		}
 		const dog = dogs.find((item) => item.id === id);
 		if (!dog) return;
 		await assignDog(dog, runId);
 	}
 
+	function selectValueToRunId(value: string): RunId | null {
+		if (!value) return null;
+		if (value === 'puppy' || value === 'rock') return value;
+		const runNumber = Number(value);
+		return Number.isFinite(runNumber) ? runNumber : null;
+	}
+
 	async function handleSelect(event: Event, dog: Dog) {
 		const value = (event.currentTarget as HTMLSelectElement).value;
-		if (!value) {
-			await assignDog(dog, null);
-			return;
-		}
-		if (value === 'puppy' || value === 'rock') {
-			await assignDog(dog, value);
-			return;
-		}
-		const runNumber = Number(value);
-		await assignDog(dog, Number.isFinite(runNumber) ? runNumber : null);
+		await assignDog(dog, selectValueToRunId(value));
+	}
+
+	async function handlePlaceholderSelect(event: Event, placeholder: KennelPlaceholder) {
+		const value = (event.currentTarget as HTMLSelectElement).value;
+		await assignPlaceholder(placeholder, selectValueToRunId(value));
 	}
 
 	async function handleTapAssign(runId: RunId | null) {
-		if (!canEdit || !selectedDog) return;
+		if (!canEdit) return;
+		if (selectedPlaceholder) {
+			await assignPlaceholder(selectedPlaceholder, runId);
+			selectedDogId = null;
+			return;
+		}
+		if (!selectedDog) return;
 		await assignDog(selectedDog, runId);
 		selectedDogId = null;
 	}
@@ -261,6 +355,9 @@
 				<div class="flex flex-wrap gap-2">
 					<span class="hero-chip">{kennelEligibleDogs.length} in shelter</span>
 					<span class="hero-chip">{unassigned.length} unassigned</span>
+					{#if placeholders.length > 0}
+						<span class="hero-chip hero-chip-expected">{placeholders.length} expected</span>
+					{/if}
 					{#if fosterDogs.length > 0}
 						<span class="hero-chip hero-chip-muted">{fosterDogs.length} in foster</span>
 					{/if}
@@ -295,7 +392,8 @@
 											<span class="kennel-conflict-note">Intact male + female</span>
 										{/if}
 										{@const slotDogs = assignments[cell.runKey ?? ''] ?? []}
-										{#if slotDogs.length > 0}
+										{@const slotPlaceholders = placeholdersByRun[cell.runKey ?? ''] ?? []}
+										{#if slotDogs.length > 0 || slotPlaceholders.length > 0}
 											<div class="kennel-dog-stack">
 												{#each slotDogs as slotDog}
 													<div
@@ -309,6 +407,29 @@
 														on:click|stopPropagation={() => toggleSelect(slotDog)}
 													>
 														<span>{slotDog.name}</span>
+													</div>
+												{/each}
+												{#each slotPlaceholders as ph (ph.id)}
+													<div
+														class={`kennel-dog kennel-dog-placeholder ${canEdit ? 'kennel-dog-draggable' : ''} ${
+															selectedDogId === ph.id ? 'kennel-dog-selected' : ''
+														}`}
+														draggable={canEdit}
+														on:dragstart={(event) => handleDragStart(event, ph)}
+														on:dragend={handleDragEnd}
+														on:pointerdown={(event) => handleTouchDragStart(event, ph)}
+														on:click|stopPropagation={() => toggleSelect(ph)}
+													>
+														<span>{ph.name}</span>
+														<span class="kennel-placeholder-tag">expected</span>
+														{#if canEdit}
+															<button
+																type="button"
+																class="kennel-placeholder-remove"
+																title="Remove expected dog"
+																on:click|stopPropagation={() => removePlaceholder(ph)}
+															>✕</button>
+														{/if}
 													</div>
 												{/each}
 											</div>
@@ -330,9 +451,9 @@
 					</div>
 					{#if loading}
 						<p class="mt-3 text-sm text-ink-500">Loading dogs...</p>
-					{:else if kennelEligibleDogs.length === 0}
+					{:else if kennelEligibleDogs.length === 0 && unassignedPlaceholders.length === 0}
 						<p class="mt-3 text-sm text-ink-500">All active dogs are currently in foster.</p>
-					{:else if unassigned.length === 0}
+					{:else if unassigned.length === 0 && unassignedPlaceholders.length === 0}
 						<p class="mt-3 text-sm text-ink-500">All active dogs have a run assigned.</p>
 					{:else}
 						<div class="mt-4 kennel-unassigned-list">
@@ -347,7 +468,40 @@
 									<span>{dog.name}</span>
 								</div>
 							{/each}
+							{#each unassignedPlaceholders as ph (ph.id)}
+								<div
+									class={`kennel-unassigned-row kennel-unassigned-placeholder ${canEdit ? 'kennel-dog-draggable' : ''}`}
+									draggable={canEdit}
+									on:dragstart={(event) => handleDragStart(event, ph)}
+									on:dragend={handleDragEnd}
+									on:pointerdown={(event) => handleTouchDragStart(event, ph)}
+								>
+									<span>{ph.name} <span class="kennel-placeholder-tag">expected</span></span>
+									{#if canEdit}
+										<button
+											type="button"
+											class="kennel-placeholder-remove"
+											title="Remove expected dog"
+											on:click|stopPropagation={() => removePlaceholder(ph)}
+										>✕</button>
+									{/if}
+								</div>
+							{/each}
 						</div>
+					{/if}
+					{#if canEdit}
+						<form class="kennel-expected-form" on:submit|preventDefault={handleAddPlaceholder}>
+							<input
+								type="text"
+								class="kennel-expected-input"
+								placeholder="Expecting a dog? Add their name…"
+								bind:value={newPlaceholderName}
+								disabled={addingPlaceholder}
+							/>
+							<button type="submit" class="kennel-expected-add" disabled={addingPlaceholder || !newPlaceholderName.trim()}>
+								{addingPlaceholder ? 'Adding…' : 'Add expected'}
+							</button>
+						</form>
 					{/if}
 					<div
 						class={`kennel-dropzone ${hoveredUnassigned ? 'kennel-dropzone-active' : ''}`}
@@ -367,9 +521,9 @@
 						<p class="text-xs uppercase tracking-[0.2em] text-ink-500">Dogs</p>
 						<span class="text-xs font-semibold text-ink-600">{kennelEligibleDogs.length}</span>
 					</div>
-					{#if selectedDog}
+					{#if selectedDog || selectedPlaceholder}
 						<div class="mt-2 rounded-2xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700">
-							Selected: <span class="font-semibold">{selectedDog.name}</span> - tap a run to assign.
+							Selected: <span class="font-semibold">{selectedDog?.name ?? selectedPlaceholder?.name}</span> - tap a run to assign.
 						</div>
 					{/if}
 					{#if loading}
@@ -394,6 +548,31 @@
 											disabled={!canEdit}
 											value={runIdToSelectValue(getDogRun(dog))}
 											on:change={(event) => handleSelect(event, dog)}
+										>
+											<option value="">Unassigned</option>
+											{#each runOptions as run}
+												<option value={runIdToSelectValue(run)}>{runIdToLabel(run)}</option>
+											{/each}
+										</select>
+									</div>
+								</div>
+							{/each}
+							{#each placeholders as ph (ph.id)}
+								<div
+									class={`kennel-mobile-row kennel-mobile-row-placeholder ${selectedDogId === ph.id ? 'kennel-mobile-row-selected' : ''}`}
+									role="button"
+									tabindex="0"
+									on:click={() => toggleSelect(ph)}
+									on:keydown={(event) => event.key === 'Enter' && toggleSelect(ph)}
+								>
+									<p class="kennel-mobile-name">{ph.name} <span class="kennel-placeholder-tag">expected</span></p>
+									<div class="kennel-mobile-run-row">
+										<span>Run</span>
+										<select
+											class="kennel-run-select"
+											disabled={!canEdit}
+											value={runIdToSelectValue(placeholderRun(ph))}
+											on:change={(event) => handlePlaceholderSelect(event, ph)}
 										>
 											<option value="">Unassigned</option>
 											{#each runOptions as run}
@@ -491,6 +670,12 @@
 		background: #fff4f2;
 		border-color: #e7c6c2;
 		color: #8a4b46;
+	}
+
+	.hero-chip-expected {
+		background: #fdf6e3;
+		border-color: #e0c88a;
+		color: #7a5c10;
 	}
 
 	.map-sheet {
@@ -605,6 +790,83 @@
 	.kennel-dog-stack {
 		display: grid;
 		gap: 0.18rem;
+	}
+
+	.kennel-dog-placeholder {
+		background: #fdf6e3;
+		border: 1.5px dashed #d8b968;
+		color: #7a5c10;
+		gap: 0.3rem;
+	}
+
+	.kennel-placeholder-tag {
+		font-size: 0.56rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		border-radius: 999px;
+		border: 1px solid #d8b968;
+		background: #fff;
+		color: #7a5c10;
+		padding: 0.02rem 0.32rem;
+	}
+
+	.kennel-placeholder-remove {
+		border: none;
+		background: none;
+		color: #9c7c2c;
+		font-size: 0.72rem;
+		line-height: 1;
+		padding: 0.1rem 0.2rem;
+		cursor: pointer;
+	}
+
+	.kennel-placeholder-remove:hover {
+		color: #7a1f1f;
+	}
+
+	.kennel-unassigned-placeholder {
+		background: #fdf6e3;
+		border: 1.5px dashed #d8b968;
+		border-radius: 0.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.4rem;
+	}
+
+	.kennel-expected-form {
+		margin-top: 0.7rem;
+		display: flex;
+		gap: 0.4rem;
+	}
+
+	.kennel-expected-input {
+		flex: 1;
+		min-width: 0;
+		border: 1px solid #d7e0eb;
+		border-radius: 0.5rem;
+		padding: 0.4rem 0.6rem;
+		font-size: 0.82rem;
+	}
+
+	.kennel-expected-add {
+		flex-shrink: 0;
+		border: 1px solid #d8b968;
+		border-radius: 0.5rem;
+		background: #fdf6e3;
+		color: #7a5c10;
+		font-size: 0.74rem;
+		font-weight: 700;
+		padding: 0.4rem 0.7rem;
+	}
+
+	.kennel-expected-add:disabled {
+		opacity: 0.55;
+	}
+
+	.kennel-mobile-row-placeholder {
+		background: #fdfaf0;
 	}
 
 	.kennel-dog-selected {
