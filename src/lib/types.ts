@@ -160,6 +160,10 @@ export interface Dog {
 	isolationReason: IsolationReason | null;
 	isolationUntilDate: DateValue | null;
 	treatments?: Treatment[];
+	/** When the ASM sync last wrote this dog (read-only — written by the sync,
+	 *  preserved across app edits). For archived dogs this approximates the
+	 *  archive date. */
+	lastSyncedAt?: DateValue | null;
 	// Deprecated single-treatment fields — kept for migration into `treatments`.
 	treatmentName?: string | null;
 	treatmentNotes?: string | null;

@@ -104,6 +104,9 @@ interface StoredDog {
 	allergyTypes?: string[];
 	dayTripStatus: 'ineligible' | 'difficult' | 'eligible';
 	dayTripIneligibleReason?: DayTripIneligibleReason | null;
+	/** Written by the ASM sync only — serializeDog deliberately omits it so app
+	 *  edits (merge writes) never clobber it. */
+	_lastSyncedAt?: string;
 	/** Legacy flag, no longer read or written — handlingLevel === 'manager_only' replaced it. */
 	dayTripManagerOnly?: boolean;
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
@@ -587,6 +590,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
 		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,
 		treatments: deserializeTreatments(stored),
+		lastSyncedAt: stored._lastSyncedAt ? toDate(stored._lastSyncedAt) : null,
 		status: stored.status,
 		createdAt: toDate(stored.createdAt) ?? new Date(),
 		updatedAt: toDate(stored.updatedAt) ?? new Date()

@@ -4,8 +4,8 @@
 	import { formatPhoneNumber, normalizePhoneNumber } from '$lib/utils/phone';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
-	import { formatDateTime } from '$lib/utils/dates';
-	import { listDogs, mergeDogs } from '$lib/data/dogs';
+	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
+	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -20,6 +20,16 @@
 	let usersLoading = false;
 	let usersError = '';
 	let savingUserId: string | null = null;
+
+	// One-time backfill: archived dogs missing a departure date
+	type DateFix = { dog: Dog; date: string; source: string };
+	type DateUnknown = { dog: Dog; manualDate: string };
+	let backfillRunning = false;
+	let backfillRan = false;
+	let backfillMatched: DateFix[] = [];
+	let backfillUnknown: DateUnknown[] = [];
+	let backfillApplying = false;
+	let backfillFixingId: string | null = null;
 
 	// Merge dogs
 	let allDogs: Dog[] = [];
@@ -52,6 +62,117 @@
 	$: mergeKeepDog = allDogs.find((d) => d.id === mergeKeepId) ?? null;
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
+
+	// Dry run: find archived dogs with no leftShelterDate and propose real dates
+	// from ASM (adoption movement dates + deceased dates). Reads only.
+	async function runBackfillDryRun() {
+		backfillRunning = true;
+		backfillRan = false;
+		backfillMatched = [];
+		backfillUnknown = [];
+		try {
+			const today = new Date().toISOString().slice(0, 10);
+			// App first shipped 2026-03-02 — Feb 2026 gives a month of margin.
+			const [dogs, res] = await Promise.all([
+				listDogs(),
+				fetch(`/api/asm/departures?fromdate=2026-02-01&todate=${today}`)
+			]);
+			if (!res.ok) throw new Error(`ASM departures feed failed (${res.status})`);
+			const departures: { id: number; shelterCode: string; date: string; outcome: string }[] = await res.json();
+			const byId = new Map(departures.map((d) => [d.id, d]));
+			const byCode = new Map(departures.filter((d) => d.shelterCode).map((d) => [d.shelterCode, d]));
+
+			const missing = dogs.filter(
+				(d) =>
+					(d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized') &&
+					!toDate(d.leftShelterDate)
+			);
+			for (const dog of missing) {
+				const asmId = dog.asmId ?? (/^\d+$/.test(dog.id) ? Number(dog.id) : null);
+				const match =
+					(asmId !== null ? byId.get(asmId) : undefined) ??
+					(dog.asmShelterCode ? byCode.get(dog.asmShelterCode) : undefined);
+				if (match) {
+					backfillMatched = [...backfillMatched, { dog, date: match.date, source: match.outcome === 'euthanized' ? '🌈 euthanized — ASM deceased record' : '🏠 adopted — ASM adoption record' }];
+				} else {
+					// No exact record in ASM — pre-fill with the day the sync archived
+					// the dog (usually within a day of the real departure). Editable.
+					const archivedAt = toDate(dog.lastSyncedAt);
+					const approx = archivedAt
+						? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
+						: '';
+					backfillUnknown = [...backfillUnknown, { dog, manualDate: approx }];
+				}
+			}
+			backfillMatched.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
+			backfillUnknown.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
+			backfillRan = true;
+			if (backfillMatched.length === 0 && backfillUnknown.length === 0) {
+				toast.success('Every archived dog already has a departure date.');
+			}
+		} catch (e) {
+			toast.error('Dry run failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			backfillRunning = false;
+		}
+	}
+
+	async function applyBackfillMatches() {
+		if (backfillApplying || backfillMatched.length === 0) return;
+		backfillApplying = true;
+		let applied = 0;
+		try {
+			for (const fix of backfillMatched) {
+				await updateDog(fix.dog.id, { leftShelterDate: toDate(fix.date) });
+				applied += 1;
+			}
+			backfillMatched = [];
+			toast.success(`Set departure dates for ${applied} dog${applied === 1 ? '' : 's'}.`);
+		} catch (e) {
+			backfillMatched = backfillMatched.slice(applied);
+			toast.error('Stopped after an error: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			backfillApplying = false;
+		}
+	}
+
+	async function applyAllFilledDates() {
+		if (backfillApplying) return;
+		const filled = backfillUnknown.filter((u) => toDate(u.manualDate));
+		if (filled.length === 0) return;
+		backfillApplying = true;
+		let applied = 0;
+		try {
+			for (const entry of filled) {
+				await updateDog(entry.dog.id, { leftShelterDate: toDate(entry.manualDate) });
+				backfillUnknown = backfillUnknown.filter((u) => u.dog.id !== entry.dog.id);
+				applied += 1;
+			}
+			toast.success(`Set departure dates for ${applied} dog${applied === 1 ? '' : 's'}.`);
+		} catch (e) {
+			toast.error(`Stopped after ${applied} — ` + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			backfillApplying = false;
+		}
+	}
+
+	async function applyManualDate(entry: DateUnknown) {
+		const parsed = toDate(entry.manualDate);
+		if (!parsed) {
+			toast.error('Pick a date first.');
+			return;
+		}
+		backfillFixingId = entry.dog.id;
+		try {
+			await updateDog(entry.dog.id, { leftShelterDate: parsed });
+			backfillUnknown = backfillUnknown.filter((u) => u.dog.id !== entry.dog.id);
+			toast.success(`${entry.dog.name}: departure date set to ${formatDate(parsed)}.`);
+		} catch (e) {
+			toast.error('Save failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			backfillFixingId = null;
+		}
+	}
 
 	async function runMerge() {
 		if (!mergeValid || merging) return;
@@ -208,6 +329,77 @@
 		</div>
 
 		<div class="admin-grid">
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Backfill departure dates</h3>
+						<p class="section-copy">
+							One-time cleanup: archived dogs saved without a departure date don't appear in the dashboard's
+							Movements history. The dry run finds them and proposes real dates from ASM (adoption and deceased
+							records). Transfers have no ASM feed — set those by hand below. <strong>Nothing changes until you apply.</strong>
+							Takes a minute or two; ASM's changes feed is slow.
+						</p>
+					</div>
+					<button class="action-btn" type="button" on:click={runBackfillDryRun} disabled={backfillRunning}>
+						{backfillRunning ? 'Checking…' : 'Dry run'}
+					</button>
+				</div>
+				{#if backfillRan && backfillMatched.length === 0 && backfillUnknown.length === 0}
+					<p class="empty-note">Every archived dog already has a departure date — nothing to fix.</p>
+				{/if}
+				{#if backfillMatched.length > 0}
+					<div class="status-row-plain">
+						<span class="status-meta">{backfillMatched.length} dog{backfillMatched.length === 1 ? '' : 's'} with a date found in ASM:</span>
+					</div>
+					<ul class="user-list">
+						{#each backfillMatched as fix (fix.dog.id)}
+							<li class="user-row">
+								<div class="user-main">
+									<p class="suspect-name">{fix.dog.name}</p>
+									<p class="suspect-detail">{fix.dog.status} · will set departure to <strong>{formatDate(fix.date)}</strong> ({fix.source})</p>
+								</div>
+							</li>
+						{/each}
+					</ul>
+					<button class="action-btn backfill-apply" type="button" on:click={applyBackfillMatches} disabled={backfillApplying}>
+						{backfillApplying ? 'Applying…' : `Apply ${backfillMatched.length} date${backfillMatched.length === 1 ? '' : 's'}`}
+					</button>
+				{/if}
+				{#if backfillUnknown.length > 0}
+					<div class="status-row-plain">
+						<span class="status-meta">
+							{backfillUnknown.length} dog{backfillUnknown.length === 1 ? '' : 's'} with no exact date in ASM.
+							Pre-filled dates are the day the sync archived the dog (usually within a day of the real departure) — adjust any, then set individually or all at once.
+						</span>
+					</div>
+					<ul class="user-list">
+						{#each backfillUnknown as entry (entry.dog.id)}
+							<li class="user-row">
+								<div class="user-main">
+									<p class="suspect-name">{entry.dog.name}</p>
+									<p class="suspect-detail">{entry.dog.status} · {entry.manualDate ? 'approximate date from archive time' : 'no date on record — set by hand'}</p>
+								</div>
+								<div class="repair-actions">
+									<input type="date" class="field-input backfill-date-input" bind:value={entry.manualDate} />
+									<button
+										class="action-btn action-btn-small"
+										type="button"
+										disabled={backfillFixingId === entry.dog.id || !entry.manualDate}
+										on:click={() => applyManualDate(entry)}
+									>Set</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+					{#if backfillUnknown.some((u) => u.manualDate)}
+						<button class="action-btn backfill-apply" type="button" on:click={applyAllFilledDates} disabled={backfillApplying}>
+							{backfillApplying ? 'Applying…' : `Apply all ${backfillUnknown.filter((u) => u.manualDate).length} filled date${backfillUnknown.filter((u) => u.manualDate).length === 1 ? '' : 's'}`}
+						</button>
+					{/if}
+				{/if}
+			</section>
+
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
@@ -499,6 +691,51 @@
 	.ghost-btn:disabled {
 		opacity: 0.65;
 		box-shadow: none;
+	}
+
+	.action-btn-small {
+		min-height: 1.9rem;
+		padding: 0.3rem 0.6rem;
+		font-size: 0.72rem;
+		border-radius: 0.5rem;
+	}
+
+	.repair-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		flex-shrink: 0;
+		align-items: center;
+	}
+
+	.status-row-plain {
+		margin-top: 0.8rem;
+	}
+
+	.suspect-name {
+		margin: 0;
+		font-family: var(--font-ui);
+		font-size: 0.94rem;
+		font-weight: 800;
+		color: #133149;
+	}
+
+	.suspect-detail {
+		margin: 0;
+		font-family: var(--font-ui);
+		font-size: 0.8rem;
+		color: #526b81;
+	}
+
+	.backfill-apply {
+		margin-top: 0.7rem;
+	}
+
+	.backfill-date-input {
+		width: auto;
+		min-height: 1.9rem;
+		padding: 0.24rem 0.4rem;
+		font-size: 0.78rem;
 	}
 
 	.danger-btn {
