@@ -10,6 +10,7 @@
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import { getBathAttentionDogs, getCautionDogs, getOverdueEnrichmentDogs } from '$lib/utils/attention';
+	import { getDailyMovements, type DailyMovements } from '$lib/utils/movements';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import { subscribeHandoff, saveHandoff, type ShiftHandoff } from '$lib/data/handoff';
 	import type { CleaningShift } from '$lib/data/cleaning';
@@ -68,6 +69,12 @@
 	let activeDogs: Dog[] = [];
 	let allActiveDogs: Dog[] = [];
 	let recentlyAdopted: RecentlyAdoptedItem[] = [];
+	let dailyMovements: DailyMovements = { arrived: [], returned: [], toFoster: [], adopted: [] };
+	$: movementCount =
+		dailyMovements.arrived.length +
+		dailyMovements.returned.length +
+		dailyMovements.toFoster.length +
+		dailyMovements.adopted.length;
 	let failedThumbs = new Set<string>();
 	let playgroupSessions: PlaygroupSession[] = [];
 	let dayTripLogs: DayTripLog[] = [];
@@ -578,6 +585,8 @@
 
 			allActiveDogs = allActive;
 			activeDogs = active;
+			// Movements need the FULL list (including dogs adopted/archived today).
+			dailyMovements = getDailyMovements(dogs, new Date());
 			dayTripLogs = tripLogs;
 			feedingLogsByDog = feedingByDog;
 			playgroupSessions = pgSessions;
@@ -867,6 +876,57 @@
 									test compatibility · {dayGapLabel(item.days)}
 								{/if}
 							</span>
+						</a>
+					{/each}
+				{/if}
+			</div>
+		</section>
+
+		<section class="planner-list planner-list-sand" class:planner-list-empty={!loading && movementCount === 0}>
+			<div class="planner-list-head">
+				<h2>Today's Movements</h2>
+				<span class="planner-pill planner-pill-amber">{movementCount}</span>
+			</div>
+			<div class="planner-items">
+				{#if loading}
+					<p class="planner-empty-row">Loading...</p>
+				{:else if movementCount === 0}
+					<p class="planner-empty-row">No arrivals, returns, fosters, or adoptions logged today.</p>
+				{:else}
+					{#each dailyMovements.arrived as dog (dog.id)}
+						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
+							<span class="planner-row-main">
+								<span class="planner-bullet">🐕</span>
+								<span class="planner-row-text">{dog.name}</span>
+							</span>
+							<span class="movement-tag movement-tag-arrived">arrived</span>
+						</a>
+					{/each}
+					{#each dailyMovements.returned as dog (dog.id)}
+						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
+							<span class="planner-row-main">
+								<span class="planner-bullet">↩️</span>
+								<span class="planner-row-text">{dog.name}</span>
+							</span>
+							<span class="movement-tag movement-tag-returned">returned</span>
+						</a>
+					{/each}
+					{#each dailyMovements.toFoster as dog (dog.id)}
+						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
+							<span class="planner-row-main">
+								<span class="planner-bullet">🏡</span>
+								<span class="planner-row-text">{dog.name}</span>
+							</span>
+							<span class="movement-tag movement-tag-foster">to foster</span>
+						</a>
+					{/each}
+					{#each dailyMovements.adopted as item (item.dog.id)}
+						<a class="planner-row planner-row-link" href="/dogs/{item.dog.id}">
+							<span class="planner-row-main">
+								<span class="planner-bullet">{item.transferred ? '🚌' : '🏠'}</span>
+								<span class="planner-row-text">{item.dog.name}</span>
+							</span>
+							<span class="movement-tag movement-tag-adopted">{item.transferred ? 'transferred' : 'adopted'}</span>
 						</a>
 					{/each}
 				{/if}
@@ -1459,6 +1519,37 @@
 	.attention-tag-enrichment {
 		background: rgba(90, 150, 90, 0.14);
 		color: #3a6e3a;
+	}
+
+	.movement-tag {
+		flex-shrink: 0;
+		padding: 0.14rem 0.38rem;
+		border-radius: 999px;
+		font-family: var(--font-ui);
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+	}
+
+	.movement-tag-arrived {
+		background: rgba(1, 107, 165, 0.1);
+		color: #016aa5;
+	}
+
+	.movement-tag-returned {
+		background: rgba(180, 120, 40, 0.14);
+		color: #7a5010;
+	}
+
+	.movement-tag-foster {
+		background: rgba(147, 57, 128, 0.12);
+		color: #6b2060;
+	}
+
+	.movement-tag-adopted {
+		background: rgba(59, 175, 43, 0.12);
+		color: #2c8e1d;
 	}
 
 	.attention-tag-dogstest {
