@@ -449,6 +449,19 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			}
 		}
 	} catch { /* ignore */ }
+
+	// Deceased dogs still present in the ASM payload: archive as euthanized, with
+	// the deceased date as the movement date. This must win over the adoptions
+	// feed so a passed dog is never mislabeled "adopted".
+	for (const a of allAnimals) {
+		if (!a.DECEASEDDATE) continue;
+		if ((a.SPECIESNAME ?? '').toLowerCase() !== 'dog') continue;
+		if (!a.SHELTERCODE) continue;
+		shelterCodeOutcomes.set(a.SHELTERCODE, 'euthanized');
+		const deceased = normalizeDateStr(a.DECEASEDDATE);
+		if (deceased) movementDateByShelterCode.set(a.SHELTERCODE, deceased);
+	}
+
 	const archived = await markStaleAsmDogsArchived(currentAsmIds, shelterCodeOutcomes, movementDateByShelterCode);
 
 	const archivedChanges: SyncChange[] = archived.map(({ id, name, outcome }) => ({
@@ -529,7 +542,9 @@ export async function markStaleAsmDogsArchived(
 			const staleData = staleDoc.data();
 			const shelterCode = staleData.asmShelterCode as string | undefined;
 			const outcome: ArchiveOutcome = (shelterCode && shelterCodeOutcomes.get(shelterCode)) || 'adopted';
-			const movementDate = shelterCode ? (movementDateByShelterCode.get(shelterCode) ?? null) : null;
+			// Fall back to the archive time so leftShelterDate is always set — the
+			// movements summary counts departures strictly by this field.
+			const movementDate = (shelterCode ? movementDateByShelterCode.get(shelterCode) : null) ?? now;
 			batch.set(staleDoc.ref, {
 				status: outcome,
 				outdoorKennelAssignment: '',

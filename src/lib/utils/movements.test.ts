@@ -47,15 +47,24 @@ describe('getDailyMovements', () => {
 		expect(m.toFoster.map((d) => d.name)).toEqual(['Fosterling']);
 	});
 
-	it('counts adoptions and transfers archived today, flagged apart', () => {
+	it('counts departures strictly by leftShelterDate, with their outcome', () => {
 		const adopted = makeDog({ name: 'Lucky', status: 'adopted', leftShelterDate: todayMorning });
 		const transferred = makeDog({ name: 'Mover', status: 'transferred', leftShelterDate: todayMorning });
-		// Archived today but ASM gave no movement date — falls back to updatedAt.
-		const noDate = makeDog({ name: 'Quiet', status: 'adopted', leftShelterDate: null, updatedAt: todayMorning });
-		const m = getDailyMovements([adopted, transferred, noDate], today);
-		expect(m.adopted.map((a) => a.dog.name)).toEqual(['Lucky', 'Mover', 'Quiet']);
-		expect(m.adopted.find((a) => a.dog.name === 'Mover')?.transferred).toBe(true);
-		expect(m.adopted.find((a) => a.dog.name === 'Lucky')?.transferred).toBe(false);
+		const passed = makeDog({ name: 'Old Soul', status: 'euthanized', leftShelterDate: todayMorning });
+		const m = getDailyMovements([adopted, transferred, passed], today);
+		expect(m.departed.map((a) => `${a.dog.name}:${a.outcome}`)).toEqual([
+			'Lucky:adopted',
+			'Mover:transferred',
+			'Old Soul:euthanized'
+		]);
+	});
+
+	it('does not count an archived dog edited today (no leftShelterDate) as a departure', () => {
+		// e.g. correcting an old dog's outcome via the admin audit: updatedAt is
+		// today, but no departure happened today.
+		const corrected = makeDog({ name: 'OldCase', status: 'transferred', leftShelterDate: null, updatedAt: todayMorning });
+		const m = getDailyMovements([corrected], today);
+		expect(m.departed).toEqual([]);
 	});
 
 	it('ignores dogs with no movement today', () => {
@@ -65,6 +74,6 @@ describe('getDailyMovements', () => {
 		expect(m.arrived).toEqual([]);
 		expect(m.returned).toEqual([]);
 		expect(m.toFoster).toEqual([]);
-		expect(m.adopted).toEqual([]);
+		expect(m.departed).toEqual([]);
 	});
 });

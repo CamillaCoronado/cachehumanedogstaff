@@ -69,12 +69,33 @@
 	let activeDogs: Dog[] = [];
 	let allActiveDogs: Dog[] = [];
 	let recentlyAdopted: RecentlyAdoptedItem[] = [];
-	let dailyMovements: DailyMovements = { arrived: [], returned: [], toFoster: [], adopted: [] };
+	// Movements panel: derived from the full dog list (incl. archived) for
+	// whichever day is picked; defaults to today.
+	let movementDogs: Dog[] = [];
+	const localDayStr = (d: Date) =>
+		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	let movementsDayStr = localDayStr(new Date());
+	function shiftMovementsDay(delta: number) {
+		const [y, m, d] = movementsDayStr.split('-').map(Number);
+		movementsDayStr = localDayStr(new Date(y, m - 1, d + delta));
+	}
+	$: movementsDay = (() => {
+		const [y, m, d] = movementsDayStr.split('-').map(Number);
+		return new Date(y, (m || 1) - 1, d || 1, 12);
+	})();
+	$: movementsIsToday = movementsDayStr === localDayStr(new Date());
+	$: dailyMovements = getDailyMovements(movementDogs, movementsDay) satisfies DailyMovements;
 	$: movementCount =
 		dailyMovements.arrived.length +
 		dailyMovements.returned.length +
 		dailyMovements.toFoster.length +
-		dailyMovements.adopted.length;
+		dailyMovements.departed.length;
+
+	const departureDisplay = {
+		adopted: { emoji: '🏠', label: 'adopted', tagClass: 'movement-tag-adopted' },
+		transferred: { emoji: '🚌', label: 'transferred', tagClass: 'movement-tag-adopted' },
+		euthanized: { emoji: '🌈', label: 'rainbow bridge', tagClass: 'movement-tag-rainbow' }
+	} as const;
 	let failedThumbs = new Set<string>();
 	let playgroupSessions: PlaygroupSession[] = [];
 	let dayTripLogs: DayTripLog[] = [];
@@ -585,8 +606,8 @@
 
 			allActiveDogs = allActive;
 			activeDogs = active;
-			// Movements need the FULL list (including dogs adopted/archived today).
-			dailyMovements = getDailyMovements(dogs, new Date());
+			// Movements need the FULL list (including archived dogs).
+			movementDogs = dogs;
 			dayTripLogs = tripLogs;
 			feedingLogsByDog = feedingByDog;
 			playgroupSessions = pgSessions;
@@ -884,14 +905,19 @@
 
 		<section class="planner-list planner-list-sand" class:planner-list-empty={!loading && movementCount === 0}>
 			<div class="planner-list-head">
-				<h2>Today's Movements</h2>
+				<h2>{movementsIsToday ? "Today's Movements" : 'Movements'}</h2>
 				<span class="planner-pill planner-pill-amber">{movementCount}</span>
+				<div class="movement-day-controls">
+					<button type="button" class="movement-day-btn" aria-label="Previous day" on:click={() => shiftMovementsDay(-1)}>‹</button>
+					<input type="date" class="movement-day-input" bind:value={movementsDayStr} max={localDayStr(new Date())} />
+					<button type="button" class="movement-day-btn" aria-label="Next day" disabled={movementsIsToday} on:click={() => shiftMovementsDay(1)}>›</button>
+				</div>
 			</div>
 			<div class="planner-items">
 				{#if loading}
 					<p class="planner-empty-row">Loading...</p>
 				{:else if movementCount === 0}
-					<p class="planner-empty-row">No arrivals, returns, fosters, or adoptions logged today.</p>
+					<p class="planner-empty-row">No arrivals, returns, fosters, or adoptions {movementsIsToday ? 'logged today' : 'on this day'}.</p>
 				{:else}
 					{#each dailyMovements.arrived as dog (dog.id)}
 						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
@@ -920,13 +946,13 @@
 							<span class="movement-tag movement-tag-foster">to foster</span>
 						</a>
 					{/each}
-					{#each dailyMovements.adopted as item (item.dog.id)}
+					{#each dailyMovements.departed as item (item.dog.id)}
 						<a class="planner-row planner-row-link" href="/dogs/{item.dog.id}">
 							<span class="planner-row-main">
-								<span class="planner-bullet">{item.transferred ? '🚌' : '🏠'}</span>
+								<span class="planner-bullet">{departureDisplay[item.outcome].emoji}</span>
 								<span class="planner-row-text">{item.dog.name}</span>
 							</span>
-							<span class="movement-tag movement-tag-adopted">{item.transferred ? 'transferred' : 'adopted'}</span>
+							<span class={`movement-tag ${departureDisplay[item.outcome].tagClass}`}>{departureDisplay[item.outcome].label}</span>
 						</a>
 					{/each}
 				{/if}
@@ -1521,6 +1547,39 @@
 		color: #3a6e3a;
 	}
 
+	.movement-day-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-left: auto;
+	}
+
+	.movement-day-btn {
+		border: 1px solid #d8cdb4;
+		background: #fffdf6;
+		border-radius: 0.4rem;
+		width: 1.6rem;
+		height: 1.6rem;
+		line-height: 1;
+		font-size: 0.95rem;
+		font-weight: 700;
+		color: #6d5b2e;
+	}
+
+	.movement-day-btn:disabled {
+		opacity: 0.4;
+	}
+
+	.movement-day-input {
+		border: 1px solid #d8cdb4;
+		background: #fffdf6;
+		border-radius: 0.4rem;
+		padding: 0.14rem 0.3rem;
+		font-family: var(--font-ui);
+		font-size: 0.7rem;
+		color: #4d4128;
+	}
+
 	.movement-tag {
 		flex-shrink: 0;
 		padding: 0.14rem 0.38rem;
@@ -1550,6 +1609,11 @@
 	.movement-tag-adopted {
 		background: rgba(59, 175, 43, 0.12);
 		color: #2c8e1d;
+	}
+
+	.movement-tag-rainbow {
+		background: linear-gradient(90deg, rgba(207, 75, 75, 0.14), rgba(224, 168, 42, 0.14), rgba(59, 175, 43, 0.14), rgba(1, 107, 165, 0.14), rgba(147, 57, 128, 0.14));
+		color: #4a4a58;
 	}
 
 	.attention-tag-dogstest {

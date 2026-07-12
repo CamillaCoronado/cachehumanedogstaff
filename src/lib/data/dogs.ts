@@ -286,9 +286,12 @@ function normalizeDogHandlingLevel(value: unknown): DogHandlingLevel {
 }
 
 function applyStatusTransition(current: Dog, updates: Partial<Dog>, now: Date): Dog {
+	const ARCHIVED: Dog['status'][] = ['adopted', 'transferred', 'euthanized'];
 	const nextStatus = updates.status ?? current.status;
-	const changedToAdopted = current.status !== 'adopted' && nextStatus === 'adopted';
-	const changedToActive = current.status === 'adopted' && nextStatus === 'active';
+	// Leaving the shelter for any reason clears housing/trip state; returning to
+	// active from any archived status records a re-entry.
+	const changedToAdopted = !ARCHIVED.includes(current.status) && ARCHIVED.includes(nextStatus);
+	const changedToActive = ARCHIVED.includes(current.status) && nextStatus === 'active';
 
 	const merged: Dog = applyFosterHousingRules({
 		...current,

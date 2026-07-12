@@ -739,7 +739,7 @@
 										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
 										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
 										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
-										<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : 'Adopted'}</strong></p>
+										<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : dog.status === 'transferred' ? 'Transferred' : dog.status === 'euthanized' ? 'Euthanized' : 'Adopted'}</strong></p>
 										{#if dog.notAdoptable}
 											<p><span>Adoptability:</span> <strong class="detail-note">Not adoptable{dog.notAdoptableReason ? ` — ${dog.notAdoptableReason}` : ''}</strong></p>
 										{/if}
