@@ -312,14 +312,25 @@ const today = new Date();
 		await refreshDogs();
 	}
 
+	const bathLoggingIds = new Set<string>();
+
 	async function handleLogBath(dog: Dog) {
+		if (bathLoggingIds.has(dog.id)) return;
 		if (!bathEligible(dog.surgeryDate, today)) {
 			toast.error('Baths are blocked for 10 days after surgery.');
 			return;
 		}
-		await logBath(dog.id);
-		toast.success(`Bath logged for ${dog.name}.`);
-		await refreshDogs();
+		bathLoggingIds.add(dog.id);
+		try {
+			await logBath(dog.id, $authProfile);
+			toast.success(`Bath logged for ${dog.name}.`);
+			await refreshDogs();
+		} catch (error) {
+			console.error(error);
+			toast.error(`Unable to log bath for ${dog.name}.`);
+		} finally {
+			bathLoggingIds.delete(dog.id);
+		}
 	}
 
 	async function handleReturnDog(dog: Dog) {

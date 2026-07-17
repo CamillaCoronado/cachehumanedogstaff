@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog, PlaygroupSession } from '$lib/types';
-import { getOverdueEnrichmentDogs } from './attention';
+import { getCautionDogs, getOverdueEnrichmentDogs } from './attention';
 
 function makeDog(overrides: Partial<Dog> = {}): Dog {
 	return {
@@ -69,6 +69,30 @@ function makeSession(dogId: string, date: Date): PlaygroupSession {
 		notes: null
 	} as PlaygroupSession;
 }
+
+describe('getCautionDogs', () => {
+	const today = new Date(2026, 6, 16);
+
+	it('flags an adult with unknown dog compatibility and no playgroup history', () => {
+		const adult = makeDog({ goodWithDogs: 'unknown', dateOfBirth: new Date(2024, 0, 1) });
+		expect(getCautionDogs([adult], [], today)).toEqual([adult]);
+	});
+
+	it('exempts puppies — presumed good with dogs/cats/kids, no test needed', () => {
+		const puppy = makeDog({ goodWithDogs: 'unknown', dateOfBirth: new Date(2026, 3, 1) });
+		expect(getCautionDogs([puppy], [], today)).toEqual([]);
+	});
+
+	it('still flags a dog of unknown age', () => {
+		const unknownAge = makeDog({ goodWithDogs: 'unknown', dateOfBirth: null });
+		expect(getCautionDogs([unknownAge], [], today)).toEqual([unknownAge]);
+	});
+
+	it('a dog past the puppy cutoff is no longer exempt', () => {
+		const grownUp = makeDog({ goodWithDogs: 'unknown', dateOfBirth: new Date(2025, 6, 1) });
+		expect(getCautionDogs([grownUp], [], today)).toEqual([grownUp]);
+	});
+});
 
 describe('getOverdueEnrichmentDogs', () => {
 	const today = new Date(2026, 3, 10);

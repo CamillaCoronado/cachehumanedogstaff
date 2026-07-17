@@ -247,20 +247,14 @@
 				photoUploadError = 'Photo is still too large after compression. Try a smaller image.';
 				return;
 			}
-			const previousPhotoUrl = value.photoUrl;
 			const uploadedUrl = await uploadDogPhotoDataUrl(optimized, {
 				dogId: value.id && value.id !== 'draft' ? value.id : null,
 				mimeType: file.type
 			});
-			value = { ...value, photoUrl: uploadedUrl } as Dog;
+			// Append to the gallery and make the new upload the primary photo.
+			// Earlier photos stay — nothing is deleted on upload.
+			value = { ...value, photoUrls: [...galleryPhotos, uploadedUrl], photoUrl: uploadedUrl } as Dog;
 			dispatch('change', { value, valid: true });
-			if (previousPhotoUrl && previousPhotoUrl !== uploadedUrl) {
-				try {
-					await deleteDogPhotoByUrl(previousPhotoUrl);
-				} catch (cleanupError) {
-					console.warn('Previous dog photo cleanup failed', cleanupError);
-				}
-			}
 		} catch (error) {
 			console.error(error);
 			photoUploadError = getStorageUploadErrorMessage(error);
@@ -270,19 +264,38 @@
 		}
 	}
 
-	async function clearPhoto() {
+	function isUploadedPhoto(url: string | null | undefined): url is string {
+		return !!url && url.includes('firebasestorage');
+	}
+
+	// The gallery is photoUrls plus a legacy app-uploaded primary from before
+	// galleries existed. ASM photos are not gallery items — they live only in
+	// photoUrl and are replaced wholesale by the sync.
+	$: galleryPhotos = (() => {
+		const urls = [...(value.photoUrls ?? [])];
+		if (isUploadedPhoto(value.photoUrl) && !urls.includes(value.photoUrl)) urls.unshift(value.photoUrl);
+		return urls;
+	})();
+
+	function setPrimaryPhoto(url: string) {
+		if (value.photoUrl === url) return;
+		value = { ...value, photoUrls: galleryPhotos, photoUrl: url } as Dog;
+		dispatch('change', { value, valid: true });
+	}
+
+	async function removePhoto(url: string) {
 		photoUploadError = '';
-		const previousPhotoUrl = value.photoUrl;
-		if (!previousPhotoUrl) return;
 		try {
 			photoUploading = true;
-			await deleteDogPhotoByUrl(previousPhotoUrl);
+			await deleteDogPhotoByUrl(url);
 		} catch (error) {
 			console.error(error);
 		} finally {
 			photoUploading = false;
 		}
-		value = { ...value, photoUrl: null } as Dog;
+		const remaining = galleryPhotos.filter((u) => u !== url);
+		const nextPrimary = value.photoUrl === url ? (remaining[0] ?? null) : value.photoUrl;
+		value = { ...value, photoUrls: remaining, photoUrl: nextPrimary } as Dog;
 		dispatch('change', { value, valid: true });
 	}
 
@@ -519,7 +532,7 @@
 				{/if}
 			</div>
 			<div class="form-field md:col-span-2">
-				<label class="form-label typewriter">Photo</label>
+				<label class="form-label typewriter">Photos</label>
 				<div class="form-photo-shell">
 					<div class="form-photo-preview-wrap">
 						{#if value.photoUrl && !photoLoadFailed}
@@ -543,23 +556,46 @@
 							disabled={disabled || photoUploading}
 							on:change={handlePhotoUpload}
 						/>
-						{#if value.photoUrl && !photoLoadFailed}
-							<button
-								type="button"
-								class="form-choice-btn"
-								disabled={disabled || photoUploading}
-								on:click={clearPhoto}
-							>
-								Remove Photo
-							</button>
-						{/if}
 					</div>
 				</div>
+				{#if galleryPhotos.length > 0}
+					<ul class="form-photo-gallery">
+						{#each galleryPhotos as url (url)}
+							<li class="form-photo-thumb-item" class:form-photo-thumb-primary={value.photoUrl === url}>
+								<img
+									class="form-photo-thumb"
+									src={url}
+									alt={`Photo of ${value.name || 'dog'}`}
+									loading="lazy"
+									on:error={() => logPhotoError('dog-form-gallery', value.id ?? null, url)}
+								/>
+								<div class="form-photo-thumb-actions">
+									{#if value.photoUrl === url}
+										<span class="form-photo-primary-tag typewriter">primary</span>
+									{:else}
+										<button
+											type="button"
+											class="form-photo-thumb-btn"
+											disabled={disabled || photoUploading}
+											on:click={() => setPrimaryPhoto(url)}
+										>Make primary</button>
+									{/if}
+									<button
+										type="button"
+										class="form-photo-thumb-btn form-photo-thumb-btn-danger"
+										disabled={disabled || photoUploading}
+										on:click={() => removePhoto(url)}
+									>Remove</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 				<p class="form-hint">
 					{#if photoUploading}
 						Uploading to Firebase...
 					{:else}
-						Upload from your phone or computer. Saved to Firebase with this dog profile.
+						Upload from your phone or computer — each upload is added to the gallery and becomes the primary photo. ASM photos are never overwritten by uploads.
 					{/if}
 				</p>
 				{#if photoUploadError}
@@ -1584,6 +1620,67 @@
 
 	.form-file-input {
 		padding: 0.45rem 0.55rem;
+	}
+
+	.form-photo-gallery {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin-top: 0.6rem;
+		padding: 0;
+		list-style: none;
+	}
+
+	.form-photo-thumb-item {
+		display: grid;
+		gap: 0.3rem;
+		width: 7rem;
+	}
+
+	.form-photo-thumb {
+		width: 7rem;
+		height: 9.33rem;
+		aspect-ratio: 3 / 4;
+		object-fit: cover;
+		border: 1.5px solid #c0c8d2;
+		border-radius: 0.28rem;
+		background: #edf2f7;
+	}
+
+	.form-photo-thumb-primary .form-photo-thumb {
+		border-color: #016aa5;
+		border-width: 2px;
+	}
+
+	.form-photo-thumb-actions {
+		display: grid;
+		gap: 0.25rem;
+	}
+
+	.form-photo-primary-tag {
+		font-size: 0.62rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #016aa5;
+		text-align: center;
+	}
+
+	.form-photo-thumb-btn {
+		font-size: 0.65rem;
+		padding: 0.25rem 0.4rem;
+		border: 1.5px solid #c0c8d2;
+		border-radius: 0.28rem;
+		background: #f7f9fc;
+		color: #33415c;
+	}
+
+	.form-photo-thumb-btn:disabled {
+		opacity: 0.5;
+	}
+
+	.form-photo-thumb-btn-danger {
+		color: #cf4b4b;
+		border-color: #cf4b4b;
 	}
 
 	.form-section-title {

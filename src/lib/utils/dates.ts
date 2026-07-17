@@ -123,6 +123,13 @@ export interface DayTripEligibility {
 export const PUPPY_MAX_AGE_MONTHS = 6;
 export const PUPPY_MIN_DAYS_AT_SHELTER = 30;
 
+// Puppies don't need a behavioral evaluation, so the awaitingEvaluation flag
+// is never set for dogs under this age (and is cleared by the sync if present).
+export function isPuppyAge(dateOfBirth: DateValue | string | null | undefined, today = new Date()): boolean {
+	const dob = toDate(dateOfBirth);
+	return dob !== null && differenceInMonths(today, dob) < PUPPY_MAX_AGE_MONTHS;
+}
+
 export function checkDayTripEligibility(
 	intakeDate: DateValue | string | null | undefined,
 	isVaccinated: boolean,
@@ -197,8 +204,7 @@ export function checkDayTripEligibility(
 	// Puppies (under 6 months) are not day-trip eligible until they've been with us a
 	// while (30+ days). If we can't tell how long they've been here, stay conservative
 	// and block. Older dogs are unaffected.
-	const dobDate = toDate(dateOfBirth);
-	const isPuppy = dobDate !== null && differenceInMonths(today, dobDate) < PUPPY_MAX_AGE_MONTHS;
+	const isPuppy = isPuppyAge(dateOfBirth, today);
 	const intakeDateObj = toDate(intakeDate);
 	const daysWithUs = intakeDateObj ? differenceInDays(startOfDay(today), startOfDay(intakeDateObj)) : null;
 	// 30-day rule is the default for under-6-month puppies, but a manager can override

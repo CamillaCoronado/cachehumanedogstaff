@@ -63,6 +63,8 @@ export interface Dog {
 	foodAmount: string;
 	dietaryNotes: string;
 	photoUrl?: string | null;
+	/** App-uploaded photo gallery; photoUrl stays the primary/display photo. */
+	photoUrls?: string[];
 	hasOwnFood?: boolean;
 	transitionToHills?: boolean | null;
 	satinBalls?: boolean;

@@ -447,6 +447,9 @@
 			await logBath(dog.id, $authProfile);
 			toast.success('Bath logged.');
 			await loadAll();
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to log bath.');
 		} finally {
 			savingBath = false;
 		}

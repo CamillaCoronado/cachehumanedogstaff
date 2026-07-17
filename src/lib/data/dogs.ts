@@ -15,7 +15,7 @@ import type {
 	YardLog
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
-import { toDate, toDateString } from '$lib/utils/dates';
+import { isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
 import { db } from '$lib/firebase/config';
 import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, setDoc, where, writeBatch } from 'firebase/firestore';
 
@@ -50,6 +50,7 @@ interface StoredDog {
 	foodAmount: string;
 	dietaryNotes: string;
 	photoUrl?: string | null;
+	photoUrls?: string[] | null;
 	hasOwnFood?: boolean;
 	transitionToHills?: boolean | null;
 	origin?: string;
@@ -321,7 +322,8 @@ function applyStatusTransition(current: Dog, updates: Partial<Dog>, now: Date): 
 			...merged,
 			leftShelterDate: null,
 			reentryDates: appendUniqueDate(merged.reentryDates, reentryAt),
-			awaitingEvaluation: true
+			// Puppies don't need evaluation.
+			awaitingEvaluation: !isPuppyAge(merged.dateOfBirth)
 		});
 	}
 
@@ -348,6 +350,7 @@ function serializeDog(dog: Dog): StoredDog {
 		foodAmount: dog.foodAmount,
 		dietaryNotes: dog.dietaryNotes,
 		photoUrl: dog.photoUrl ?? null,
+		photoUrls: dog.photoUrls ?? [],
 		hasOwnFood: dog.hasOwnFood ?? false,
 		transitionToHills: dog.transitionToHills ?? null,
 		satinBalls: dog.satinBalls ?? false,
@@ -507,6 +510,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		foodAmount: stored.foodAmount,
 		dietaryNotes: stored.dietaryNotes,
 		photoUrl: typeof stored.photoUrl === 'string' ? stored.photoUrl : null,
+		photoUrls: Array.isArray(stored.photoUrls) ? stored.photoUrls.filter((u): u is string => typeof u === 'string') : [],
 		hasOwnFood: stored.hasOwnFood ?? false,
 		transitionToHills: typeof stored.transitionToHills === 'boolean' ? stored.transitionToHills : null,
 		satinBalls: stored.satinBalls ?? false,
@@ -864,7 +868,7 @@ export async function createDog(data: Omit<Dog, 'id' | 'createdAt' | 'updatedAt'
 		const now = new Date();
 		const dog: Dog = applyFosterHousingRules({
 			...data,
-			awaitingEvaluation: true,
+			awaitingEvaluation: !isPuppyAge(data.dateOfBirth),
 			id: createId('dog'),
 			createdAt: now,
 			updatedAt: now
@@ -877,7 +881,7 @@ export async function createDog(data: Omit<Dog, 'id' | 'createdAt' | 'updatedAt'
 	const now = new Date();
 	const dog: Dog = applyFosterHousingRules({
 		...data,
-		awaitingEvaluation: true,
+		awaitingEvaluation: !isPuppyAge(data.dateOfBirth),
 		id: createId('dog'),
 		createdAt: now,
 		updatedAt: now
@@ -908,8 +912,72 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 	return getDog(id);
 }
 
+// Re-derives the denormalized bath/yard timers from the dog's logs — the
+// source of truth after logs move between dogs (merge) or are deleted.
+async function recomputeCareTimers(dogId: string) {
+	const [baths, yards] = await Promise.all([listBathLogs(dogId), listYardLogs(dogId)]);
+	let latestBath: BathLog | null = null;
+	for (const log of baths) {
+		if (!latestBath || toMillis(log.timestamp) > toMillis(latestBath.timestamp)) latestBath = log;
+	}
+	let latestYard: YardLog | null = null;
+	for (const log of yards) {
+		if (!latestYard || toMillis(log.timestamp) > toMillis(latestYard.timestamp)) latestYard = log;
+	}
+	await updateDog(dogId, {
+		lastBathDate: latestBath ? toDate(latestBath.timestamp) : null,
+		lastBathBy: latestBath?.loggedByName ?? null,
+		lastYardDate: latestYard ? toDate(latestYard.timestamp) : null
+	});
+}
+
+// Field-level merge of two records describing the same dog: the keep dog's
+// values win wherever it has real data; gaps (null, '', 'unknown', empty
+// array, default false/0) are filled from the dog being deleted. Name and id
+// always stay the keep dog's. Status becomes active if either record is
+// active — a merged duplicate of a dog still at the shelter is at the shelter.
+function pickMergedDogFields(keep: Dog, remove: Dog): Partial<Dog> {
+	const updates: Partial<Dog> = {};
+	const skip = new Set<keyof Dog>(['id', 'name']);
+	for (const key of Object.keys(remove) as (keyof Dog)[]) {
+		if (skip.has(key)) continue;
+		const keepValue = keep[key];
+		const removeValue = remove[key];
+		if (removeValue === null || removeValue === undefined) continue;
+		if (key === 'status') {
+			if (keepValue !== 'active' && removeValue === 'active') updates.status = 'active';
+			continue;
+		}
+		if (typeof removeValue === 'boolean') {
+			if (removeValue && !keepValue) (updates as Record<string, unknown>)[key] = true;
+			continue;
+		}
+		if (Array.isArray(removeValue)) {
+			if (removeValue.length > 0 && !(Array.isArray(keepValue) && keepValue.length > 0)) {
+				(updates as Record<string, unknown>)[key] = removeValue;
+			}
+			continue;
+		}
+		const keepIsMissing =
+			keepValue === null ||
+			keepValue === undefined ||
+			(typeof keepValue === 'string' && (keepValue.trim() === '' || keepValue === 'unknown')) ||
+			(typeof keepValue === 'number' && keepValue === 0);
+		if (keepIsMissing) (updates as Record<string, unknown>)[key] = removeValue;
+	}
+	return updates;
+}
+
 export async function mergeDogs(keepId: string, deleteId: string) {
 	const subcollections = ['behavioralNotes', 'bathLogs', 'yardLogs', 'feedingLogs', 'stoolLogs', 'dayTripLogs'] as const;
+
+	// Fill the keep dog's profile gaps from the dog about to be deleted, so
+	// merging in either direction preserves the union of what both knew.
+	const [keepDog, removeDog] = await Promise.all([getDog(keepId), getDog(deleteId)]);
+	if (keepDog && removeDog) {
+		const fieldUpdates = pickMergedDogFields(keepDog, removeDog);
+		if (Object.keys(fieldUpdates).length > 0) await updateDog(keepId, fieldUpdates);
+	}
 
 	if (db) {
 		for (const sub of subcollections) {
@@ -923,6 +991,8 @@ export async function mergeDogs(keepId: string, deleteId: string) {
 			await batch.commit();
 		}
 		await deleteDog(deleteId);
+		await recomputeLastDayTripDate(keepId);
+		await recomputeCareTimers(keepId);
 		return;
 	}
 
@@ -936,6 +1006,11 @@ export async function mergeDogs(keepId: string, deleteId: string) {
 	baths[keepId] = [...(baths[keepId] ?? []), ...(baths[deleteId] ?? [])];
 	delete baths[deleteId];
 	writeJson(BATH_KEY, baths);
+
+	const yards = readJson<LogMap<StoredYardLog>>(YARD_KEY, {});
+	yards[keepId] = [...(yards[keepId] ?? []), ...(yards[deleteId] ?? [])];
+	delete yards[deleteId];
+	writeJson(YARD_KEY, yards);
 
 	const feeding = readJson<LogMap<StoredFeedingLog>>(FEEDING_KEY, {});
 	feeding[keepId] = [...(feeding[keepId] ?? []), ...(feeding[deleteId] ?? [])];
@@ -953,6 +1028,8 @@ export async function mergeDogs(keepId: string, deleteId: string) {
 	writeDayTripMap(dayTrips);
 
 	await deleteDog(deleteId);
+	await recomputeLastDayTripDate(keepId);
+	await recomputeCareTimers(keepId);
 }
 
 export async function archiveDog(id: string) {
@@ -1353,23 +1430,36 @@ export async function addStoolLog(dogId: string, log: Omit<StoolLog, 'id' | 'log
 	return entry;
 }
 
+// Stamps the dog doc's denormalized care timers (lastBathDate/lastYardDate)
+// with a field-only merge so staff/volunteer writes pass the rules'
+// affectedKeys check. A permission failure here must not lose the log that
+// was just written, so it is swallowed.
+async function touchDogTimerFields(
+	dogId: string,
+	fields: Partial<Record<'lastBathDate' | 'lastBathBy' | 'lastYardDate', string | null>>
+) {
+	const ref = dogRef(dogId);
+	if (!ref) return;
+	try {
+		await setDoc(ref, fields, { merge: true });
+	} catch (error) {
+		if (!isPermissionDenied(error)) throw error;
+	}
+}
+
 export async function logBath(dogId: string, profile?: UserProfile | null, timestamp?: Date) {
 	const identity = getUserIdentity(profile);
 	const now = timestamp ?? new Date();
 	const ref = dogSubcollectionRef(dogId, 'bathLogs');
 	if (ref) {
-		try {
-			const entry: BathLog = {
-				id: createId('bath'),
-				timestamp: now,
-				loggedBy: identity.uid,
-				loggedByName: identity.name
-			};
-			await setDoc(doc(ref, entry.id), serializeBathLog(entry));
-		} catch (error) {
-			if (!isPermissionDenied(error)) throw error;
-		}
-		await updateDog(dogId, { lastBathDate: now, lastBathBy: identity.name });
+		const entry: BathLog = {
+			id: createId('bath'),
+			timestamp: now,
+			loggedBy: identity.uid,
+			loggedByName: identity.name
+		};
+		await setDoc(doc(ref, entry.id), serializeBathLog(entry));
+		await touchDogTimerFields(dogId, { lastBathDate: toDateString(now), lastBathBy: identity.name });
 		return null;
 	}
 
@@ -1425,12 +1515,8 @@ export async function logYardTime(
 	};
 	const ref = dogSubcollectionRef(dogId, 'yardLogs');
 	if (ref) {
-		try {
-			await setDoc(doc(ref, entry.id), serializeYardLog(entry));
-		} catch (error) {
-			if (!isPermissionDenied(error)) throw error;
-		}
-		await updateDog(dogId, { lastYardDate: now });
+		await setDoc(doc(ref, entry.id), serializeYardLog(entry));
+		await touchDogTimerFields(dogId, { lastYardDate: toDateString(now) });
 		return null;
 	}
 

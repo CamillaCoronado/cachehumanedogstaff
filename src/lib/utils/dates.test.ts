@@ -4,6 +4,7 @@ import {
 	daysSince,
 	formatAge,
 	formatDate,
+	isPuppyAge,
 	isSameCalendarDay,
 	isSurgeryToday,
 	toDate
@@ -100,6 +101,24 @@ describe('isSurgeryToday', () => {
 		expect(isSurgeryToday(thursday, thursday)).toBe(true);
 		expect(isSurgeryToday(friday, friday)).toBe(false);
 		expect(isSurgeryToday(null, thursday)).toBe(false);
+	});
+});
+
+describe('isPuppyAge', () => {
+	const today = new Date(2026, 6, 17);
+
+	it('under 6 months is a puppy', () => {
+		expect(isPuppyAge(new Date(2026, 4, 1), today)).toBe(true);
+	});
+
+	it('6 months or older is not', () => {
+		expect(isPuppyAge(new Date(2026, 0, 1), today)).toBe(false);
+		expect(isPuppyAge(new Date(2024, 0, 1), today)).toBe(false);
+	});
+
+	it('unknown date of birth is treated as adult', () => {
+		expect(isPuppyAge(null, today)).toBe(false);
+		expect(isPuppyAge(undefined, today)).toBe(false);
 	});
 });
 

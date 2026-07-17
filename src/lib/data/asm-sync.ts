@@ -1,5 +1,6 @@
 import { doc, writeBatch, getDocs, collection } from 'firebase/firestore';
 import { db } from '$lib/firebase/config';
+import { isPuppyAge } from '$lib/utils/dates';
 import { readJson, writeJson } from '$lib/utils/storage';
 
 export type SyncChange = {
@@ -344,6 +345,19 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	type PendingWrite = { animal: AsmAnimal; isNew: boolean; changedFields: string[] };
 	const pending: PendingWrite[] = [];
 
+	// Photos uploaded through the app (Firebase Storage URLs) always beat ASM's
+	// photo, and ASM having no photo must never clear one the shelter uploaded.
+	function applyPhotoPrecedence<T extends { photoUrl: string | null }>(
+		fields: T,
+		existing: Record<string, unknown> | undefined
+	): T {
+		const existingUrl = typeof existing?.photoUrl === 'string' ? existing.photoUrl : null;
+		if (existingUrl && (existingUrl.includes('firebasestorage') || fields.photoUrl === null)) {
+			fields.photoUrl = existingUrl;
+		}
+		return fields;
+	}
+
 	for (const animal of dogs) {
 		const docId = String(animal.ID);
 		const existing = existingDocs.get(docId);
@@ -352,7 +366,10 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			pending.push({ animal, isNew: true, changedFields: [] });
 		} else {
 			// Compare ASM-sourced fields only (exclude _lastSyncedAt — it always changes)
-			const { _lastSyncedAt: _ignored, ...comparable } = asmToStoredFields(animal, now);
+			const { _lastSyncedAt: _ignored, ...comparable } = applyPhotoPrecedence(
+				asmToStoredFields(animal, now),
+				existing
+			);
 			const DATE_FIELDS = new Set(['dateOfBirth', 'intakeDate', 'originalIntakeDate', 'microchipDate', 'fixedDate', 'vaccinatedDate', 'inFosterSince']);
 			const changedFields = (Object.entries(comparable) as [string, unknown][])
 				.filter(([k, v]) => {
@@ -378,9 +395,13 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		for (const { animal, isNew } of pending.slice(i, i + BATCH_SIZE)) {
 			const docId = String(animal.ID);
 			const ref = doc(db, 'dogs', docId);
-			const asmFields = asmToStoredFields(animal, now);
+			const asmFields = applyPhotoPrecedence(asmToStoredFields(animal, now), existingDocs.get(docId));
+			// Puppies don't need evaluation — never flag them.
+			const isPuppy = isPuppyAge(asmFields.dateOfBirth);
 			if (isNew) {
-				batch.set(ref, { id: docId, ...defaultStoredFields(now), ...asmFields }, { merge: true });
+				const defaults = defaultStoredFields(now);
+				if (isPuppy) defaults.awaitingEvaluation = false;
+				batch.set(ref, { id: docId, ...defaults, ...asmFields }, { merge: true });
 			} else {
 				const existing = existingDocs.get(docId);
 				const returningFromFoster = existing?.inFoster === true && asmFields.inFoster === false;
@@ -389,7 +410,7 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 				const leavingIncoming = existing?.isIncoming === true && asmFields.isIncoming === false;
 				const intakeMs = asmFields.intakeDate ? new Date(asmFields.intakeDate).getTime() : 0;
 				const recentIntake = intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000;
-				const needsEvalFlag = existing?.awaitingEvaluation === undefined && recentIntake;
+				const needsEvalFlag = existing?.awaitingEvaluation === undefined && recentIntake && !isPuppy;
 				const extra = {
 					...(returningFromFoster || leavingIncoming ? { shelterSince: now } : {}),
 					...(needsEvalFlag ? { awaitingEvaluation: true } : {})
@@ -400,20 +421,27 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		await batch.commit();
 	}
 
-	// Backfill awaitingEvaluation for existing dogs with recent intake where field was never set
-	const evalBackfill: { id: string }[] = [];
+	// Backfill awaitingEvaluation for existing dogs with recent intake where the
+	// field was never set — puppies excluded, they don't need evaluation. Also
+	// clear the flag on any puppy that was flagged before the exemption existed.
+	const evalBackfill: { id: string; flag: boolean }[] = [];
 	for (const [docId, data] of existingDocs) {
-		if (data.awaitingEvaluation !== undefined) continue;
 		if (data.status === 'adopted') continue;
+		const isPuppy = isPuppyAge(data.dateOfBirth as string | null | undefined);
+		if (isPuppy) {
+			if (data.awaitingEvaluation === true) evalBackfill.push({ id: docId, flag: false });
+			continue;
+		}
+		if (data.awaitingEvaluation !== undefined) continue;
 		const intakeMs = data.intakeDate ? new Date(data.intakeDate).getTime() : 0;
 		if (intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000) {
-			evalBackfill.push({ id: docId });
+			evalBackfill.push({ id: docId, flag: true });
 		}
 	}
 	for (let i = 0; i < evalBackfill.length; i += BATCH_SIZE) {
 		const batch = writeBatch(db);
-		for (const { id } of evalBackfill.slice(i, i + BATCH_SIZE)) {
-			batch.set(doc(db, 'dogs', id), { awaitingEvaluation: true }, { merge: true });
+		for (const { id, flag } of evalBackfill.slice(i, i + BATCH_SIZE)) {
+			batch.set(doc(db, 'dogs', id), { awaitingEvaluation: flag }, { merge: true });
 		}
 		await batch.commit();
 	}

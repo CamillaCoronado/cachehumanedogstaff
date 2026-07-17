@@ -66,6 +66,11 @@ service cloud.firestore {
     match /dogs/{dogId} {
       allow read: if isAuthenticated();
       allow create, update, delete: if canEditDogs();
+      // Staff/volunteers log baths and yard time, which stamp denormalized
+      // timer fields on the dog doc. Allow updates that touch only those.
+      allow update: if isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['lastBathDate', 'lastBathBy', 'lastYardDate']);
 
       match /behavioralNotes/{noteId} {
         allow read, create: if isAuthenticated();
@@ -78,6 +83,11 @@ service cloud.firestore {
       }
 
       match /bathLogs/{logId} {
+        allow read, create: if isAuthenticated();
+        allow update, delete: if canEditDogs();
+      }
+
+      match /yardLogs/{logId} {
         allow read, create: if isAuthenticated();
         allow update, delete: if canEditDogs();
       }
@@ -99,6 +109,12 @@ service cloud.firestore {
     }
 
     match /cleaningCompletions/{completionId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Shift handoff notes (cleaning page + dashboard; also written server-side
+    // by the phone inbox pipeline).
+    match /shiftHandoffs/{handoffId} {
       allow read, write: if isAuthenticated();
     }
 

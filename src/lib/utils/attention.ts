@@ -2,6 +2,10 @@ import { startOfDay } from 'date-fns';
 import { bathEligible, checkDayTripEligibility, daysSince, dogStripeColor, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
 import type { Dog, PlaygroupSession } from '$lib/types';
 
+// A dog under this age is a puppy: presumed good with dogs/cats/kids (no
+// compatibility test needed) and subject to puppy playgroup rules instead.
+export const PUPPY_AGE_WEEKS = 26;
+
 export function isDayTripEligible(dog: Dog, today = new Date()): boolean {
 	if (dog.isOutOnDayTrip) return false;
 	// A red dog (its single source-of-truth color) is never eligible.
@@ -19,8 +23,10 @@ export function isDayTripEligible(dog: Dog, today = new Date()): boolean {
 // ─── Dogs to Test ────────────────────────────────────────────────────────────
 // Active shelter dogs marked unknown for dog compatibility with no playgroup
 // history at all (sessions from any stay, including before foster, count).
+// Puppies are exempt — they're presumed good with dogs/cats/kids and don't
+// need a compatibility test.
 
-export function getCautionDogs(dogs: Dog[], sessions: PlaygroupSession[]): Dog[] {
+export function getCautionDogs(dogs: Dog[], sessions: PlaygroupSession[], today = new Date()): Dog[] {
 	// Build a map of dogId → most recent session date (ms). A cancelled session
 	// means no play actually happened, so it shouldn't count as an assessment.
 	const lastSessionMs: Record<string, number> = {};
@@ -36,6 +42,8 @@ export function getCautionDogs(dogs: Dog[], sessions: PlaygroupSession[]): Dog[]
 	return dogs.filter((dog) => {
 		if (dog.isolationStatus !== 'none') return false;
 		if (dog.goodWithDogs !== 'unknown') return false;
+		const ageWeeks = dogAgeWeeks(dog, today);
+		if (ageWeeks !== null && ageWeeks < PUPPY_AGE_WEEKS) return false;
 
 		return lastSessionMs[dog.id] === undefined;
 	});
@@ -159,7 +167,7 @@ export function isPuppyVaccinated(dog: Dog): boolean {
 
 export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
 	const ageWeeks = dogAgeWeeks(dog, today);
-	const isPuppyAge = ageWeeks !== null && ageWeeks < 26;
+	const isPuppyAge = ageWeeks !== null && ageWeeks < PUPPY_AGE_WEEKS;
 	// Adults need a confirmed 'yes'; puppies can play (with each other or with
 	// puppy-experienced adults) as long as they're not marked 'no'.
 	if (dog.goodWithDogs === 'no') return false;

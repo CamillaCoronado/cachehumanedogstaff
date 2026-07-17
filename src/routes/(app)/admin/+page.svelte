@@ -55,7 +55,7 @@
 	$: if ($authReady && $authUser && isAdmin && !allDogsLoaded) {
 		allDogsLoaded = true;
 		void listDogs().then((dogs) => {
-			allDogs = dogs.filter((d) => d.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
+			allDogs = dogs.sort((a, b) => a.name.localeCompare(b.name));
 		});
 	}
 
@@ -415,7 +415,7 @@
 						<select class="field-select" bind:value={mergeKeepId} disabled={merging}>
 							<option value="">— select dog to keep —</option>
 							{#each allDogs as dog}
-								<option value={dog.id}>{dog.name}</option>
+								<option value={dog.id}>{dog.name}{dog.status === 'active' ? '' : ` (${dog.status})`}</option>
 							{/each}
 						</select>
 					</label>
@@ -424,7 +424,7 @@
 						<select class="field-select" bind:value={mergeDeleteId} disabled={merging}>
 							<option value="">— select dog to delete —</option>
 							{#each allDogs.filter((d) => d.id !== mergeKeepId) as dog}
-								<option value={dog.id}>{dog.name}</option>
+								<option value={dog.id}>{dog.name}{dog.status === 'active' ? '' : ` (${dog.status})`}</option>
 							{/each}
 						</select>
 					</label>
@@ -433,9 +433,11 @@
 				{#if mergeValid && !mergeConfirm}
 					<div class="merge-preview">
 						<p class="merge-preview-text">
-							All feeding logs, stool logs, bath logs, behavioral notes, and day trip logs from
+							All feeding logs, stool logs, bath logs, yard logs, behavioral notes, and day trip logs from
 							<strong>{mergeDeleteDog?.name}</strong> will be moved to <strong>{mergeKeepDog?.name}</strong>,
-							then <strong>{mergeDeleteDog?.name}</strong> will be permanently deleted.
+							and any profile fields <strong>{mergeKeepDog?.name}</strong> is missing will be filled in from
+							<strong>{mergeDeleteDog?.name}</strong> (the name stays <strong>{mergeKeepDog?.name}</strong>).
+							Then <strong>{mergeDeleteDog?.name}</strong> will be permanently deleted.
 						</p>
 						<button class="danger-btn" type="button" on:click={() => (mergeConfirm = true)}>
 							Merge dogs

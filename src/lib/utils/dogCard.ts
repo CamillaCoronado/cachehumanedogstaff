@@ -1,5 +1,5 @@
 import type { Dog } from '$lib/types';
-import { checkDayTripEligibility, daysSince, sinceReturn } from '$lib/utils/dates';
+import { checkDayTripEligibility, daysSince, isPuppyAge, sinceReturn } from '$lib/utils/dates';
 import {
 	getBathStatus,
 	getDayTripGapDays,
@@ -161,7 +161,8 @@ export function pendingItems(
 		}
 	}
 
-	const pendingEvaluation = missingEvaluations(dog);
+	// Puppies don't need evaluation — no "Needs evaluation" nag for them.
+	const pendingEvaluation = isPuppyAge(dog.dateOfBirth, today) ? [] : missingEvaluations(dog);
 	if (pendingEvaluation.length > 0) {
 		items.push({
 			label: `Needs evaluation: ${pendingEvaluation.join(', ')}`,
