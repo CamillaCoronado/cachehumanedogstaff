@@ -123,6 +123,13 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
+    // Finished events archived from the Events tab ("mark event over").
+    // Editing or deleting history is manager/admin only.
+    match /eventHistory/{eventId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if canEditDogs();
+    }
+
     match /playgroupSessions/{sessionId} {
       allow read: if isAuthenticated();
       allow create, update, delete: if canEditPlaygroups();
