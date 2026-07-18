@@ -31,6 +31,7 @@
 			| 'playgroups'
 			| 'medical'
 			| 'volunteers'
+			| 'events'
 			| 'admin';
 	};
 
@@ -45,6 +46,7 @@
 	const medicalTab: TabItem = { href: '/medical', label: 'Medical', colorClass: 'tab-red', icon: 'medical' };
 	const dayTripsTab: TabItem = { href: '/daytrips', label: 'Day Trips', colorClass: 'tab-accent', icon: 'daytrips' };
 	const volunteersTab: TabItem = { href: '/volunteers', label: 'Volunteers', colorClass: 'tab-green', icon: 'volunteers' };
+	const eventsTab: TabItem = { href: '/events', label: 'Events', colorClass: 'tab-accent', icon: 'events' };
 	const adminTab: TabItem = { href: '/admin', label: 'Admin', colorClass: 'tab-accent', icon: 'admin' };
 	let tabs: TabItem[] = baseTabs;
 	let currentTabIndex = 0;
@@ -214,6 +216,7 @@
 		playgroupsTab,
 		medicalTab,
 		...(canViewDayTrips ? [dayTripsTab] : []),
+		eventsTab,
 		// volunteers tab hidden until ready
 		// ...(canViewVolunteers ? [volunteersTab] : []),
 		...(isAdmin ? [adminTab] : [])
@@ -429,7 +432,12 @@
 										<circle cx="17" cy="8.5" r="2"></circle>
 										<path d="M15.5 19v-1c0-1.7 1.1-3.1 2.7-3.6"></path>
 										<path d="M20 19v-1c-.1-1.2-.7-2.2-1.5-2.9"></path>
-									{:else if tab.icon === 'admin'}
+									{:else if tab.icon === 'events'}
+											<rect x="4" y="6" width="16" height="14" rx="2"></rect>
+											<path d="M4 10h16"></path>
+											<path d="M8 4v3.5M16 4v3.5"></path>
+											<path d="m12 12.6.9 1.8 2 .3-1.4 1.4.3 2-1.8-.9-1.8.9.3-2-1.4-1.4 2-.3z"></path>
+										{:else if tab.icon === 'admin'}
 											<path d="M12 3.8 18.7 6.7v4.1c0 4.2-2.6 7.7-6.7 9.4C7.9 18.5 5.3 15 5.3 10.8V6.7z"></path>
 											<path d="M12 8.4v4.7"></path>
 											<circle cx="12" cy="15.8" r="0.8" fill="currentColor" stroke="none"></circle>

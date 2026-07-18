@@ -118,6 +118,11 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
+    // Shared event visitor counter (Events tab). Any signed-in user can tally.
+    match /eventCounters/{counterId} {
+      allow read, write: if isAuthenticated();
+    }
+
     match /playgroupSessions/{sessionId} {
       allow read: if isAuthenticated();
       allow create, update, delete: if canEditPlaygroups();
