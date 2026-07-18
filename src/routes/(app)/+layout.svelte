@@ -15,6 +15,7 @@
 	import { syncVersion } from '$lib/stores/sync';
 	import { readJson, writeJson } from '$lib/utils/storage';
 	import PhotoDebugPanel from '$lib/components/debug/PhotoDebugPanel.svelte';
+	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 
 	type TabItem = {
 		href: string;
@@ -492,7 +493,7 @@
 				{#each currentOverlay.dogs as dog}
 					<div class="adoption-dog-item">
 						{#if dog.photoUrl}
-							<img class="adoption-photo" src={dog.photoUrl} alt={dog.name} />
+							<img class="adoption-photo" src={resolveDogPhotoUrl(dog.photoUrl)} alt={dog.name} />
 						{:else}
 							<div class="adoption-photo adoption-photo-placeholder"></div>
 						{/if}
@@ -512,7 +513,7 @@
 				{#each currentOverlay.dogs as dog}
 					<div class="transfer-dog-item">
 						{#if dog.photoUrl}
-							<img class="transfer-photo" src={dog.photoUrl} alt={dog.name} />
+							<img class="transfer-photo" src={resolveDogPhotoUrl(dog.photoUrl)} alt={dog.name} />
 						{:else}
 							<div class="transfer-photo transfer-photo-placeholder"></div>
 						{/if}
@@ -532,7 +533,7 @@
 				{#each currentOverlay.dogs as dog}
 					<div class="foster-dog-item">
 						{#if dog.photoUrl}
-							<img class="foster-photo" src={dog.photoUrl} alt={dog.name} />
+							<img class="foster-photo" src={resolveDogPhotoUrl(dog.photoUrl)} alt={dog.name} />
 						{:else}
 							<div class="foster-photo foster-photo-placeholder"></div>
 						{/if}
@@ -553,7 +554,7 @@
 						{#if dog.photoUrl}
 							<img
 								class="incoming-photo"
-								src={dog.photoUrl}
+								src={resolveDogPhotoUrl(dog.photoUrl)}
 								alt={dog.name}
 								on:error={incomingPhotoError}
 							/>

@@ -19,6 +19,7 @@
 	import { deleteDogPhotoByUrl, uploadDogPhotoDataUrl } from '$lib/firebase/storage';
 	import { getStorageUploadErrorMessage } from '$lib/firebase/errors';
 	import { logPhotoError, logPhotoLoaded } from '$lib/utils/photoLog';
+	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 
 	export let value: Dog;
 	export let disabled = false;
@@ -538,7 +539,7 @@
 						{#if value.photoUrl && !photoLoadFailed}
 							<img
 								class="form-photo-preview"
-								src={value.photoUrl}
+								src={resolveDogPhotoUrl(value.photoUrl)}
 								alt={`Photo of ${value.name || 'dog'}`}
 								loading="lazy"
 								on:load={() => logPhotoLoaded('dog-form', value.id ?? null)}

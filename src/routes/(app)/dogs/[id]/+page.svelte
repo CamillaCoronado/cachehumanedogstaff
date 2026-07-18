@@ -3,6 +3,7 @@
 	import toast from 'svelte-french-toast';
 	import { page } from '$app/stores';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
+	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
@@ -630,9 +631,9 @@
 								{#if dog.photoUrl && !photoLoadFailed}
 									<img
 										class="kennel-photo-img"
-										src={dog.photoUrl}
+										src={resolveDogPhotoUrl(dog.photoUrl)}
 										alt=""
-										use:retryablePhoto={{ src: dog.photoUrl, context: 'dog-profile', dogId: dog?.id ?? null, onFail: () => { photoLoadFailed = true; } }}
+										use:retryablePhoto={{ src: resolveDogPhotoUrl(dog.photoUrl), context: 'dog-profile', dogId: dog?.id ?? null, onFail: () => { photoLoadFailed = true; } }}
 									/>
 								{:else}
 									<span>{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
@@ -1190,7 +1191,7 @@
 		<div class="adoption-celebration">
 			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
 			{#if celebrationPhotoUrl}
-				<img class="adoption-photo" src={celebrationPhotoUrl} alt={celebrationDogName} />
+				<img class="adoption-photo" src={resolveDogPhotoUrl(celebrationPhotoUrl)} alt={celebrationDogName} />
 			{/if}
 			<p class="adoption-name">{celebrationDogName}</p>
 			<p class="adoption-message">Found their forever home! 🎉</p>

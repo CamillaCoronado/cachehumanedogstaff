@@ -14,6 +14,7 @@
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import { logPhotoRender } from '$lib/utils/photoLog';
+	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
@@ -594,9 +595,9 @@ const today = new Date();
 											{#if dog.photoUrl && !failedPhotos.has(dog.id)}
 												<img
 													class="card-photo-img"
-													src={dog.photoUrl}
+													src={resolveDogPhotoUrl(dog.photoUrl)}
 													alt=""
-													use:retryablePhoto={{ src: dog.photoUrl, context: 'dogs-list', dogId: dog.id, onFail: () => { failedPhotos = new Set([...failedPhotos, dog.id]); } }}
+													use:retryablePhoto={{ src: resolveDogPhotoUrl(dog.photoUrl), context: 'dogs-list', dogId: dog.id, onFail: () => { failedPhotos = new Set([...failedPhotos, dog.id]); } }}
 												/>
 											{:else}
 												<span class="card-photo-initial" aria-hidden="true">{dog.name[0].toUpperCase()}</span>

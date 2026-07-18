@@ -7,6 +7,7 @@
 	import { canEditDogs } from '$lib/utils/permissions';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import { logPhotoRender } from '$lib/utils/photoLog';
+	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
@@ -823,9 +824,9 @@
 								{#if dog.photoUrl && !failedThumbs.has(dog.id)}
 									<img
 										class="adopted-thumb"
-										src={dog.photoUrl}
+										src={resolveDogPhotoUrl(dog.photoUrl)}
 										alt={dog.name}
-										use:retryablePhoto={{ src: dog.photoUrl, context: 'dashboard', dogId: dog.id, onFail: () => { failedThumbs = new Set([...failedThumbs, dog.id]); } }}
+										use:retryablePhoto={{ src: resolveDogPhotoUrl(dog.photoUrl), context: 'dashboard', dogId: dog.id, onFail: () => { failedThumbs = new Set([...failedThumbs, dog.id]); } }}
 									/>
 								{:else if dog.photoUrl}
 									<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
@@ -857,9 +858,9 @@
 							{#if dog.photoUrl && !failedThumbs.has(dog.id)}
 								<img
 									class="adopted-thumb"
-									src={dog.photoUrl}
+									src={resolveDogPhotoUrl(dog.photoUrl)}
 									alt={dog.name}
-									use:retryablePhoto={{ src: dog.photoUrl, context: 'dashboard', dogId: dog.id, onFail: () => { failedThumbs = new Set([...failedThumbs, dog.id]); } }}
+									use:retryablePhoto={{ src: resolveDogPhotoUrl(dog.photoUrl), context: 'dashboard', dogId: dog.id, onFail: () => { failedThumbs = new Set([...failedThumbs, dog.id]); } }}
 								/>
 							{:else if dog.photoUrl}
 								<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{dog.name.slice(0, 1).toUpperCase() || '?'}</span>
@@ -982,9 +983,9 @@
 									{#if item.photoUrl && !failedThumbs.has(item.id)}
 										<img
 											class="adopted-thumb"
-											src={item.photoUrl}
+											src={resolveDogPhotoUrl(item.photoUrl)}
 											alt={item.name}
-											use:retryablePhoto={{ src: item.photoUrl, context: 'dashboard', dogId: item.id, onFail: () => { failedThumbs = new Set([...failedThumbs, item.id]); } }}
+											use:retryablePhoto={{ src: resolveDogPhotoUrl(item.photoUrl), context: 'dashboard', dogId: item.id, onFail: () => { failedThumbs = new Set([...failedThumbs, item.id]); } }}
 										/>
 									{:else if item.photoUrl}
 										<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{item.name.slice(0, 1).toUpperCase() || '?'}</span>
@@ -1000,9 +1001,9 @@
 									{#if item.photoUrl && !failedThumbs.has(item.id)}
 										<img
 											class="adopted-thumb"
-											src={item.photoUrl}
+											src={resolveDogPhotoUrl(item.photoUrl)}
 											alt={item.name}
-											use:retryablePhoto={{ src: item.photoUrl, context: 'dashboard', dogId: item.id, onFail: () => { failedThumbs = new Set([...failedThumbs, item.id]); } }}
+											use:retryablePhoto={{ src: resolveDogPhotoUrl(item.photoUrl), context: 'dashboard', dogId: item.id, onFail: () => { failedThumbs = new Set([...failedThumbs, item.id]); } }}
 										/>
 									{:else if item.photoUrl}
 										<span class="adopted-thumb adopted-thumb-fallback" aria-hidden="true">{item.name.slice(0, 1).toUpperCase() || '?'}</span>
