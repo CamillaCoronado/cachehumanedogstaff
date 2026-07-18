@@ -6,6 +6,7 @@
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import { canEditDogs } from '$lib/utils/permissions';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
+	import { logPhotoRender } from '$lib/utils/photoLog';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
@@ -602,6 +603,10 @@
 				.sort((a, b) => a.name.localeCompare(b.name));
 			const active = allActive.filter((dog) => !dog.inFoster);
 			recentlyAdopted = buildRecentlyAdoptedItems(dogs, recentAsmAdoptions);
+			// Temporary diagnostic: log each recently-adopted card's photo state.
+			for (const item of recentlyAdopted) {
+				logPhotoRender('dashboard-recently-adopted', item.id, item.name, item.photoUrl);
+			}
 			void reconcileAsmAdoptions(dogs, recentAsmAdoptions);
 
 			allActiveDogs = allActive;

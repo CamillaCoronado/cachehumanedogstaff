@@ -14,6 +14,7 @@
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { syncVersion } from '$lib/stores/sync';
 	import { readJson, writeJson } from '$lib/utils/storage';
+	import PhotoDebugPanel from '$lib/components/debug/PhotoDebugPanel.svelte';
 
 	type TabItem = {
 		href: string;
@@ -574,6 +575,8 @@
 		</div>
 	</div>
 {/if}
+
+<PhotoDebugPanel />
 
 <style>
 	.shelter-shell {

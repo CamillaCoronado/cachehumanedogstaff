@@ -13,6 +13,7 @@
 	import { getBathStatus, isBathDue, getDayTripGapDays, isPlaygroupEligible, buildLastPlaygroupMap, isSurgeryResting, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
+	import { logPhotoRender } from '$lib/utils/photoLog';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
 	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
@@ -126,6 +127,16 @@ const today = new Date();
 		}
 		return a.name.localeCompare(b.name) * direction;
 	});
+
+	// Temporary diagnostic: log each card's photo state once so the on-screen
+	// debug panel shows whether photoUrl was ever set for a given dog.
+	const loggedPhotoIds = new Set<string>();
+	$: for (const dog of sortedDogs) {
+		if (!loggedPhotoIds.has(dog.id)) {
+			loggedPhotoIds.add(dog.id);
+			logPhotoRender('dogs-list', dog.id, dog.name, dog.photoUrl);
+		}
+	}
 
 	function setSort(key: typeof sortKey) {
 		if (sortKey === key) {
