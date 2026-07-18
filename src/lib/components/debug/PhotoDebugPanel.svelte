@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { photoDebugLog } from '$lib/utils/photoLog';
+	import { photoDebugLog, runConnectivityProbe } from '$lib/utils/photoLog';
 
 	let open = false;
 	const ua = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
 	let copied = false;
+	let testing = false;
 
 	async function copyLog() {
 		const lines = $photoDebugLog
@@ -17,6 +18,17 @@
 			setTimeout(() => (copied = false), 1500);
 		} catch {
 			copied = false;
+		}
+	}
+
+	async function testConnectivity() {
+		const sample = $photoDebugLog.find((e) => e.event === 'render' && e.url)?.url;
+		if (!sample) return;
+		testing = true;
+		try {
+			await runConnectivityProbe(sample);
+		} finally {
+			testing = false;
 		}
 	}
 </script>
@@ -33,6 +45,7 @@
 		<div class="photo-debug-head">
 			<strong>Photo debug log</strong>
 			<div class="photo-debug-head-actions">
+				<button type="button" on:click={testConnectivity} disabled={testing}>{testing ? 'Testing…' : 'Test connectivity'}</button>
 				<button type="button" on:click={copyLog}>{copied ? 'Copied!' : 'Copy'}</button>
 				<button type="button" on:click={() => (open = false)}>✕</button>
 			</div>
