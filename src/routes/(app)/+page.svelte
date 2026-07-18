@@ -99,6 +99,29 @@
 		euthanized: { emoji: '🌈', label: 'rainbow bridge', tagClass: 'movement-tag-rainbow' }
 	} as const;
 	let failedThumbs = new Set<string>();
+
+	// Masonry layout for the dashboard cards: CSS `columns` (real masonry) has
+	// a longstanding WebKit bug where cards overlap once async content (photos)
+	// changes a card's height after layout, so we use CSS grid with each
+	// card's live-measured height converted to a row-span instead — grid item
+	// placement doesn't have that fragmentation bug, and `grid-auto-flow: dense`
+	// backfills gaps the same way masonry would.
+	const MASONRY_ROW_PX = 8;
+	const MASONRY_GAP_PX = 9.28; // matches .planner-columns { gap: 0.58rem } at 16px root
+	function rowSpan(height: number) {
+		if (!height) return 1;
+		return Math.max(1, Math.ceil((height + MASONRY_GAP_PX) / (MASONRY_ROW_PX + MASONRY_GAP_PX)));
+	}
+	let hToday = 0;
+	let hHandoff = 0;
+	let hDayTrips = 0;
+	let hManagerOnly = 0;
+	let hIsolation = 0;
+	let hInFoster = 0;
+	let hIncoming = 0;
+	let hAttention = 0;
+	let hMovements = 0;
+	let hRecentlyAdopted = 0;
 	let playgroupSessions: PlaygroupSession[] = [];
 	let dayTripLogs: DayTripLog[] = [];
 	let feedingLogsByDog: Record<string, FeedingLog[]> = {};
@@ -659,7 +682,7 @@
 	{/if}
 
 	<div class="planner-columns">
-		<section class="planner-list planner-list-sand">
+		<section class="planner-list planner-list-sand" bind:clientHeight={hToday} style="grid-row: span {rowSpan(hToday)};">
 			<div class="planner-list-head">
 				<h2>Today</h2>
 				<span class="planner-pill planner-pill-sand">{todayItems.length}</span>
@@ -694,7 +717,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sand planner-handoff">
+		<section class="planner-list planner-list-sand planner-handoff" bind:clientHeight={hHandoff} style="grid-row: span {rowSpan(hHandoff)};">
 			<div class="planner-list-head">
 				<h2>Shift Handoff</h2>
 				<span class="planner-pill planner-pill-sand">{cleaningShift === 'morning' ? 'AM' : 'PM'}</span>
@@ -730,7 +753,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-rose" class:planner-list-empty={!loading && dogsOut.length === 0}>
+		<section class="planner-list planner-list-rose" class:planner-list-empty={!loading && dogsOut.length === 0} bind:clientHeight={hDayTrips} style="grid-row: span {rowSpan(hDayTrips)};">
 			<div class="planner-list-head">
 				<h2>Day Trips</h2>
 				<span class="planner-pill planner-pill-rose">{dogsOut.length}</span>
@@ -761,7 +784,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-lilac" class:planner-list-empty={!loading && managerOnlyDogs.length === 0}>
+		<section class="planner-list planner-list-lilac" class:planner-list-empty={!loading && managerOnlyDogs.length === 0} bind:clientHeight={hManagerOnly} style="grid-row: span {rowSpan(hManagerOnly)};">
 			<div class="planner-list-head">
 				<h2>Manager Only</h2>
 				<span class="planner-pill planner-pill-lilac">{managerOnlyDogs.length}</span>
@@ -784,7 +807,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-cyan" class:planner-list-empty={!loading && isolationDogs.length === 0}>
+		<section class="planner-list planner-list-cyan" class:planner-list-empty={!loading && isolationDogs.length === 0} bind:clientHeight={hIsolation} style="grid-row: span {rowSpan(hIsolation)};">
 			<div class="planner-list-head">
 				<h2>Isolation</h2>
 				<span class="planner-pill planner-pill-cyan">{isolationDogs.length}</span>
@@ -807,7 +830,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sky" class:planner-list-empty={!loading && fosterDogs.length === 0}>
+		<section class="planner-list planner-list-sky" class:planner-list-empty={!loading && fosterDogs.length === 0} bind:clientHeight={hInFoster} style="grid-row: span {rowSpan(hInFoster)};">
 			<div class="planner-list-head">
 				<h2>In Foster</h2>
 				<span class="planner-pill planner-pill-sky">{fosterDogs.length}</span>
@@ -841,7 +864,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-steel" class:planner-list-empty={!loading && incomingDogs.length === 0}>
+		<section class="planner-list planner-list-steel" class:planner-list-empty={!loading && incomingDogs.length === 0} bind:clientHeight={hIncoming} style="grid-row: span {rowSpan(hIncoming)};">
 		<div class="planner-list-head">
 			<h2>Incoming</h2>
 			<span class="planner-pill planner-pill-steel">{incomingDogs.length}</span>
@@ -875,7 +898,7 @@
 		</div>
 	</section>
 
-	<section class="planner-list planner-list-amber planner-list-attention" class:planner-list-empty={!loading && attentionItems.length === 0}>
+	<section class="planner-list planner-list-amber planner-list-attention" class:planner-list-empty={!loading && attentionItems.length === 0} bind:clientHeight={hAttention} style="grid-row: span {rowSpan(hAttention)};">
 			<div class="planner-list-head">
 				<h2>Needs Attention</h2>
 				<span class="planner-pill planner-pill-amber">{attentionItems.length}</span>
@@ -909,7 +932,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sand" class:planner-list-empty={!loading && movementCount === 0}>
+		<section class="planner-list planner-list-sand" class:planner-list-empty={!loading && movementCount === 0} bind:clientHeight={hMovements} style="grid-row: span {rowSpan(hMovements)};">
 			<div class="planner-list-head">
 				<h2>{movementsIsToday ? "Today's Movements" : 'Movements'}</h2>
 				<span class="planner-pill planner-pill-amber">{movementCount}</span>
@@ -965,7 +988,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sage" class:planner-list-empty={!loading && recentlyAdopted.length === 0}>
+		<section class="planner-list planner-list-sage" class:planner-list-empty={!loading && recentlyAdopted.length === 0} bind:clientHeight={hRecentlyAdopted} style="grid-row: span {rowSpan(hRecentlyAdopted)};">
 			<div class="planner-list-head">
 				<h2>Recently Adopted</h2>
 				<span class="planner-pill planner-pill-sage">{recentlyAdopted.length}</span>
@@ -1283,6 +1306,8 @@
 	.planner-columns {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
+		grid-auto-rows: 8px;
+		grid-auto-flow: dense;
 		gap: 0.58rem;
 	}
 
@@ -1633,7 +1658,6 @@
 	@media (min-width: 760px) {
 		.planner-columns {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
-			align-items: start;
 		}
 	}
 
