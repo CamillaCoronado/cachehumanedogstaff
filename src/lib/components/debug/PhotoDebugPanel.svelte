@@ -22,7 +22,7 @@
 	}
 
 	async function testConnectivity() {
-		const sample = $photoDebugLog.find((e) => e.event === 'render' && e.url)?.url;
+		const sample = $photoDebugLog.find((e) => e.event === 'render' && e.url?.includes('sheltermanager.com'))?.url;
 		if (!sample) return;
 		testing = true;
 		try {
@@ -45,7 +45,7 @@
 		<div class="photo-debug-head">
 			<strong>Photo debug log</strong>
 			<div class="photo-debug-head-actions">
-				<button type="button" on:click={testConnectivity} disabled={testing}>{testing ? 'Testing…' : 'Test connectivity'}</button>
+				<button type="button" on:click={testConnectivity} disabled={testing}>{testing ? 'Diagnosing…' : 'Diagnose network'}</button>
 				<button type="button" on:click={copyLog}>{copied ? 'Copied!' : 'Copy'}</button>
 				<button type="button" on:click={() => (open = false)}>✕</button>
 			</div>

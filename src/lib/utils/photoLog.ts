@@ -32,46 +32,94 @@ function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number):
 
 const PROBE_TIMEOUT_MS = 8000;
 
+function logProbeResult(
+	label: string,
+	ms: number,
+	result: { kind: 'ok'; res: Response } | { kind: 'timeout' } | { kind: 'error'; message: string }
+) {
+	const detail =
+		result.kind === 'ok'
+			? `${label} → responded, status=${result.res.status || '(opaque)'} type=${result.res.type} (${ms}ms)`
+			: result.kind === 'timeout'
+				? `${label} → TIMED OUT after ${ms}ms`
+				: `${label} → network error (${ms}ms): ${result.message}`;
+	pushEntry({ dogId: null, dogName: null, event: 'probe', detail });
+}
+
+async function timedFetch(label: string, url: string, options: RequestInit) {
+	const start = Date.now();
+	const result = await fetchWithTimeout(url, options, PROBE_TIMEOUT_MS);
+	logProbeResult(label, Date.now() - start, result);
+}
+
 /**
- * Confirms (or rules out) a network-level block against a specific host:
- * fetches a known-reliable endpoint on our own server (already proven to
- * reach ASM fine, server-side) and a direct ASM image URL, side by side,
- * both capped at 8s. If ours succeeds fast and the direct ASM fetch times
- * out, that's a device/network-level block on that host — not app data,
- * not a code bug.
+ * Runs several independent tests in parallel to narrow down WHY a host is
+ * unreachable, not just confirm that it is:
+ *  - our own server (baseline — already proven to reach ASM fine)
+ *  - a well-known external host (Apple's own captive-portal check URL) —
+ *    if THIS also fails, it's not sheltermanager-specific, it's "nothing
+ *    external works except our app" (allowlist-only network / MDM)
+ *  - the ASM entry host directly (service.sheltermanager.com)
+ *  - the actual media CDN host ASM redirects to (us06d.sheltermanager.com)
+ *    — if this one works but the entry host doesn't, the block is keyed to
+ *    that specific hostname, not the whole sheltermanager.com domain
+ *  - DNS-over-HTTPS lookup for the ASM host via Cloudflare — if even this
+ *    fails, the network is blocking arbitrary external HTTPS, not just DNS
+ *    for that one name
  */
 export async function runConnectivityProbe(sampleAsmUrl: string) {
-	pushEntry({ dogId: null, dogName: null, event: 'probe', detail: 'Connectivity test starting…' });
+	pushEntry({ dogId: null, dogName: null, event: 'probe', detail: 'Network diagnostic starting — running 5 tests in parallel…' });
 
-	const ownStart = Date.now();
-	const own = await fetchWithTimeout('/api/asm/recent-adoptions?days=1', { cache: 'no-store' }, PROBE_TIMEOUT_MS);
-	const ownMs = Date.now() - ownStart;
-	pushEntry({
-		dogId: null,
-		dogName: null,
-		event: 'probe',
-		detail:
-			own.kind === 'ok'
-				? `our server (/api/asm) → ${own.res.status} (${ownMs}ms)`
-				: own.kind === 'timeout'
-					? `our server (/api/asm) → TIMED OUT after ${ownMs}ms`
-					: `our server (/api/asm) → network error (${ownMs}ms): ${own.message}`
-	});
+	let asmHost = 'service.sheltermanager.com';
+	try {
+		asmHost = new URL(sampleAsmUrl).host;
+	} catch { /* keep default */ }
 
-	const asmStart = Date.now();
-	const direct = await fetchWithTimeout(sampleAsmUrl, { cache: 'no-store', mode: 'no-cors' }, PROBE_TIMEOUT_MS);
-	const asmMs = Date.now() - asmStart;
-	pushEntry({
-		dogId: null,
-		dogName: null,
-		event: 'probe',
-		detail:
-			direct.kind === 'ok'
-				? `direct ASM fetch → responded, type=${direct.res.type} (${asmMs}ms)`
-				: direct.kind === 'timeout'
-					? `direct ASM fetch → TIMED OUT after ${asmMs}ms`
-					: `direct ASM fetch → network error (${asmMs}ms): ${direct.message}`
-	});
+	await Promise.all([
+		timedFetch('our server (/api/asm)', '/api/asm/recent-adoptions?days=1', { cache: 'no-store' }),
+		timedFetch('known-external host (apple.com captive check)', 'https://www.apple.com/library/test/success.html', {
+			cache: 'no-store',
+			mode: 'no-cors'
+		}),
+		timedFetch(`ASM entry host (${asmHost})`, sampleAsmUrl, { cache: 'no-store', mode: 'no-cors' }),
+		timedFetch(
+			'ASM media CDN host (us06d.sheltermanager.com)',
+			'https://us06d.sheltermanager.com/service?account=sl2799&method=media_image&mediaid=1&ts=0',
+			{ cache: 'no-store', mode: 'no-cors' }
+		),
+		(async () => {
+			const start = Date.now();
+			const result = await fetchWithTimeout(
+				`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(asmHost)}&type=A`,
+				{ headers: { Accept: 'application/dns-json' }, cache: 'no-store' },
+				PROBE_TIMEOUT_MS
+			);
+			const ms = Date.now() - start;
+			if (result.kind !== 'ok') {
+				logProbeResult('DNS-over-HTTPS lookup (via Cloudflare)', ms, result);
+				return;
+			}
+			try {
+				const body = await result.res.json();
+				const ips = Array.isArray(body?.Answer) ? body.Answer.map((a: { data: string }) => a.data).join(', ') : '(no answer)';
+				pushEntry({
+					dogId: null,
+					dogName: null,
+					event: 'probe',
+					detail: `DNS-over-HTTPS lookup (via Cloudflare) → ${asmHost} resolves to: ${ips} (${ms}ms)`
+				});
+			} catch (e) {
+				pushEntry({
+					dogId: null,
+					dogName: null,
+					event: 'probe',
+					detail: `DNS-over-HTTPS lookup (via Cloudflare) → got a response but couldn't parse it (${ms}ms): ${e instanceof Error ? e.message : String(e)}`
+				});
+			}
+		})()
+	]);
+
+	pushEntry({ dogId: null, dogName: null, event: 'probe', detail: 'Network diagnostic finished.' });
 }
 
 const MAX_ENTRIES = 100;
