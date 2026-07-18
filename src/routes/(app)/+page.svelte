@@ -1626,19 +1626,14 @@
 
 	@media (min-width: 760px) {
 		.planner-columns {
-			display: block;
-			columns: 2;
-			column-gap: 0.58rem;
-		}
-		.planner-list {
-			break-inside: avoid;
-			margin-bottom: 0.58rem;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			align-items: start;
 		}
 	}
 
 	@media (min-width: 1180px) {
 		.planner-columns {
-			columns: 3;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
 		}
 	}
 
