@@ -41,7 +41,6 @@
 	const amounts: AmountEaten[] = ['all', 'most', 'half', 'little', 'none'];
 	const HISTORY_LIMIT = 200;
 	const LESS_THAN_MOST = new Set<AmountEaten>(['half', 'little', 'none']);
-	const MEAL_LABEL: Record<MealTime, string> = { am: 'AM', pm: 'PM', second: '2nd' };
 
 	$: dogs = $dogsStore;
 	let feedingLogs: Record<string, FeedingLog[]> = {};
@@ -112,25 +111,41 @@
 	$: lowAppetiteEntries = displayDogs
 		.map((dog) => ({ dog, log: fedMap[dog.id] }))
 		.filter((entry): entry is { dog: Dog; log: FeedingLog } => !!entry.log && LESS_THAN_MOST.has(entry.log.amountEaten));
-	$: lowAppetiteCopyText = buildLowAppetiteCopyText(lowAppetiteEntries, mealTime, selectedDay);
+	$: lowAppetiteCopyText = buildLowAppetiteCopyText(lowAppetiteEntries);
 
-	function buildLowAppetiteCopyText(
-		entries: { dog: Dog; log: FeedingLog }[],
-		meal: MealTime,
-		day: Date
-	): string {
+	const LOW_APPETITE_VERB: Record<'half' | 'little' | 'none', string> = {
+		half: 'ate half',
+		little: 'ate little',
+		none: "didn't eat"
+	};
+
+	function joinNames(names: string[]): string {
+		if (names.length <= 1) return names[0] ?? '';
+		if (names.length === 2) return `${names[0]} and ${names[1]}`;
+		return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+	}
+
+	// Older feeding logs may still have the full "Surgery — do not feed" note text
+	// stored on them; trim that suffix so the copy block always just says "Surgery".
+	function sanitizeCopyNote(note: string): string {
+		return note.replace(/\s*[—-]\s*do not feed\.?$/i, '').trim();
+	}
+
+	function buildLowAppetiteCopyText(entries: { dog: Dog; log: FeedingLog }[]): string {
 		if (entries.length === 0) return '';
-		const lines = [`Ate less than most — ${MEAL_LABEL[meal]}, ${formatDate(day)}`];
+		const sentences: string[] = [];
 		for (const amount of ['half', 'little', 'none'] as const) {
 			const group = entries.filter((entry) => entry.log.amountEaten === amount);
 			if (group.length === 0) continue;
-			lines.push('', amount.charAt(0).toUpperCase() + amount.slice(1));
-			for (const { dog, log } of group) {
+			const names = group.map(({ dog, log }) => {
 				const notes = log.notes?.trim();
-				lines.push(`• ${dog.name}${notes ? ` — ${notes}` : ''}`);
-			}
+				const cleanNotes = notes ? sanitizeCopyNote(notes) : '';
+				return `${dog.name}${cleanNotes ? ` (${cleanNotes})` : ''}`;
+			});
+			const sentence = `${joinNames(names)} ${LOW_APPETITE_VERB[amount]}`;
+			sentences.push(sentence.charAt(0).toUpperCase() + sentence.slice(1));
 		}
-		return lines.join('\n');
+		return `${sentences.join('. ')}.`;
 	}
 
 	async function copyToClipboard(text: string) {
@@ -342,7 +357,7 @@
 							mealTime,
 							amountEaten: isDoNotFeed(dog) ? 'none' : 'all',
 							notes: isSurgeryBlocked(dog)
-								? 'Surgery — do not feed'
+								? 'Surgery'
 								: isFastBlocked(dog)
 									? fastingLabel(dog)
 									: null
