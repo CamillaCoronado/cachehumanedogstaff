@@ -40,6 +40,8 @@
 
 	const amounts: AmountEaten[] = ['all', 'most', 'half', 'little', 'none'];
 	const HISTORY_LIMIT = 200;
+	const LESS_THAN_MOST = new Set<AmountEaten>(['half', 'little', 'none']);
+	const MEAL_LABEL: Record<MealTime, string> = { am: 'AM', pm: 'PM', second: '2nd' };
 
 	$: dogs = $dogsStore;
 	let feedingLogs: Record<string, FeedingLog[]> = {};
@@ -105,6 +107,41 @@
 		}))
 		.filter((entry) => entry.surgery || entry.fasting || entry.appetite);
 	$: feedingHistoryEntries = getFeedingHistoryEntries(shelterDogs, feedingLogs).slice(0, HISTORY_LIMIT);
+	// Dogs logged for the current meal that ate less than "most" (half/little/none),
+	// surfaced as a copyable block so a shift lead can paste it into a report.
+	$: lowAppetiteEntries = displayDogs
+		.map((dog) => ({ dog, log: fedMap[dog.id] }))
+		.filter((entry): entry is { dog: Dog; log: FeedingLog } => !!entry.log && LESS_THAN_MOST.has(entry.log.amountEaten));
+	$: lowAppetiteCopyText = buildLowAppetiteCopyText(lowAppetiteEntries, mealTime, selectedDay);
+
+	function buildLowAppetiteCopyText(
+		entries: { dog: Dog; log: FeedingLog }[],
+		meal: MealTime,
+		day: Date
+	): string {
+		if (entries.length === 0) return '';
+		const lines = [`Ate less than most — ${MEAL_LABEL[meal]}, ${formatDate(day)}`];
+		for (const amount of ['half', 'little', 'none'] as const) {
+			const group = entries.filter((entry) => entry.log.amountEaten === amount);
+			if (group.length === 0) continue;
+			lines.push('', amount.charAt(0).toUpperCase() + amount.slice(1));
+			for (const { dog, log } of group) {
+				const notes = log.notes?.trim();
+				lines.push(`• ${dog.name}${notes ? ` — ${notes}` : ''}`);
+			}
+		}
+		return lines.join('\n');
+	}
+
+	async function copyToClipboard(text: string) {
+		if (!text) return;
+		try {
+			await navigator.clipboard.writeText(text);
+			toast.success('Copied!');
+		} catch {
+			toast.error('Copy failed — select and copy manually.');
+		}
+	}
 
 	function activeFoodAmountLabel(dog: Dog) {
 		return mealTime === 'second' ? secondMealAmountLabel(dog) : foodAmountLabel(dog);
@@ -486,6 +523,17 @@
 					</div>
 				</div>
 				<p class="feeding-order-note typewriter">Feed straight down the list.</p>
+				{#if lowAppetiteEntries.length > 0}
+					<div class="feeding-low-appetite-block">
+						<div class="feeding-low-appetite-head">
+							<p class="feeding-low-appetite-title typewriter">ate less than most — copy for report</p>
+							<button type="button" class="feeding-copy-btn" on:click={() => copyToClipboard(lowAppetiteCopyText)}>
+								Copy
+							</button>
+						</div>
+						<pre class="feeding-low-appetite-pre">{lowAppetiteCopyText}</pre>
+					</div>
+				{/if}
 				{#if exceptionDogs.length > 0}
 					<div class="feeding-special-summary feeding-exceptions">
 						<p class="feeding-special-title typewriter">today's exceptions</p>
@@ -1379,6 +1427,63 @@
 		border: 1.5px dashed #9fb4ca;
 		background: #f7fbff;
 		padding: 0.44rem 0.46rem;
+	}
+
+	.feeding-low-appetite-block {
+		margin-top: 0.48rem;
+		display: grid;
+		gap: 0.34rem;
+		border: 1.5px dashed #d9a05b;
+		background: #fdf8ef;
+		padding: 0.44rem 0.46rem;
+	}
+
+	.feeding-low-appetite-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.4rem;
+	}
+
+	.feeding-low-appetite-title {
+		margin: 0;
+		font-size: 0.56rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		color: #8a5a1c;
+	}
+
+	.feeding-copy-btn {
+		min-height: 1.9rem;
+		border: 1px solid #d9a05b;
+		border-radius: 0.22rem;
+		background: #ffffff;
+		padding: 0.12rem 0.56rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		color: #8a5a1c;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.feeding-copy-btn:hover {
+		background: #fdf3e2;
+	}
+
+	.feeding-low-appetite-pre {
+		margin: 0;
+		padding: 0.5rem 0.6rem;
+		background: #ffffff;
+		border: 1px solid #ecd9bc;
+		border-radius: 0.3rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.72rem;
+		line-height: 1.5;
+		white-space: pre-wrap;
+		color: #3f2f14;
 	}
 
 	.feeding-special-title {
