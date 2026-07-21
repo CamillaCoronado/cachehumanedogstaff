@@ -125,23 +125,13 @@
 		return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 	}
 
-	// Older feeding logs may still have the full "Surgery — do not feed" note text
-	// stored on them; trim that suffix so the copy block always just says "Surgery".
-	function sanitizeCopyNote(note: string): string {
-		return note.replace(/\s*[—-]\s*do not feed\.?$/i, '').trim();
-	}
-
 	function buildLowAppetiteCopyText(entries: { dog: Dog; log: FeedingLog }[]): string {
 		if (entries.length === 0) return '';
 		const sentences: string[] = [];
 		for (const amount of ['half', 'little', 'none'] as const) {
 			const group = entries.filter((entry) => entry.log.amountEaten === amount);
 			if (group.length === 0) continue;
-			const names = group.map(({ dog, log }) => {
-				const notes = log.notes?.trim();
-				const cleanNotes = notes ? sanitizeCopyNote(notes) : '';
-				return `${dog.name}${cleanNotes ? ` (${cleanNotes})` : ''}`;
-			});
+			const names = group.map(({ dog }) => dog.name);
 			const sentence = `${joinNames(names)} ${LOW_APPETITE_VERB[amount]}`;
 			sentences.push(sentence.charAt(0).toUpperCase() + sentence.slice(1));
 		}
