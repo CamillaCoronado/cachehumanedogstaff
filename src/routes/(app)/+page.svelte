@@ -99,6 +99,124 @@
 		euthanized: { emoji: '🌈', label: 'rainbow bridge', tagClass: 'movement-tag-rainbow' }
 	} as const;
 	let failedThumbs = new Set<string>();
+
+	// Masonry layout for the dashboard cards: each card is placed at the
+	// bottom of whichever column is currently shortest (the same "shortest
+	// column" placement real masonry libraries use), rather than a plain CSS
+	// grid — which only lays cards into uniform rows, leaving dead space next
+	// to any card shorter than its row's tallest neighbor. Cards are
+	// absolutely positioned in JS instead of via CSS `columns`, which has a
+	// longstanding WebKit bug where cards overlap once async content (photos,
+	// data finishing loading) changes a card's height after layout — plain
+	// positioning re-measures and relays out on every height change instead.
+	//
+	// Column count mirrors the breakpoints in .planner-columns below — keep
+	// MASONRY_BREAKPOINTS in sync with those media queries.
+	const MASONRY_GAP = 9.28; // px, matches .planner-columns { gap: 0.58rem } at 16px root
+	const MASONRY_BREAKPOINTS = [
+		{ minWidth: 1180, columns: 3 },
+		{ minWidth: 760, columns: 2 },
+		{ minWidth: 0, columns: 1 }
+	];
+
+	let masonryContainer: HTMLElement | null = null;
+	let masonryCards: HTMLElement[] = [];
+	let masonryHeight = 0;
+	let masonryReady = false;
+	let masonryFrame: number | null = null;
+
+	function scheduleMasonryLayout() {
+		if (masonryFrame !== null) return;
+		masonryFrame = requestAnimationFrame(() => {
+			masonryFrame = null;
+			layoutMasonry();
+		});
+	}
+
+	function layoutMasonry() {
+		const container = masonryContainer;
+		if (!container) return;
+		// Cards start stacked at (0,0) before their first placement — animating
+		// that opening move would show them sliding through/over each other for
+		// a frame, which reads exactly like the overlap bug this dashboard has
+		// had before. Skip the transition for the first layout only.
+		const isFirstLayout = !masonryReady;
+		const width = container.clientWidth;
+		const columns = MASONRY_BREAKPOINTS.find((bp) => width >= bp.minWidth)?.columns ?? 1;
+		const colWidth = (width - MASONRY_GAP * (columns - 1)) / columns;
+		const colBottoms = new Array(columns).fill(0);
+		for (const card of masonryOrder()) {
+			const col = colBottoms.indexOf(Math.min(...colBottoms));
+			const top = colBottoms[col];
+			const left = col * (colWidth + MASONRY_GAP);
+			if (isFirstLayout) card.style.transition = 'none';
+			card.style.width = `${colWidth}px`;
+			card.style.transform = `translate(${left}px, ${top}px)`;
+			colBottoms[col] = top + card.getBoundingClientRect().height + MASONRY_GAP;
+		}
+		masonryHeight = colBottoms.length ? Math.max(...colBottoms) - MASONRY_GAP : 0;
+		masonryReady = true;
+		if (isFirstLayout) {
+			requestAnimationFrame(() => {
+				for (const card of masonryCards) card.style.transition = '';
+			});
+		}
+	}
+
+	// Preserves the priority the old CSS `order` rules gave cards: empty-state
+	// cards flow last, and a non-empty "Needs Attention" card is deprioritized
+	// just above them — everything else keeps DOM order.
+	function masonryOrder() {
+		return [...masonryCards].sort((a, b) => masonryPriority(a) - masonryPriority(b));
+	}
+	function masonryPriority(card: HTMLElement) {
+		if (card.dataset.masonryEmpty === 'true') return 2;
+		if (card.dataset.masonryAttention === 'true') return 1;
+		return 0;
+	}
+
+	function masonryItem(node: HTMLElement) {
+		masonryCards = [...masonryCards, node];
+		const resizeObserver = new ResizeObserver(scheduleMasonryLayout);
+		resizeObserver.observe(node);
+		scheduleMasonryLayout();
+		return {
+			destroy() {
+				resizeObserver.disconnect();
+				masonryCards = masonryCards.filter((n) => n !== node);
+				scheduleMasonryLayout();
+			}
+		};
+	}
+
+	function masonryContainerAction(node: HTMLElement) {
+		masonryContainer = node;
+		const resizeObserver = new ResizeObserver(scheduleMasonryLayout);
+		resizeObserver.observe(node);
+		return {
+			destroy() {
+				resizeObserver.disconnect();
+				masonryContainer = null;
+			}
+		};
+	}
+
+	// Relayout when a card's empty/non-empty state (its masonry priority)
+	// changes even if its measured height happens to stay the same — the
+	// ResizeObserver in masonryItem alone wouldn't catch that.
+	$: {
+		loading;
+		dogsOut.length;
+		managerOnlyDogs.length;
+		isolationDogs.length;
+		fosterDogs.length;
+		incomingDogs.length;
+		attentionItems.length;
+		movementCount;
+		recentlyAdopted.length;
+		scheduleMasonryLayout();
+	}
+
 	let playgroupSessions: PlaygroupSession[] = [];
 	let dayTripLogs: DayTripLog[] = [];
 	let feedingLogsByDog: Record<string, FeedingLog[]> = {};
@@ -125,6 +243,10 @@
 
 	onMount(() => {
 		void fetchWeather();
+	});
+
+	onDestroy(() => {
+		if (masonryFrame !== null) cancelAnimationFrame(masonryFrame);
 	});
 
 	async function fetchWeather() {
@@ -658,8 +780,13 @@
 		<p class="planner-error">{errorMessage}</p>
 	{/if}
 
-	<div class="planner-columns">
-		<section class="planner-list planner-list-sand">
+	<div
+		class="planner-columns"
+		class:planner-columns-ready={masonryReady}
+		use:masonryContainerAction
+		style="height: {masonryHeight}px;"
+	>
+		<section class="planner-list planner-list-sand" use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Today</h2>
 				<span class="planner-pill planner-pill-sand">{todayItems.length}</span>
@@ -694,7 +821,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sand planner-handoff">
+		<section class="planner-list planner-list-sand planner-handoff" use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Shift Handoff</h2>
 				<span class="planner-pill planner-pill-sand">{cleaningShift === 'morning' ? 'AM' : 'PM'}</span>
@@ -730,7 +857,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-rose" class:planner-list-empty={!loading && dogsOut.length === 0}>
+		<section class="planner-list planner-list-rose" class:planner-list-empty={!loading && dogsOut.length === 0} data-masonry-empty={!loading && dogsOut.length === 0} use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Day Trips</h2>
 				<span class="planner-pill planner-pill-rose">{dogsOut.length}</span>
@@ -761,7 +888,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-lilac" class:planner-list-empty={!loading && managerOnlyDogs.length === 0}>
+		<section class="planner-list planner-list-lilac" class:planner-list-empty={!loading && managerOnlyDogs.length === 0} data-masonry-empty={!loading && managerOnlyDogs.length === 0} use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Manager Only</h2>
 				<span class="planner-pill planner-pill-lilac">{managerOnlyDogs.length}</span>
@@ -784,7 +911,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-cyan" class:planner-list-empty={!loading && isolationDogs.length === 0}>
+		<section class="planner-list planner-list-cyan" class:planner-list-empty={!loading && isolationDogs.length === 0} data-masonry-empty={!loading && isolationDogs.length === 0} use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Isolation</h2>
 				<span class="planner-pill planner-pill-cyan">{isolationDogs.length}</span>
@@ -807,7 +934,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sky" class:planner-list-empty={!loading && fosterDogs.length === 0}>
+		<section class="planner-list planner-list-sky" class:planner-list-empty={!loading && fosterDogs.length === 0} data-masonry-empty={!loading && fosterDogs.length === 0} use:masonryItem>
 			<div class="planner-list-head">
 				<h2>In Foster</h2>
 				<span class="planner-pill planner-pill-sky">{fosterDogs.length}</span>
@@ -841,7 +968,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-steel" class:planner-list-empty={!loading && incomingDogs.length === 0}>
+		<section class="planner-list planner-list-steel" class:planner-list-empty={!loading && incomingDogs.length === 0} data-masonry-empty={!loading && incomingDogs.length === 0} use:masonryItem>
 		<div class="planner-list-head">
 			<h2>Incoming</h2>
 			<span class="planner-pill planner-pill-steel">{incomingDogs.length}</span>
@@ -875,7 +1002,7 @@
 		</div>
 	</section>
 
-	<section class="planner-list planner-list-amber planner-list-attention" class:planner-list-empty={!loading && attentionItems.length === 0}>
+	<section class="planner-list planner-list-amber planner-list-attention" class:planner-list-empty={!loading && attentionItems.length === 0} data-masonry-empty={!loading && attentionItems.length === 0} data-masonry-attention="true" use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Needs Attention</h2>
 				<span class="planner-pill planner-pill-amber">{attentionItems.length}</span>
@@ -909,7 +1036,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sand" class:planner-list-empty={!loading && movementCount === 0}>
+		<section class="planner-list planner-list-sand" class:planner-list-empty={!loading && movementCount === 0} data-masonry-empty={!loading && movementCount === 0} use:masonryItem>
 			<div class="planner-list-head">
 				<h2>{movementsIsToday ? "Today's Movements" : 'Movements'}</h2>
 				<span class="planner-pill planner-pill-amber">{movementCount}</span>
@@ -965,7 +1092,7 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sage" class:planner-list-empty={!loading && recentlyAdopted.length === 0}>
+		<section class="planner-list planner-list-sage" class:planner-list-empty={!loading && recentlyAdopted.length === 0} data-masonry-empty={!loading && recentlyAdopted.length === 0} use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Recently Adopted</h2>
 				<span class="planner-pill planner-pill-sage">{recentlyAdopted.length}</span>
@@ -1280,10 +1407,17 @@
 		cursor: default;
 	}
 
+	/* Columns become an absolute-positioning context for JS masonry (see
+	   masonryContainerAction / masonryItem above); hidden until the first
+	   layout pass runs so cards don't flash stacked at 0,0 pre-measurement.
+	   Column count / breakpoints live in MASONRY_BREAKPOINTS, not here. */
 	.planner-columns {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr);
-		gap: 0.58rem;
+		position: relative;
+		visibility: hidden;
+	}
+
+	.planner-columns-ready {
+		visibility: visible;
 	}
 
 	.planner-list {
@@ -1293,14 +1427,10 @@
 		padding: 0.58rem 0.5rem 0.52rem;
 		border-radius: 0.92rem;
 		min-height: 0;
-	}
-
-	.planner-list-empty {
-		order: 10;
-	}
-
-	.planner-list-attention:not(.planner-list-empty) {
-		order: 9;
+		position: absolute;
+		top: 0;
+		left: 0;
+		transition: transform 180ms ease, width 180ms ease;
 	}
 
 	.planner-list-sand {
@@ -1629,19 +1759,6 @@
 
 
 
-
-	@media (min-width: 760px) {
-		.planner-columns {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			align-items: start;
-		}
-	}
-
-	@media (min-width: 1180px) {
-		.planner-columns {
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-		}
-	}
 
 	@media (max-width: 560px) {
 		.planner-dashboard {
