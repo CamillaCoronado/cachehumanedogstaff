@@ -442,7 +442,7 @@
 	function isolationBullet(dog: Dog) {
 		if (dog.isolationReason === 'sick') return '🩺';
 		if (dog.isolationReason === 'bite_quarantine') return '⚠';
-		return '•';
+		return '🔒';
 	}
 
 	function dayGapLabel(days: number) {
@@ -926,7 +926,7 @@
 						<a class="planner-row planner-row-link" href="/dogs/{dog.id}">
 							<span class="planner-row-main">
 								<span class="planner-bullet">{isolationBullet(dog)}</span>
-								<span class="planner-row-text">{dog.name} ({isolationLabel(dog)})</span>
+								<span class="planner-row-text" title={`In isolation: ${isolationLabel(dog)}`}>{dog.name}</span>
 							</span>
 						</a>
 					{/each}

@@ -14,6 +14,8 @@ export interface KennelPlaceholder {
 	name: string;
 	/** Same format as Dog.outdoorKennelAssignment ('' = unassigned). */
 	run: string;
+	/** Inside-kennel assignment, same format as Dog.insideKennelAssignment ('' = unassigned). */
+	insideRun?: string;
 	createdAt: string;
 	createdByName: string;
 }
@@ -38,6 +40,7 @@ export async function addKennelPlaceholder(name: string, createdByName: string):
 		id: `ph-${createId('ph')}`,
 		name: name.trim(),
 		run: '',
+		insideRun: '',
 		createdAt: new Date().toISOString(),
 		createdByName
 	};
@@ -61,6 +64,15 @@ export async function setKennelPlaceholderRun(id: string, run: string): Promise<
 	}
 	const stored = readJson<KennelPlaceholder[]>(STORAGE_KEY, []);
 	writeJson(STORAGE_KEY, stored.map((p) => (p.id === id ? { ...p, run } : p)));
+}
+
+export async function setKennelPlaceholderInsideRun(id: string, insideRun: string): Promise<void> {
+	if (db) {
+		await updateDoc(doc(db, 'kennelPlaceholders', id), { insideRun });
+		return;
+	}
+	const stored = readJson<KennelPlaceholder[]>(STORAGE_KEY, []);
+	writeJson(STORAGE_KEY, stored.map((p) => (p.id === id ? { ...p, insideRun } : p)));
 }
 
 export async function deleteKennelPlaceholder(id: string): Promise<void> {

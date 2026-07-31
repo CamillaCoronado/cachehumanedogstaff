@@ -69,6 +69,11 @@ export function adoptionLabel(dog: Dog) {
 			: 'Adoption: Not available (care hold)';
 	}
 	if (adoption.state === 'isolation_hold') return 'Adoption: Temporarily unavailable';
+	if (adoption.state === 'sick_hold') {
+		return adoption.holdReason
+			? `Adoption: Temporarily unavailable (${adoption.holdReason})`
+			: 'Adoption: Temporarily unavailable (sick)';
+	}
 	return 'Adoption: Available';
 }
 
@@ -78,6 +83,7 @@ export function adoptionPillClass(dog: Dog) {
 	if (adoption.state === 'handling_hold') return 'status-pill-yellow';
 	if (adoption.state === 'day_trip_hold') return 'status-pill-yellow';
 	if (adoption.state === 'isolation_hold') return 'status-pill-yellow';
+	if (adoption.state === 'sick_hold') return 'status-pill-yellow';
 	return 'status-pill-red';
 }
 

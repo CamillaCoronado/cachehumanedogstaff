@@ -44,6 +44,10 @@
 	let addingTx = false;
 	let showAddTx = false;
 
+	let fleaDogId = '';
+	let showAddFleas = false;
+	let markingFleas = false;
+
 	const isoReasonOptions: { value: IsolationReason | null; label: string }[] = [
 		{ value: null, label: 'ISO' },
 		{ value: 'sick', label: 'Sick' },
@@ -65,6 +69,14 @@
 	// A dog can hold multiple treatments, so any active dog can have one added.
 	$: eligibleForTx = dogs
 		.filter((d) => d.status === 'active')
+		.sort((a, b) => a.name.localeCompare(b.name));
+
+	$: eligibleForFleas = dogs
+		.filter((d) => d.status === 'active' && !d.hasFleas)
+		.sort((a, b) => a.name.localeCompare(b.name));
+
+	$: fleaDogs = dogs
+		.filter((d) => d.status === 'active' && d.hasFleas)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: surgeryDogs = dogs
@@ -194,6 +206,32 @@
 			toast.success(`${dog.name} cleared from FortiFlora list.`);
 		} catch {
 			toast.error('Could not clear FortiFlora record.');
+		}
+	}
+
+	async function markFleas() {
+		if (!fleaDogId) return;
+		markingFleas = true;
+		try {
+			await updateDog(fleaDogId, { hasFleas: true });
+			await refreshDogs();
+			fleaDogId = '';
+			showAddFleas = false;
+			toast.success('Marked as having fleas.');
+		} catch {
+			toast.error('Could not mark fleas.');
+		} finally {
+			markingFleas = false;
+		}
+	}
+
+	async function clearFleas(dog: Dog) {
+		try {
+			await updateDog(dog.id, { hasFleas: false });
+			await refreshDogs();
+			toast.success(`${dog.name} cleared of fleas.`);
+		} catch {
+			toast.error('Could not clear fleas.');
 		}
 	}
 
@@ -654,6 +692,59 @@
 										{/each}
 									</div>
 								</div>
+							</div>
+						{/each}
+					{/if}
+				</div>
+			</section>
+
+			<!-- Fleas (amber) -->
+			<section class="med-card med-card-amber">
+				<div class="med-card-head">
+					<h2>Fleas</h2>
+					<div class="med-head-right">
+						<span class="med-pill med-pill-amber">{fleaDogs.length}</span>
+						<button
+							class="med-add-toggle {showAddFleas ? 'med-add-toggle-open' : ''}"
+							type="button"
+							on:click={() => (showAddFleas = !showAddFleas)}
+							aria-label="Mark a dog as having fleas"
+						>+</button>
+					</div>
+				</div>
+
+				{#if showAddFleas}
+					<form class="med-form" on:submit|preventDefault={markFleas}>
+						<select class="med-input med-input-grow" bind:value={fleaDogId} required>
+							<option value="" disabled>Dog…</option>
+							{#each eligibleForFleas as dog}
+								<option value={dog.id}>{dog.name}</option>
+							{/each}
+						</select>
+						<button class="med-submit typewriter" type="submit" disabled={markingFleas || !fleaDogId}>
+							{markingFleas ? '…' : 'Mark'}
+						</button>
+					</form>
+				{/if}
+
+				<div class="med-items">
+					{#if fleaDogs.length === 0}
+						<p class="med-empty">No dogs marked with fleas.</p>
+					{:else}
+						{#each fleaDogs as dog (dog.id)}
+							<div class="med-row">
+								<div class="med-row-body">
+									<button class="med-dog-link" on:click={() => goto(`/dogs/${dog.id}`)}>
+										{dog.name}
+										{#if dog.outdoorKennelAssignment}
+											<span class="med-kennel">· K{dog.outdoorKennelAssignment}</span>
+										{/if}
+									</button>
+									<div class="med-row-sub">
+										<span class="med-tag med-tag-info">Buffer kennels on inside map</span>
+									</div>
+								</div>
+								<button class="med-clear typewriter" type="button" on:click={() => clearFleas(dog)}>Clear</button>
 							</div>
 						{/each}
 					{/if}

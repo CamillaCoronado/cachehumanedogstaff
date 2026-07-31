@@ -16,7 +16,7 @@ export function isDayTripEligible(dog: Dog, today = new Date()): boolean {
 		dog.dayTripManagerOnlyReason, dog.dayTripNotes, dog.handlingLevel,
 		dog.surgeryDate, dog.surgeryRestDays, dog.awaitingEvaluation,
 		null, today, dog.dateOfBirth, dog.vaccineCount, dog.vaccinesOutstanding,
-		dog.dayTripPuppyOverride
+		dog.dayTripPuppyOverride, dog.sickHold
 	).eligible;
 }
 
@@ -191,8 +191,10 @@ export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
 // Enrichment = day trip, playgroup, or yard time; any one of them resets the
 // clock. The clock runs from the dog's (re)arrival at the shelter — foster and
 // incoming dogs are excluded, so their clock effectively restarts when they
-// land on the floor. Dogs on medical rest, in isolation, or manager-only keep
-// their clock running but stay hidden until the restriction lifts.
+// land on the floor. Dogs on medical rest, manager-only, in isolation, or on a
+// sick hold are hidden (the clock is paused): they can't get enrichment, so they
+// aren't flagged. Coming off an isolation/sick hold stamps enrichmentResetDate,
+// which becomes the new clock baseline — so held time never counts against them.
 
 export const ENRICHMENT_OVERDUE_DAYS = 7;
 
@@ -213,17 +215,21 @@ export function getOverdueEnrichmentDogs(
 		if (dog.inFoster || dog.isIncoming) continue;
 		if (dog.isOutOnDayTrip) continue;
 		if (dog.isolationStatus !== 'none') continue;
+		if (dog.sickHold) continue;
 		if (isSurgeryResting(dog, today)) continue;
 		if (dog.handlingLevel === 'manager_only') continue;
 
 		const availableSince = dog.shelterSince ?? dog.intakeDate;
 		const availableMs = toDate(availableSince)?.getTime() ?? 0;
+		// Coming off an isolation/sick hold reset the clock — ignore anything before it.
+		const resetMs = toDate(dog.enrichmentResetDate)?.getTime() ?? 0;
+		const baselineMs = Math.max(availableMs, resetMs);
 
 		const activityDates = [toDate(dog.lastDayTripDate), lastPgMap[dog.id] ?? null, toDate(dog.lastYardDate)];
 		const lastEnrichmentMs = activityDates.reduce((latest, date) => {
-			if (!date || date.getTime() < availableMs) return latest;
+			if (!date || date.getTime() < baselineMs) return latest;
 			return Math.max(latest, date.getTime());
-		}, availableMs);
+		}, baselineMs);
 
 		const days = daysSince(new Date(lastEnrichmentMs), today) ?? 0;
 		if (days >= ENRICHMENT_OVERDUE_DAYS) {

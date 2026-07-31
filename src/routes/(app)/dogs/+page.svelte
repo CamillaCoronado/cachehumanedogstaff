@@ -184,6 +184,7 @@ const today = new Date();
 			idealHome: '',
 			energyLevel: 'unknown',
 			outdoorKennelAssignment: '',
+			insideKennelAssignment: '',
 			microchipDate: null,
 			healthProblems: '',
 			lastBathDate: null,
@@ -304,7 +305,8 @@ const today = new Date();
 			dog.dateOfBirth,
 			dog.vaccineCount,
 			dog.vaccinesOutstanding,
-			dog.dayTripPuppyOverride
+			dog.dayTripPuppyOverride,
+			dog.sickHold
 		);
 	}
 
@@ -726,6 +728,9 @@ const today = new Date();
 								</details>
 
 								<div class="dog-status-list">
+									{#if dog.sickHold}
+										<span class="status-pill status-pill-red">Sick</span>
+									{/if}
 									{#if isSurgeryToday(dog.surgeryDate, today)}
 										<span class="status-pill status-pill-yellow">Surgery Today</span>
 									{/if}

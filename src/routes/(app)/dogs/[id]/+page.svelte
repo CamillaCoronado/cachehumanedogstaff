@@ -124,7 +124,8 @@
 				dog.dateOfBirth,
 				dog.vaccineCount,
 				dog.vaccinesOutstanding,
-				dog.dayTripPuppyOverride
+				dog.dayTripPuppyOverride,
+				dog.sickHold
 			)
 		: { eligible: false, status: 'ineligible' as const, reasons: [] };
 	$: dayTripBadgeClass =
@@ -840,6 +841,14 @@
 							{/if}
 						</dd>
 					</div>
+					{#if dog.sickHold}
+						<div>
+							<dt>Sick hold</dt>
+							<dd>
+								Yes{dog.sickHoldReason?.trim() ? ` — ${dog.sickHoldReason.trim()}` : ''} · staff-only, no playgroups / day-trips / yard
+							</dd>
+						</div>
+					{/if}
 					<div>
 						<dt>Treatments</dt>
 						<dd>{treatmentSummary.length ? treatmentSummary.join(', ') : 'None'}</dd>

@@ -166,6 +166,7 @@
 						idealHome: '',
 						energyLevel: 'unknown',
 						outdoorKennelAssignment: '',
+						insideKennelAssignment: '',
 						lastBathDate: null,
 						lastBathBy: null,
 						lastDayTripDate: null,

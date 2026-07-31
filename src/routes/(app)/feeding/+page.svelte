@@ -83,7 +83,10 @@
 		return true;
 	}).sort((a, b) => a.name.localeCompare(b.name));
 	$: fosterDogs = dogs.filter((dog) => dog.status === 'active' && dog.inFoster && !dog.permanentFoster);
-	$: shelterDogs = activeDogs;
+	// Isolation dogs are fed by the clinic, not the feeding shift — keep them out
+	// of the staff feed list/counts and surface them in their own panel.
+	$: isoDogs = activeDogs.filter((dog) => dog.isolationStatus !== 'none');
+	$: shelterDogs = activeDogs.filter((dog) => dog.isolationStatus === 'none');
 	$: kennelAssignments = getAssignments(shelterDogs);
 	$: unassignedDogs = shelterDogs.filter((dog) => !getDogRun(dog));
 	$: assignedCount = shelterDogs.length - unassignedDogs.length;
@@ -150,6 +153,12 @@
 
 	function activeFoodAmountLabel(dog: Dog) {
 		return mealTime === 'second' ? secondMealAmountLabel(dog) : foodAmountLabel(dog);
+	}
+
+	function isolationReasonLabel(dog: Dog) {
+		if (dog.isolationReason === 'sick') return 'Sick';
+		if (dog.isolationReason === 'bite_quarantine') return 'Bite quarantine';
+		return 'Isolation';
 	}
 
 	function startEditFeed(dog: Dog) {
@@ -571,6 +580,20 @@
 									<a class="feeding-special-name dog-name-link" href="/dogs/{dog.id}">{dog.name}</a>
 									<span class="feeding-special-amount">{activeFoodAmountLabel(dog)}</span>
 									<span class="feeding-special-reasons">{specialFeedingReasons(dog, mealTime).join(' • ')}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+				{#if isoDogs.length > 0}
+					<div class="feeding-special-summary feeding-clinic-feeds">
+						<p class="feeding-special-title typewriter">in iso room</p>
+						<div class="feeding-special-list">
+							{#each isoDogs as dog}
+								<div class="feeding-special-row">
+									<a class="feeding-special-name dog-name-link" href="/dogs/{dog.id}">{dog.name}</a>
+									<span class="feeding-iso-tag">ISO</span>
+									<span class="feeding-special-reasons">{isolationReasonLabel(dog)}</span>
 								</div>
 							{/each}
 						</div>
@@ -1544,6 +1567,13 @@
 
 	.feeding-exceptions .feeding-special-title { color: #8a5a1c; }
 
+	.feeding-clinic-feeds {
+		border-color: #e0b6b6;
+		background: #fcf3f3;
+	}
+
+	.feeding-clinic-feeds .feeding-special-title { color: #b23c3c; }
+
 	.feeding-exception-tag {
 		font-size: 0.58rem;
 		letter-spacing: 0.08em;
@@ -1636,6 +1666,19 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.feeding-iso-tag {
+		flex-shrink: 0;
+		border-radius: 999px;
+		background: #f7e3e3;
+		border: 1px solid #e0b6b6;
+		color: #cf4b4b;
+		font-size: 0.6rem;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		padding: 0.1rem 0.42rem;
+		text-transform: uppercase;
 	}
 
 	.feeding-feed-run {

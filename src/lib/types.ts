@@ -32,6 +32,7 @@ export type TripColorReason =
 	| 'behavior'
 	| 'medical'
 	| 'isolation'
+	| 'sick'
 	| 'awaiting_eval'
 	| 'manager_only'
 	| 'staff_only'
@@ -94,8 +95,14 @@ export interface Dog {
 	 *  dogs and gentle with small ones). Empty/unset = needs a play assessment. */
 	playStyles?: DogPlayStyle[];
 	outdoorKennelAssignment: string;
+	/** Inside kennel assignment — free-text label parsed the same way as
+	 *  outdoorKennelAssignment, but for the indoor sick/healthy-zone map. */
+	insideKennelAssignment: string;
 	microchipDate?: DateValue | null;
 	healthProblems?: string;
+	/** Marked (in Medical) as having fleas. On the inside kennel map this puts a
+	 *  keep-empty flea buffer in the kennels on either side, since fleas can jump. */
+	hasFleas?: boolean;
 	lastBathDate: DateValue | null;
 	lastBathBy: string | null;
 	/** Last logged yard time — counts as enrichment alongside day trips and playgroups. */
@@ -161,6 +168,19 @@ export interface Dog {
 	isolationStatus: IsolationStatus;
 	isolationReason: IsolationReason | null;
 	isolationUntilDate: DateValue | null;
+	/** Outbreak "sick hold" — distinct from isolation (iso room). A sick-hold dog stays in
+	 *  the normal kennel building and is still fed/handled by regular staff (with
+	 *  precautions), but is grouped into the inside red zone and is staff-only, blocked from
+	 *  playgroups/day-trips/yard, and not adoptable while held. All those effects are DERIVED
+	 *  from this flag (handlingLevel/dayTripStatus are not mutated), so clearing it reverses
+	 *  them with no residual state. */
+	sickHold?: boolean;
+	sickHoldReason?: string | null;
+	sickHoldSince?: DateValue | null;
+	/** When the enrichment clock was last reset — stamped when a dog comes off an
+	 *  isolation or sick hold, so it doesn't read as instantly overdue for enrichment
+	 *  (which it couldn't get while held). The enrichment clock ignores time before this. */
+	enrichmentResetDate?: DateValue | null;
 	treatments?: Treatment[];
 	/** When the ASM sync last wrote this dog (read-only — written by the sync,
 	 *  preserved across app edits). For archived dogs this approximates the

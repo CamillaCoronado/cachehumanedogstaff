@@ -73,8 +73,10 @@ interface StoredDog {
 	energyLevel?: 'low' | 'medium' | 'high' | 'very_high' | 'unknown';
 	playStyles?: string[];
 	outdoorKennelAssignment: string;
+	insideKennelAssignment?: string;
 	microchipDate?: string | null;
 	healthProblems?: string;
+	hasFleas?: boolean;
 	lastBathDate: string | null;
 	lastYardDate?: string | null;
 	lastBathBy: string | null;
@@ -131,6 +133,10 @@ interface StoredDog {
 	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
 	isolationReason?: 'sick' | 'bite_quarantine' | null;
 	isolationUntilDate?: string | null;
+	sickHold?: boolean;
+	sickHoldReason?: string | null;
+	sickHoldSince?: string | null;
+	enrichmentResetDate?: string | null;
 	treatments?: StoredTreatment[];
 	// Deprecated single-treatment fields — migrated into `treatments` on read.
 	treatmentName?: string | null;
@@ -271,13 +277,19 @@ function deduplicateAgainstAsm(dogs: Dog[]): Dog[] {
 }
 
 function applyFosterHousingRules(dog: Dog): Dog {
+	// Inside kennels can hold foster dogs (brought back during an outbreak), so the inside
+	// assignment is kept regardless of foster status. Only the outdoor floor assignment is
+	// cleared for foster dogs.
+	const trimmedInside = normalizeKennelAssignment(dog.insideKennelAssignment);
 	if (!dog.inFoster) {
-		const trimmed = normalizeKennelAssignment(dog.outdoorKennelAssignment);
-		if (trimmed === dog.outdoorKennelAssignment) return dog;
-		return { ...dog, outdoorKennelAssignment: trimmed };
+		const trimmedOutdoor = normalizeKennelAssignment(dog.outdoorKennelAssignment);
+		if (trimmedOutdoor === dog.outdoorKennelAssignment && trimmedInside === dog.insideKennelAssignment) {
+			return dog;
+		}
+		return { ...dog, outdoorKennelAssignment: trimmedOutdoor, insideKennelAssignment: trimmedInside };
 	}
-	if (!dog.outdoorKennelAssignment) return dog;
-	return { ...dog, outdoorKennelAssignment: '' };
+	if (!dog.outdoorKennelAssignment && trimmedInside === dog.insideKennelAssignment) return dog;
+	return { ...dog, outdoorKennelAssignment: '', insideKennelAssignment: trimmedInside };
 }
 
 function normalizeDayTripIneligibleReason(value: unknown): DayTripIneligibleReason | null {
@@ -303,11 +315,20 @@ function applyStatusTransition(current: Dog, updates: Partial<Dog>, now: Date): 
 		updatedAt: now
 	});
 
+	// Coming off an isolation or sick hold resets the enrichment clock — a held dog
+	// couldn't get enrichment, so it shouldn't read as instantly overdue on release.
+	const leftIsolation = current.isolationStatus !== 'none' && merged.isolationStatus === 'none';
+	const leftSickHold = Boolean(current.sickHold) && !merged.sickHold;
+	if (leftIsolation || leftSickHold) {
+		merged.enrichmentResetDate = now;
+	}
+
 	if (changedToAdopted) {
 		return applyFosterHousingRules({
 			...merged,
 			leftShelterDate: merged.leftShelterDate ?? now,
 			outdoorKennelAssignment: '',
+			insideKennelAssignment: '',
 			inFoster: false,
 			permanentFoster: false,
 			shelterSince: null,
@@ -376,8 +397,12 @@ function serializeDog(dog: Dog): StoredDog {
 		energyLevel: dog.energyLevel,
 		playStyles: dog.playStyles ?? [],
 		outdoorKennelAssignment: normalizeKennelAssignment(dog.inFoster ? '' : dog.outdoorKennelAssignment),
+		// Foster dogs aren't on the outdoor floor, but can be housed in an inside kennel
+		// (e.g. brought back during an outbreak), so their inside assignment is kept.
+		insideKennelAssignment: normalizeKennelAssignment(dog.insideKennelAssignment ?? ''),
 		microchipDate: toDateString(dog.microchipDate),
 		healthProblems: dog.healthProblems ?? '',
+		hasFleas: dog.hasFleas ?? false,
 		lastBathDate: toDateString(dog.lastBathDate),
 		lastYardDate: toDateString(dog.lastYardDate) ?? null,
 		lastBathBy: dog.lastBathBy,
@@ -424,6 +449,10 @@ function serializeDog(dog: Dog): StoredDog {
 		isolationStatus: dog.isolationStatus,
 		isolationReason: dog.isolationReason ?? null,
 		isolationUntilDate: toDateString(dog.isolationUntilDate),
+		sickHold: dog.sickHold ?? false,
+		sickHoldReason: dog.sickHold ? (dog.sickHoldReason ?? null) : null,
+		sickHoldSince: dog.sickHold ? (toDateString(dog.sickHoldSince) ?? null) : null,
+		enrichmentResetDate: toDateString(dog.enrichmentResetDate) ?? null,
 		treatments: (dog.treatments ?? []).map((t) => ({
 			id: t.id,
 			name: t.name,
@@ -539,8 +568,10 @@ function deserializeDog(stored: StoredDog): Dog {
 			(s): s is DogPlayStyle => s === 'rough_and_rowdy' || s === 'gentle_and_dainty' || s === 'solo'
 		),
 		outdoorKennelAssignment: stored.outdoorKennelAssignment,
+		insideKennelAssignment: stored.insideKennelAssignment ?? '',
 		microchipDate: stored.microchipDate ? toDate(stored.microchipDate) : null,
 		healthProblems: stored.healthProblems ?? '',
+		hasFleas: stored.hasFleas ?? false,
 		lastBathDate: stored.lastBathDate ? toDate(stored.lastBathDate) : null,
 		lastYardDate: stored.lastYardDate ? toDate(stored.lastYardDate) : null,
 		lastBathBy: stored.lastBathBy ?? null,
@@ -570,7 +601,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		manualTripColor: (['green', 'yellow', 'red'].includes(stored.manualTripColor ?? '')
 			? (stored.manualTripColor as 'green' | 'yellow' | 'red')
 			: null),
-		manualTripColorReason: (['behavior', 'medical', 'isolation', 'awaiting_eval', 'manager_only', 'staff_only', 'difficult', 'other'].includes(stored.manualTripColorReason ?? '')
+		manualTripColorReason: (['behavior', 'medical', 'isolation', 'sick', 'awaiting_eval', 'manager_only', 'staff_only', 'difficult', 'other'].includes(stored.manualTripColorReason ?? '')
 			? (stored.manualTripColorReason as TripColorReason)
 			: null),
 		lastSheetColor: (['green', 'yellow', 'red'].includes(stored.lastSheetColor ?? '')
@@ -593,6 +624,10 @@ function deserializeDog(stored: StoredDog): Dog {
 		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
 		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
 		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,
+		sickHold: stored.sickHold ?? false,
+		sickHoldReason: stored.sickHold ? (stored.sickHoldReason ?? null) : null,
+		sickHoldSince: stored.sickHold && stored.sickHoldSince ? toDate(stored.sickHoldSince) : null,
+		enrichmentResetDate: stored.enrichmentResetDate ? toDate(stored.enrichmentResetDate) : null,
 		treatments: deserializeTreatments(stored),
 		lastSyncedAt: stored._lastSyncedAt ? toDate(stored._lastSyncedAt) : null,
 		status: stored.status,
@@ -910,6 +945,18 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 	});
 	writeJson(DOGS_KEY, next);
 	return getDog(id);
+}
+
+// Batch mark/clear the outbreak "sick hold" across many dogs at once (e.g. a whole
+// transfer group). Reuses updateDog so both the Firestore and localStorage paths and the
+// serialize/merge logic are shared. Setting sick stamps `sickHoldSince`; clearing wipes
+// the reason/date. Callers should refresh the dogs store afterwards.
+export async function setDogsSickHold(ids: string[], sick: boolean, reason?: string | null) {
+	const now = new Date();
+	const updates: Partial<Dog> = sick
+		? { sickHold: true, sickHoldReason: reason?.trim() || null, sickHoldSince: now }
+		: { sickHold: false, sickHoldReason: null, sickHoldSince: null };
+	await Promise.all(ids.map((id) => updateDog(id, updates)));
 }
 
 // Re-derives the denormalized bath/yard timers from the dog's logs — the

@@ -29,6 +29,7 @@
 		getAssignments
 	} from '$lib/utils/kennelLayout';
 	import type { RunId } from '$lib/utils/kennelLayout';
+	import InsideKennelMap from '$lib/components/kennels/InsideKennelMap.svelte';
 
 	$: dogs = $dogsStore;
 	$: loading = !$dogsLoaded;
@@ -36,6 +37,7 @@
 	let placeholders: KennelPlaceholder[] = [];
 	let newPlaceholderName = '';
 	let addingPlaceholder = false;
+	let activeMap: 'outdoor' | 'inside' = 'outdoor';
 	let draggingId: string | null = null;
 	let hoveredRun: RunId | null = null;
 	let hoveredUnassigned = false;
@@ -75,7 +77,12 @@
 	$: canEdit = canEditDogs(role);
 	$: activeDogs = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster);
 	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster);
-	$: kennelEligibleDogs = activeDogs.filter((dog) => !dog.inFoster);
+	// Dogs in isolation can't share the outdoor kennel map — they're shown as
+	// unassignable and kept out of every run/assignment calculation.
+	$: isoDogs = activeDogs.filter((dog) => !dog.inFoster && dog.isolationStatus !== 'none');
+	$: kennelEligibleDogs = activeDogs.filter(
+		(dog) => !dog.inFoster && dog.isolationStatus === 'none'
+	);
 	$: assignments = getAssignments(kennelEligibleDogs);
 	$: unassigned = kennelEligibleDogs.filter((dog) => !getDogRun(dog));
 	// Run keys where an intact dog shares the kennel with an intact dog of the
@@ -365,8 +372,33 @@
 						<span class="hero-chip hero-chip-muted">Read only</span>
 					{/if}
 				</div>
+				<div class="kennel-map-tabs" role="tablist" aria-label="Kennel map">
+					<button
+						type="button"
+						role="tab"
+						aria-selected={activeMap === 'outdoor'}
+						class={`kennel-map-tab ${activeMap === 'outdoor' ? 'kennel-map-tab-active' : ''}`}
+						on:click={() => (activeMap = 'outdoor')}
+					>
+						Outdoor
+					</button>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={activeMap === 'inside'}
+						class={`kennel-map-tab ${activeMap === 'inside' ? 'kennel-map-tab-active' : ''}`}
+						on:click={() => (activeMap = 'inside')}
+					>
+						Inside
+					</button>
+				</div>
 			</div>
 		</div>
+		{#if activeMap === 'inside'}
+			<div class="kennels-body">
+				<InsideKennelMap {dogs} {canEdit} />
+			</div>
+		{:else}
 		<div class="kennels-body space-y-4">
 			<div class="space-y-4">
 				<div class="map-sheet">
@@ -489,6 +521,23 @@
 							{/each}
 						</div>
 					{/if}
+					{#if isoDogs.length > 0}
+						<div class="kennel-iso-section">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<p class="text-xs uppercase tracking-[0.2em] text-ink-500">In isolation</p>
+								<span class="text-xs font-semibold text-ink-600">{isoDogs.length}</span>
+							</div>
+							<p class="mt-1 text-xs text-ink-500">Not assignable to an outdoor run.</p>
+							<div class="mt-3 kennel-unassigned-list">
+								{#each isoDogs as dog}
+									<div class="kennel-unassigned-row kennel-unassigned-iso">
+										<span>{dog.name}</span>
+										<span class="kennel-iso-tag">ISO</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
 					{#if canEdit}
 						<form class="kennel-expected-form" on:submit|preventDefault={handleAddPlaceholder}>
 							<input
@@ -587,6 +636,7 @@
 				</div>
 			</div>
 		</div>
+		{/if}
 	</div>
 </section>
 
@@ -664,6 +714,33 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: #3e5f83;
+	}
+
+	.kennel-map-tabs {
+		display: inline-flex;
+		gap: 0.25rem;
+		background: #eef3f9;
+		border: 1px solid #d7e0eb;
+		border-radius: 999px;
+		padding: 0.2rem;
+	}
+
+	.kennel-map-tab {
+		border: 0;
+		background: transparent;
+		border-radius: 999px;
+		padding: 0.3rem 0.9rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		color: #4d5f77;
+		cursor: pointer;
+	}
+
+	.kennel-map-tab-active {
+		background: #016aa5;
+		color: #fff;
+		box-shadow: 0 1px 3px rgba(1, 106, 165, 0.35);
 	}
 
 	.hero-chip-muted {
@@ -943,6 +1020,31 @@
 
 	.kennel-unassigned-row:last-child {
 		border-bottom: 0;
+	}
+
+	.kennel-iso-section {
+		margin-top: 1rem;
+		padding-top: 0.85rem;
+		border-top: 1.5px solid #ead0d0;
+	}
+
+	.kennel-unassigned-iso {
+		justify-content: space-between;
+		gap: 0.4rem;
+		color: #8a5b5b;
+		cursor: not-allowed;
+	}
+
+	.kennel-iso-tag {
+		flex-shrink: 0;
+		border-radius: 999px;
+		background: #f7e3e3;
+		border: 1px solid #e0b6b6;
+		color: #cf4b4b;
+		font-size: 0.62rem;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		padding: 0.1rem 0.44rem;
 	}
 
 	.kennel-dog-draggable {

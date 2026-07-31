@@ -155,7 +155,8 @@
 			dog.dateOfBirth,
 			dog.vaccineCount,
 			dog.vaccinesOutstanding,
-			dog.dayTripPuppyOverride
+			dog.dayTripPuppyOverride,
+			dog.sickHold
 		);
 	}
 

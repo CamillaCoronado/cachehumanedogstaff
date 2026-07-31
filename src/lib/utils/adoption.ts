@@ -6,6 +6,7 @@ export type AdoptionAvailabilityState =
 	| 'available'
 	| 'medical_hold'
 	| 'isolation_hold'
+	| 'sick_hold'
 	| 'handling_hold'
 	| 'day_trip_hold'
 	| 'not_available';
@@ -43,6 +44,8 @@ export function getAdoptionAvailability(
 		| 'handlingLevel'
 		| 'notAdoptable'
 		| 'notAdoptableReason'
+		| 'sickHold'
+		| 'sickHoldReason'
 	>
 ): AdoptionAvailability {
 	const missingMedicalRequirements = missingAdoptionMedicalRequirements(dog);
@@ -83,6 +86,15 @@ export function getAdoptionAvailability(
 			state: 'isolation_hold',
 			missingMedicalRequirements: [],
 			holdReason: dog.isolationReason === 'sick' ? 'sick isolation' : dog.isolationReason === 'bite_quarantine' ? 'bite quarantine' : 'isolation'
+		};
+	}
+
+	if (dog.sickHold) {
+		return {
+			available: false,
+			state: 'sick_hold',
+			missingMedicalRequirements: [],
+			holdReason: dog.sickHoldReason?.trim() ? `sick — ${dog.sickHoldReason.trim()}` : 'sick — outbreak hold'
 		};
 	}
 

@@ -264,6 +264,7 @@ function defaultStoredFields(now: string) {
 		secondMealAmount: '',
 		origin: '',
 		outdoorKennelAssignment: '',
+		insideKennelAssignment: '',
 		hiddenComments: '',
 		warningNotes: '',
 		holdNotes: '',
@@ -576,6 +577,7 @@ export async function markStaleAsmDogsArchived(
 			batch.set(staleDoc.ref, {
 				status: outcome,
 				outdoorKennelAssignment: '',
+				insideKennelAssignment: '',
 				inFoster: false,
 				permanentFoster: false,
 				shelterSince: null,

@@ -148,7 +148,8 @@ export function checkDayTripEligibility(
 	dateOfBirth: DateValue | string | null | undefined = null,
 	vaccineCount: number | null | undefined = null,
 	vaccinesOutstanding: number | null | undefined = null,
-	puppyDayTripOverride: boolean | null | undefined = null
+	puppyDayTripOverride: boolean | null | undefined = null,
+	sickHold: boolean | null | undefined = null
 ): DayTripEligibility {
 	const reasons: string[] = [];
 	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
@@ -183,6 +184,10 @@ export function checkDayTripEligibility(
 
 	if (isolationStatus !== 'none') {
 		reasons.push('In isolation');
+	}
+
+	if (sickHold) {
+		reasons.push('Sick (outbreak hold)');
 	}
 
 	if (roleRestrictionReason) {
@@ -254,7 +259,7 @@ export function checkDayTripEligibility(
 	void vaccineCount;
 	const blockedByRequirements = !isVaccinated || !isFixed || hasOutstandingVaccines;
 	const blockedByStatus =
-		isolationStatus !== 'none' || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay || Boolean(awaitingEvaluation) || puppyTooNew;
+		isolationStatus !== 'none' || Boolean(sickHold) || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay || Boolean(awaitingEvaluation) || puppyTooNew;
 	const eligible = !(blockedByRequirements || blockedByStatus);
 
 	let status: DayTripStatus = 'ineligible';
@@ -263,6 +268,8 @@ export function checkDayTripEligibility(
 	} else if (puppyTooNew) {
 		status = 'ineligible';
 	} else if (isolationStatus !== 'none') {
+		status = 'ineligible';
+	} else if (sickHold) {
 		status = 'ineligible';
 	} else if (manuallyBlocked) {
 		status = 'ineligible';
@@ -297,6 +304,7 @@ export const TRIP_COLOR_REASONS: { value: TripColorReason; label: string }[] = [
 	{ value: 'behavior', label: 'Behavior' },
 	{ value: 'medical', label: 'Medical' },
 	{ value: 'isolation', label: 'Isolation' },
+	{ value: 'sick', label: 'Sick (outbreak)' },
 	{ value: 'awaiting_eval', label: 'Awaiting evaluation' },
 	{ value: 'manager_only', label: 'Manager only' },
 	{ value: 'staff_only', label: 'Staff only' },
@@ -315,6 +323,7 @@ export function dogColorReason(dog: Dog): TripColorReason | null {
 	if (dog.manualTripColorReason) return dog.manualTripColorReason;
 	const level = resolveDogHandlingLevel(dog.handlingLevel);
 	if (dog.isolationStatus !== 'none') return 'isolation';
+	if (dog.sickHold) return 'sick';
 	if (level === 'manager_only') {
 		if (dog.dayTripManagerOnlyReason === 'behavior') return 'behavior';
 		if (dog.dayTripManagerOnlyReason === 'medical') return 'medical';
@@ -337,6 +346,7 @@ export function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
 	// Otherwise, a computed default from the dog's status.
 	const level = resolveDogHandlingLevel(dog.handlingLevel);
 	if (dog.isolationStatus !== 'none') return 'red';
+	if (dog.sickHold) return 'red';
 	if (level === 'manager_only' || level === 'staff_only') return 'red';
 	if (dog.awaitingEvaluation) return 'red';
 	if (dog.dayTripStatus === 'difficult') return 'yellow';

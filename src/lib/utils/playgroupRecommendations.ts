@@ -37,7 +37,7 @@ export function isPuppy(dog: Dog): boolean {
 }
 
 export function getReadiness(dog: Dog): DogReadiness {
-	if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no') return 'hold';
+	if (dog.isolationStatus !== 'none' || dog.sickHold || dog.goodWithDogs === 'no') return 'hold';
 	if (isSurgeryResting(dog, new Date())) return 'hold';
 	const weeks = dogAgeWeeks(dog, new Date());
 	if (weeks !== null && weeks < 26) {
@@ -57,6 +57,7 @@ export function guidanceForDog(dog: Dog) {
 	const readiness = getReadiness(dog);
 	if (readiness === 'hold') {
 		if (dog.isolationStatus !== 'none') return 'In isolation: do not schedule.';
+		if (dog.sickHold) return 'Sick (outbreak hold): no playgroups.';
 		if (dog.goodWithDogs === 'no') return 'Marked not dog-social: behavior team only.';
 		const surgeryDaysAgo = daysSince(dog.surgeryDate);
 		if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) {
@@ -165,6 +166,8 @@ export function checkSelectionWarnings(selected: Dog[]): SelectionWarning[] {
 	for (const dog of selected) {
 		if (dog.isolationStatus !== 'none') {
 			warnings.push({ id: `iso-${dog.id}`, message: `${dog.name} is in isolation.` });
+		} else if (dog.sickHold) {
+			warnings.push({ id: `sick-${dog.id}`, message: `${dog.name} is on a sick (outbreak) hold — no playgroups.` });
 		} else if (isSurgeryResting(dog, new Date())) {
 			warnings.push({ id: `med-${dog.id}`, message: `${dog.name} is on medical/surgery rest.` });
 		}

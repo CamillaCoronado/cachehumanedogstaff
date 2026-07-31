@@ -137,4 +137,32 @@ describe('getOverdueEnrichmentDogs', () => {
 		const lifted = makeDog({ handlingLevel: 'staff_only' });
 		expect(getOverdueEnrichmentDogs([lifted], [], today)).toHaveLength(1);
 	});
+
+	it('pauses the enrichment clock for isolation and sick-hold dogs', () => {
+		const overdueIntake = new Date(2026, 2, 25); // would be 16 days overdue
+		expect(
+			getOverdueEnrichmentDogs([makeDog({ intakeDate: overdueIntake, isolationStatus: 'iso' })], [], today)
+		).toEqual([]);
+		expect(
+			getOverdueEnrichmentDogs([makeDog({ intakeDate: overdueIntake, sickHold: true })], [], today)
+		).toEqual([]);
+	});
+
+	it('resets the clock from enrichmentResetDate when a hold lifts', () => {
+		// Long-overdue arrival, but the hold lifted 2 days ago → not yet overdue.
+		const dog = makeDog({
+			intakeDate: new Date(2026, 1, 1),
+			enrichmentResetDate: new Date(2026, 3, 8)
+		});
+		expect(getOverdueEnrichmentDogs([dog], [], today)).toEqual([]);
+
+		// If the reset was 8 days ago, it's overdue again — counted from the reset, not intake.
+		const older = makeDog({
+			intakeDate: new Date(2026, 1, 1),
+			enrichmentResetDate: new Date(2026, 3, 2)
+		});
+		const items = getOverdueEnrichmentDogs([older], [], today);
+		expect(items).toHaveLength(1);
+		expect(items[0].days).toBe(8);
+	});
 });

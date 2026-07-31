@@ -110,7 +110,7 @@
 	$: filteredDogs = activeDogs.filter((dog) => dog.name.toLowerCase().includes(search.toLowerCase()));
 	$: dogIdsWithHistory = new Set(sessions.flatMap((s) => s.dogIds));
 	$: readyDogs = activeDogs.filter((dog) => {
-		if (dog.isolationStatus !== 'none' || dog.goodWithDogs === 'no' || dog.awaitingEvaluation) return false;
+		if (dog.isolationStatus !== 'none' || dog.sickHold || dog.goodWithDogs === 'no' || dog.awaitingEvaluation) return false;
 		if (getReadiness(dog) === 'hold') return false; // too-young/unvaccinated puppies, surgery rest
 		if (dog.goodWithDogs === 'yes' || isPuppy(dog)) return true;
 		return dogIdsWithHistory.has(dog.id);
