@@ -849,6 +849,12 @@
 							</dd>
 						</div>
 					{/if}
+					{#if dog.hasFleas}
+						<div>
+							<dt>Fleas</dt>
+							<dd>Yes</dd>
+						</div>
+					{/if}
 					<div>
 						<dt>Treatments</dt>
 						<dd>{treatmentSummary.length ? treatmentSummary.join(', ') : 'None'}</dd>

@@ -366,7 +366,15 @@
 		.filter((dog) => isSameCalendarDay(dog.surgeryDate, today))
 		.sort((a, b) => a.name.localeCompare(b.name));
 
-	$: feedingTargets = activeDogs.filter((dog) => !isSameCalendarDay(dog.surgeryDate, today));
+	// Only dogs the feeding shift actually feeds count toward "feeding done": iso dogs are
+	// fed by the clinic (never logged on shift), and incoming dogs aren't fed until they
+	// arrive — so including them would keep feeding perpetually "not done".
+	$: feedingTargets = activeDogs.filter(
+		(dog) =>
+			dog.isolationStatus === 'none' &&
+			!isSameCalendarDay(dog.surgeryDate, today) &&
+			(!dog.isIncoming || isSameCalendarDay(dog.intakeDate, today))
+	);
 	$: feedingDone =
 		feedingTargets.length > 0 &&
 		feedingTargets.every((dog) =>
@@ -789,7 +797,7 @@
 		<section class="planner-list planner-list-sand" use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Today</h2>
-				<span class="planner-pill planner-pill-sand">{todayItems.length}</span>
+				<div class="today-head-right"><div class="shift-toggle" role="tablist" aria-label="Shift"><button type="button" role="tab" aria-selected={$shift === 'am'} class={`shift-btn ${$shift === 'am' ? 'shift-btn-active' : ''}`} on:click={() => shift.set('am')}>AM</button><button type="button" role="tab" aria-selected={$shift === 'pm'} class={`shift-btn ${$shift === 'pm' ? 'shift-btn-active' : ''}`} on:click={() => shift.set('pm')}>PM</button></div><span class="planner-pill planner-pill-sand">{todayItems.length}</span></div>
 			</div>
 			<div class="planner-items">
 				{#each todayItems as item}
@@ -1474,6 +1482,38 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.48rem;
+	}
+
+	.today-head-right {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.shift-toggle {
+		display: inline-flex;
+		gap: 0.16rem;
+		background: #efe7d6;
+		border: 1px solid #ddd0b6;
+		border-radius: 999px;
+		padding: 0.14rem;
+	}
+
+	.shift-btn {
+		border: 0;
+		background: transparent;
+		border-radius: 999px;
+		padding: 0.16rem 0.62rem;
+		font-size: 0.72rem;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		color: #8a795a;
+		cursor: pointer;
+	}
+
+	.shift-btn-active {
+		background: #b98a3c;
+		color: #fff;
 	}
 
 	.planner-list-head h2 {

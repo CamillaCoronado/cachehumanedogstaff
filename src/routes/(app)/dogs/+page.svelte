@@ -731,6 +731,9 @@ const today = new Date();
 									{#if dog.sickHold}
 										<span class="status-pill status-pill-red">Sick</span>
 									{/if}
+									{#if dog.hasFleas}
+										<span class="status-pill status-pill-red">Fleas</span>
+									{/if}
 									{#if isSurgeryToday(dog.surgeryDate, today)}
 										<span class="status-pill status-pill-yellow">Surgery Today</span>
 									{/if}

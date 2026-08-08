@@ -16,11 +16,17 @@ export type InsideKennelCell = {
 	label: string;
 	row: number;
 	col: number;
+	/** Mobile placement — the desktop grid is transposed 90° (like the outdoor map) so it
+	 *  fits a portrait screen without horizontal scrolling: each row becomes a column, top
+	 *  row on the right. */
+	mobileCol: number;
+	mobileRow: number;
 	kind: InsideCellKind;
 	note?: string;
 };
 
 export const INSIDE_GRID_COLUMNS = 14;
+const INSIDE_GRID_ROWS = 3;
 
 type CellSpec = {
 	kind?: InsideCellKind;
@@ -33,12 +39,16 @@ type CellSpec = {
 function makeRow(row: number, specs: CellSpec[], startId: number): InsideKennelCell[] {
 	return specs.map((spec, index) => {
 		const n = startId + index;
+		const col = index + 1;
 		return {
 			id: `inside-${n}`,
 			key: String(n),
 			label: String(n),
 			row,
-			col: index + 1,
+			col,
+			// 90° transpose: top row (row 1) → rightmost mobile column, columns → rows.
+			mobileCol: INSIDE_GRID_ROWS - row + 1,
+			mobileRow: col,
 			kind: spec.kind ?? 'normal',
 			note: spec.note
 		};
@@ -61,6 +71,9 @@ const row2 = makeRow(
 const row3 = makeRow(3, Array.from({ length: 14 }, () => N), row1.length + row2.length + 1);
 
 export const insideKennelCells: InsideKennelCell[] = [...row1, ...row2, ...row3];
+
+// Rows needed by the transposed mobile grid (= widest desktop row).
+export const INSIDE_MOBILE_ROWS = Math.max(...insideKennelCells.map((cell) => cell.mobileRow));
 
 export const insideCellByKey = new Map(insideKennelCells.map((cell) => [cell.key, cell]));
 

@@ -22,6 +22,7 @@ function adoptableDog(overrides: Partial<Dog> = {}): Dog {
 		notAdoptableReason: null,
 		sickHold: false,
 		sickHoldReason: null,
+		hasFleas: false,
 		...overrides
 	} as Dog;
 }
