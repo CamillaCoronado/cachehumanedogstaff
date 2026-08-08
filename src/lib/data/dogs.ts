@@ -30,6 +30,7 @@ const DAY_TRIP_KEY = 'shelter.dayTripLogs';
 interface StoredTreatment {
 	id: string;
 	name: string;
+	condition?: string | null;
 	notes?: string | null;
 	startDate?: string | null;
 	endDate?: string | null;
@@ -470,6 +471,7 @@ function serializeDog(dog: Dog): StoredDog {
 		treatments: (dog.treatments ?? []).map((t) => ({
 			id: t.id,
 			name: t.name,
+			condition: t.condition ?? null,
 			notes: t.notes ?? null,
 			startDate: toDateString(t.startDate),
 			endDate: toDateString(t.endDate)
@@ -493,6 +495,7 @@ function deserializeTreatments(stored: StoredDog): Treatment[] {
 		return stored.treatments.map((t) => ({
 			id: t.id,
 			name: t.name,
+			condition: t.condition ?? null,
 			notes: t.notes ?? null,
 			startDate: t.startDate ? toDate(t.startDate) : null,
 			endDate: t.endDate ? toDate(t.endDate) : null
@@ -502,6 +505,7 @@ function deserializeTreatments(stored: StoredDog): Treatment[] {
 		return [{
 			id: createId('tx'),
 			name: stored.treatmentName,
+			condition: null,
 			notes: stored.treatmentNotes ?? null,
 			startDate: stored.treatmentStartDate ? toDate(stored.treatmentStartDate) : null,
 			endDate: stored.treatmentEndDate ? toDate(stored.treatmentEndDate) : null

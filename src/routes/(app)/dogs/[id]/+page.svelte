@@ -102,9 +102,10 @@
 	$: canEdit = canEditDogs(role);
 	$: bathIsEligible = dog ? bathEligible(dog.surgeryDate, today) : true;
 	$: feedToday = dog ? !isSurgeryToday(dog.surgeryDate, today) : true;
-	$: treatmentSummary = (dog?.treatments ?? []).map((t) =>
-		t.endDate ? `${t.name} (until ${formatDate(t.endDate)})` : t.name
-	);
+	$: treatmentSummary = (dog?.treatments ?? []).map((t) => {
+		const label = t.condition?.trim() ? `${t.name} for ${t.condition.trim()}` : t.name;
+		return t.endDate ? `${label} (until ${formatDate(t.endDate)})` : label;
+	});
 	$: dayTripEligibility = dog
 		? checkDayTripEligibility(
 				dog.intakeDate,

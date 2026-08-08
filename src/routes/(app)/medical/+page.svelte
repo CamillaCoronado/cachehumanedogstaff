@@ -8,6 +8,7 @@
 	import { formatDate, toDate } from '$lib/utils/dates';
 	import { differenceInDays, startOfDay } from 'date-fns';
 	import toast from 'svelte-french-toast';
+	import TreatmentEditor from '$lib/components/medical/TreatmentEditor.svelte';
 	const today = new Date();
 
 	$: dogs = $dogsStore;
@@ -38,6 +39,7 @@
 
 	// Treatment form
 	let txDogId = '';
+	let txCondition = '';
 	let txName = '';
 	let txNotes = '';
 	let txStartDate = today.toISOString().slice(0, 10);
@@ -52,8 +54,34 @@
 	// Group update — built for exactly the message staff send: "these dogs are on
 	// treatment for URI, these for diarrhea, these are done and on monitor." Pick the
 	// dogs (or a whole transfer), name the condition, choose the stage.
+	// Outbreak mode — off on a normal day, so the card is just treatment and monitor.
+	// Turning it on reveals the sick (red-zone) controls. Kept in localStorage so it
+	// survives a reload, and forced on while any dog is still flagged so staff can
+	// always clear them.
+	const OUTBREAK_KEY = 'medicalOutbreakMode';
+	let outbreakMode = false;
+	$: outbreakActive = outbreakMode || sickDogs.length > 0;
+
+	function toggleOutbreakMode() {
+		outbreakMode = !outbreakMode;
+		try {
+			if (outbreakMode) localStorage.setItem(OUTBREAK_KEY, '1');
+			else localStorage.removeItem(OUTBREAK_KEY);
+		} catch {
+			/* ignore storage failures */
+		}
+		if (!outbreakMode && sickDogs.length > 0) {
+			toast(`${sickDogs.length} dog${sickDogs.length === 1 ? ' is' : 's are'} still flagged sick.`, {
+				icon: '⚠️'
+			});
+		}
+	}
+
 	let groupReason = '';
+	let groupMedication = '';
 	let groupStage: 'treating' | 'monitor' | 'sick' = 'treating';
+	// The group form can't target a stage whose controls are hidden.
+	$: if (!outbreakActive && groupStage === 'sick') groupStage = 'treating';
 	let showGroupForm = false;
 	let savingSickId = '';
 	let savingGroup = false;
@@ -212,33 +240,112 @@
 		return (dog.treatments ?? []).map((t) => t.name).join(', ') || null;
 	}
 
+	// Inline treatment editing — a treatment is often logged in a hurry, so every part of
+	// it (reason, medication, dates, notes) stays editable from its row, as does removing it.
+	let editingTxId = '';
+	let editingTxFocus: 'condition' | 'name' = 'name';
+	let savingTx = false;
+
+	function startEditTreatment(t: Treatment, focus: 'condition' | 'name' = 'name') {
+		editingTxId = t.id;
+		editingTxFocus = focus;
+	}
+
+	function cancelEditTreatment() {
+		editingTxId = '';
+	}
+
+	async function saveTreatmentEdit(
+		dog: Dog,
+		treatmentId: string,
+		detail: { condition: string | null; name: string; startDate: string; endDate: string; notes: string | null }
+	) {
+		savingTx = true;
+		const next = (dog.treatments ?? []).map((t) =>
+			t.id === treatmentId
+				? {
+						...t,
+						condition: detail.condition,
+						name: detail.name,
+						startDate: detail.startDate ? new Date(detail.startDate + 'T12:00:00') : null,
+						endDate: detail.endDate ? new Date(detail.endDate + 'T12:00:00') : null,
+						notes: detail.notes
+					}
+				: t
+		);
+		try {
+			await updateDog(dog.id, { treatments: next });
+			await refreshDogs();
+			cancelEditTreatment();
+			toast.success(`${dog.name}'s treatment updated.`);
+		} catch {
+			toast.error(`Could not update ${dog.name}'s treatment.`);
+			await refreshDogs();
+		} finally {
+			savingTx = false;
+		}
+	}
+
+	// A treatment logged with only a reason stores that reason as its name too, so the
+	// two matching means nobody has recorded what the dog is actually being given.
+	function needsMedication(t: Treatment): boolean {
+		const condition = t.condition?.trim();
+		return !!condition && t.name.trim().toLowerCase() === condition.toLowerCase();
+	}
+
+	// What the dog is being treated FOR, as opposed to what they're being given.
+	// Older records have no condition, so this can be empty even with treatments.
+	function treatmentConditions(dog: Dog): string[] {
+		const seen = new Set<string>();
+		for (const t of dog.treatments ?? []) {
+			const condition = t.condition?.trim();
+			if (condition) seen.add(condition);
+		}
+		return [...seen];
+	}
+
+
 	// One dropdown per row drives all stage moves. "Treating" with no meds yet just
 	// opens the prefilled treatment form — the stage flips once the med is added.
-	async function setStage(dog: Dog, next: string) {
-		const current = dog.sickHold ? 'sick' : (dog.treatments?.length ?? 0) > 0 ? 'treating' : 'monitor';
-		if (next === current) return;
+	// Monitor is a care state (watching, no meds) — turning it on finishes any treatment,
+	// since a dog is either being medicated or being watched.
+	async function toggleMonitor(dog: Dog) {
 		savingSickId = dog.id;
 		try {
-			if (next === 'sick') {
-				await setDogsSickHold([dog.id], true, dog.sickMonitorReason ?? treatmentNames(dog));
-				toast.success(`${dog.name} marked sick.`);
-			} else if (next === 'monitor') {
-				const reason = dog.sickHoldReason ?? treatmentNames(dog) ?? dog.sickMonitorReason ?? null;
-				// Leaving treatment for monitor means the meds are finished.
+			if (dog.sickMonitor) {
+				await setDogsMonitor([dog.id], false);
+				toast.success(`${dog.name} off monitor.`);
+			} else {
+				const reason =
+					treatmentConditions(dog).join(', ') || treatmentNames(dog) || dog.sickHoldReason || null;
 				if ((dog.treatments?.length ?? 0) > 0) await updateDog(dog.id, { treatments: [] });
 				await setDogsMonitor([dog.id], true, reason);
 				toast.success(`${dog.name} on monitor.`);
-			} else if (next === 'treating') {
-				if (dog.sickHold) await setDogsSickHold([dog.id], false);
-				if ((dog.treatments?.length ?? 0) === 0) {
-					startTreatment(dog);
-					toast(`Add ${dog.name}'s treatment below.`, { icon: '💊' });
-				}
-			} else if (next === 'recovered') {
+			}
+			await refreshDogs();
+		} catch {
+			toast.error(`Could not update ${dog.name}.`);
+			await refreshDogs();
+		} finally {
+			savingSickId = '';
+		}
+	}
+
+	// Sick is the outbreak flag — independent of treatment. It red-zones the dog on the
+	// kennel maps and blocks playgroups/day-trips/yard until cleared.
+	async function toggleSick(dog: Dog) {
+		savingSickId = dog.id;
+		try {
+			if (dog.sickHold) {
 				await setDogsSickHold([dog.id], false);
-				await setDogsMonitor([dog.id], false);
-				if ((dog.treatments?.length ?? 0) > 0) await updateDog(dog.id, { treatments: [] });
-				toast.success(`${dog.name} recovered.`);
+				toast.success(`${dog.name} no longer flagged sick.`);
+			} else {
+				await setDogsSickHold(
+					[dog.id],
+					true,
+					treatmentConditions(dog).join(', ') || treatmentNames(dog) || dog.sickMonitorReason
+				);
+				toast.success(`${dog.name} flagged sick.`);
 			}
 			await refreshDogs();
 		} catch {
@@ -333,13 +440,16 @@
 			} else if (groupStage === 'monitor') {
 				await setDogsMonitor(ids, true, reason);
 			} else {
-				// "On treatment for URI" — the condition becomes each dog's treatment entry.
+				// "On treatment for URI" — the condition is what they're being treated for;
+				// the medication is optional (staff often record it later).
+				const medication = groupMedication.trim();
 				await Promise.all(
 					ids.map((id) => {
 						const dog = dogs.find((d) => d.id === id);
 						const entry: Treatment = {
 							id: createId('tx'),
-							name: reason!,
+							name: medication || reason!,
+							condition: reason,
 							notes: null,
 							startDate: new Date(),
 							endDate: null
@@ -354,6 +464,7 @@
 			groupCheckedIds = {};
 			groupOrigin = '';
 			groupReason = '';
+			groupMedication = '';
 			showGroupForm = false;
 			const label =
 				groupStage === 'sick'
@@ -450,13 +561,14 @@
 	}
 
 	async function addTreatment() {
-		if (!txDogId || !txName) return;
+		if (!txDogId || !(txName.trim() || txCondition.trim())) return;
 		addingTx = true;
 		try {
 			const dog = dogs.find((d) => d.id === txDogId);
 			const newTreatment: Treatment = {
 				id: createId('tx'),
-				name: txName.trim(),
+				name: txName.trim() || txCondition.trim(),
+				condition: txCondition.trim() || null,
 				notes: txNotes.trim() || null,
 				startDate: new Date(txStartDate + 'T12:00:00'),
 				endDate: txEndDate ? new Date(txEndDate + 'T12:00:00') : null
@@ -468,6 +580,7 @@
 			if (dog?.sickMonitor) await setDogsMonitor([dog.id], false);
 			await refreshDogs();
 			txDogId = '';
+			txCondition = '';
 			txName = '';
 			txNotes = '';
 			txStartDate = today.toISOString().slice(0, 10);
@@ -534,6 +647,11 @@
 	// the shared dog store ($lib/stores/dogs); `refreshDogs` is its force-refresh.
 
 	onMount(async () => {
+		try {
+			outbreakMode = localStorage.getItem(OUTBREAK_KEY) === '1';
+		} catch {
+			/* ignore */
+		}
 		await ensureDogsLoaded();
 		await autoClearExpiredIsolations();
 		await autoClearExpiredTreatments();
@@ -553,7 +671,7 @@
 				<span class="med-chip med-chip-rose">ISO {isolatedDogs.length}</span>
 				<span class="med-chip med-chip-amber">Surgery {surgeryDogs.length}</span>
 				<span class="med-chip med-chip-sage">FortiFlora {fortifloraDogs.length}</span>
-				<span class="med-chip med-chip-lilac">Tx {treatmentDogs.length}</span>
+				<span class="med-chip med-chip-lilac">Care {illDogs.length}</span>
 				{#if sickDogs.length > 0}
 					<span class="med-chip med-chip-rose">Sick {sickDogs.length}</span>
 				{/if}
@@ -785,23 +903,32 @@
 			<!-- Treatment (lilac) -->
 			<section class="med-card med-card-lilac">
 				<div class="med-card-head">
-					<h2>Treatment</h2>
+					<h2>Under Care</h2>
 					<div class="med-head-right">
 						{#if sickDogs.length > 0}
 							<span class="med-pill med-pill-rose">{sickDogs.length} sick</span>
 						{/if}
 						<span class="med-pill med-pill-lilac">{treatmentDogs.length}</span>
 						<button
-							class="med-outbreak-toggle {showGroupForm ? 'med-outbreak-toggle-open' : ''}"
+							class="med-outbreak-toggle {outbreakActive ? 'med-outbreak-toggle-open' : ''}"
 							type="button"
-							title="Update a whole group — on treatment, on monitor, or sick during an outbreak"
+							aria-pressed={outbreakActive}
+							title={outbreakActive
+								? 'Turn off outbreak mode — hides the sick controls'
+								: 'Turn on outbreak mode — adds the sick (red zone) controls'}
+							on:click={toggleOutbreakMode}
+						>Outbreak</button>
+						<button
+							class="med-group-toggle {showGroupForm ? 'med-group-toggle-open' : ''}"
+							type="button"
+							title="Update a whole group of dogs at once"
 							on:click={() => (showGroupForm = !showGroupForm)}
 						>Update group</button>
 						<button
 							class="med-add-toggle {showAddTx ? 'med-add-toggle-open' : ''}"
 							type="button"
 							on:click={() => (showAddTx = !showAddTx)}
-							aria-label="Add to treatment list"
+							aria-label="Add a treatment"
 						>+</button>
 					</div>
 				</div>
@@ -818,15 +945,20 @@
 							<input
 								class="med-input med-input-grow"
 								type="text"
-								placeholder="Treatment / medication"
+								placeholder="Reason (e.g. URI)"
+								bind:value={txCondition}
+							/>
+							<input
+								class="med-input med-input-grow"
+								type="text"
+								placeholder="Medication (optional)"
 								bind:value={txName}
-								required
 							/>
 						</div>
 						<div class="med-form-row">
 							<input class="med-input" type="date" bind:value={txStartDate} required />
 							<input class="med-input" type="date" placeholder="End date (opt.)" bind:value={txEndDate} />
-							<button class="med-submit typewriter" type="submit" disabled={addingTx || !txDogId || !txName}>
+							<button class="med-submit typewriter" type="submit" disabled={addingTx || !txDogId || !(txName.trim() || txCondition.trim())}>
 								{addingTx ? '…' : 'Add'}
 							</button>
 						</div>
@@ -878,13 +1010,23 @@
 							<input
 								class="med-input med-input-grow"
 								type="text"
-								placeholder="Condition (e.g. URI, diarrhea)"
+								placeholder="Reason (e.g. URI, diarrhea)"
 								bind:value={groupReason}
 							/>
+							{#if groupStage === 'treating'}
+								<input
+									class="med-input med-input-grow"
+									type="text"
+									placeholder="Medication (optional)"
+									bind:value={groupMedication}
+								/>
+							{/if}
 							<select class="med-input" bind:value={groupStage}>
-								<option value="treating">On treatment</option>
-								<option value="monitor">On monitor</option>
-								<option value="sick">Sick (outbreak)</option>
+								<option value="treating">Start treatment</option>
+								<option value="monitor">Put on monitor</option>
+								{#if outbreakActive}
+									<option value="sick">Flag sick (outbreak)</option>
+								{/if}
 							</select>
 							<button
 								class="med-submit typewriter"
@@ -894,15 +1036,30 @@
 								{savingGroup ? '…' : `Apply to ${groupSelectedIds.length || '…'}`}
 							</button>
 						</div>
-						<p class="med-hint">"On treatment for URI" → check the dogs, type URI, pick On treatment. Sick (outbreak) additionally makes dogs staff-only and blocks playgroups, day-trips and yard.</p>
+						<p class="med-hint">"These six are on treatment for URI" → check the dogs, type URI, start treatment. Monitor means watching without meds.{#if outbreakActive} Flagging sick makes dogs staff-only and blocks playgroups, day-trips and yard.{/if}</p>
 					</form>
 				{/if}
 
 				<div class="med-items">
 					{#if illDogs.length === 0}
-						<p class="med-empty">No dogs sick, on monitor, or on treatment.</p>
+						<p class="med-empty">No dogs under care.</p>
 					{:else}
 						{#each illDogs as { dog, stage, treatments } (dog.id)}
+							{@const storedReason = dog.sickHoldReason ?? dog.sickMonitorReason ?? null}
+							{@const conditions = treatmentConditions(dog)}
+							<!-- The reason is the condition; the treatments below are the medications.
+							     Records with no condition fall back to the treatment name itself. -->
+							{@const reason = storedReason ?? (conditions.join(', ') || treatmentNames(dog))}
+							<!-- When the reason IS one of the treatments, that treatment's detail rides on
+							     the reason line instead of repeating the name underneath. -->
+							{@const inlineTx = treatments.find(
+								({ t }) => t.name.trim().toLowerCase() === (reason ?? '').trim().toLowerCase()
+							) ?? null}
+							{@const restTx = inlineTx ? treatments.filter((row) => row !== inlineTx) : treatments}
+							<!-- A reason derived from several treatment NAMES would just repeat the list
+							     below it; conditions are separate information, so they always show. -->
+							{@const showReason =
+								!!reason && (!!storedReason || conditions.length > 0 || !!inlineTx)}
 							<div class="med-row">
 								<div class="med-row-body">
 									<button class="med-dog-link" on:click={() => goto(`/dogs/${dog.id}`)}>
@@ -911,62 +1068,145 @@
 											<span class="med-kennel">· K{dog.outdoorKennelAssignment}</span>
 										{/if}
 									</button>
-									{#if stage === 'sick'}
+									{#if stage !== 'treating' || inlineTx || conditions.length > 0}
 										<div class="med-meta-row">
-											<span class="med-tag med-tag-warn">Sick</span>
-											<span class="med-meta">{dog.sickHoldReason ?? 'No reason recorded'}</span>
-											{#if dog.sickHoldSince}
+											{#if showReason}
+												<span class="med-field-label">Reason</span>
+												<span class="med-meta">{reason}</span>
+											{:else if treatments.length === 0}
+												<span class="med-field-label">Reason</span>
+												<span class="med-meta med-meta-soft">not recorded</span>
+											{/if}
+											{#if inlineTx && inlineTx.daysLeft !== null}
+												<span class="med-tag {inlineTx.daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
+													{inlineTx.daysLeft > 0 ? `${inlineTx.daysLeft}d left` : 'Last day'}
+												</span>
+											{/if}
+											{#if stage === 'sick' && dog.sickHoldSince}
 												<span class="med-meta med-meta-soft">since {formatDate(dog.sickHoldSince)}</span>
-											{/if}
-										</div>
-									{:else if stage === 'monitor'}
-										<div class="med-meta-row">
-											{#if dog.sickMonitorReason}
-												<span class="med-meta">after {dog.sickMonitorReason}</span>
-											{/if}
-											{#if dog.sickMonitorSince}
+											{:else if stage === 'monitor' && dog.sickMonitorSince}
 												<span class="med-meta med-meta-soft">since {formatDate(dog.sickMonitorSince)}</span>
 											{/if}
+											{#if inlineTx && editingTxId !== inlineTx.t.id}
+												{#if !inlineTx.t.condition}
+													<button
+														class="med-reason-add"
+														type="button"
+														on:click={() => startEditTreatment(inlineTx.t, 'condition')}
+													>+ reason</button>
+												{:else if needsMedication(inlineTx.t) && !dog.sickMonitor}
+													<button
+														class="med-reason-add"
+														type="button"
+														on:click={() => startEditTreatment(inlineTx.t, 'name')}
+													>+ medication</button>
+												{/if}
+												<button
+													class="med-tx-edit"
+													type="button"
+													aria-label="Edit {inlineTx.t.name}"
+													on:click={() => startEditTreatment(inlineTx.t)}
+												>Edit</button>
+											{/if}
 										</div>
+										{#if inlineTx && editingTxId === inlineTx.t.id}
+											<TreatmentEditor
+												treatment={inlineTx.t}
+												focusField={editingTxFocus}
+												saving={savingTx}
+												on:save={(e) => saveTreatmentEdit(dog, inlineTx.t.id, e.detail)}
+												on:cancel={cancelEditTreatment}
+												on:remove={() => (cancelEditTreatment(), removeTreatment(dog, inlineTx.t.id))}
+											/>
+										{/if}
+										{#if inlineTx?.t.notes}
+											<p class="med-notes">{inlineTx.t.notes}</p>
+										{/if}
 									{/if}
-									{#if treatments.length > 0}
+									{#if restTx.length > 0}
 										<div class="med-tx-list">
-											{#each treatments as { t, daysLeft }}
+											{#each restTx as { t, daysLeft }}
 												<div class="med-tx-item">
-													<div class="med-tx-line">
-														<span class="med-meta">{t.name}</span>
-														{#if daysLeft !== null}
-															<span class="med-tag {daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
-																{daysLeft > 0 ? `${daysLeft}d left` : 'Last day'}
-															</span>
+													{#if editingTxId === t.id}
+														<TreatmentEditor
+															treatment={t}
+															focusField={editingTxFocus}
+															saving={savingTx}
+															on:save={(e) => saveTreatmentEdit(dog, t.id, e.detail)}
+															on:cancel={cancelEditTreatment}
+															on:remove={() => (cancelEditTreatment(), removeTreatment(dog, t.id))}
+														/>
+													{:else}
+														<div class="med-tx-line">
+															<span class="med-field-label">{needsMedication(t) ? 'Reason' : 'Med'}</span>
+															<button
+																class="med-tx-name"
+																type="button"
+																title="Edit treatment"
+																on:click={() => startEditTreatment(t)}
+															>{t.name}</button>
+															{#if !t.condition}
+																<button
+																	class="med-reason-add"
+																	type="button"
+																	on:click={() => startEditTreatment(t, 'condition')}
+																>+ reason</button>
+															{:else if needsMedication(t) && !dog.sickMonitor}
+																<button
+																	class="med-reason-add"
+																	type="button"
+																	on:click={() => startEditTreatment(t, 'name')}
+																>+ medication</button>
+															{:else if conditions.length > 1}
+																<!-- Which condition this med is for, when the dog has more than one. -->
+																<button
+																	class="med-reason-edit"
+																	type="button"
+																	title="Edit reason"
+																	on:click={() => startEditTreatment(t, 'condition')}
+																>for {t.condition}</button>
+															{/if}
+															{#if daysLeft !== null}
+																<span class="med-tag {daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
+																	{daysLeft > 0 ? `${daysLeft}d left` : 'Last day'}
+																</span>
+															{/if}
+															<button
+																class="med-tx-remove"
+																type="button"
+																aria-label="Remove {t.name}"
+																on:click={() => removeTreatment(dog, t.id)}
+															>×</button>
+														</div>
+														{#if t.notes}
+															<p class="med-notes">{t.notes}</p>
 														{/if}
-														<button
-															class="med-tx-remove"
-															type="button"
-															aria-label="Remove {t.name}"
-															on:click={() => removeTreatment(dog, t.id)}
-														>×</button>
-													</div>
-													{#if t.notes}
-														<p class="med-notes">{t.notes}</p>
 													{/if}
 												</div>
 											{/each}
 										</div>
 									{/if}
 								</div>
-								<select
-									class="med-stage-select"
-									value={stage}
-									disabled={savingSickId === dog.id}
-									aria-label="Stage for {dog.name}"
-									on:change={(e) => setStage(dog, e.currentTarget.value)}
-								>
-									<option value="monitor">Monitor</option>
-									<option value="treating">Treating</option>
-									<option value="sick">Sick</option>
-									<option value="recovered">Recovered</option>
-								</select>
+								<div class="med-switches">
+									<button
+										type="button"
+										class="med-switch {dog.sickMonitor ? 'med-switch-on-monitor' : ''}"
+										disabled={savingSickId === dog.id}
+										aria-pressed={!!dog.sickMonitor}
+										title={dog.sickMonitor ? 'Stop watching' : 'Watch — no meds'}
+										on:click={() => toggleMonitor(dog)}
+									>Monitor</button>
+									{#if outbreakActive}
+										<button
+											type="button"
+											class="med-switch {dog.sickHold ? 'med-switch-on-sick' : ''}"
+											disabled={savingSickId === dog.id}
+											aria-pressed={!!dog.sickHold}
+											title={dog.sickHold ? 'Clear the outbreak flag' : 'Flag sick — staff-only, no playgroups or trips'}
+											on:click={() => toggleSick(dog)}
+										>Sick</button>
+									{/if}
+								</div>
 							</div>
 						{/each}
 					{/if}
@@ -1326,6 +1566,76 @@
 		color: #7a8fa0;
 	}
 
+	/* Tells reason apart from medication at a glance. */
+	.med-field-label {
+		flex-shrink: 0;
+		font-family: var(--font-ui);
+		font-size: 0.56rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.09em;
+		color: #9aa7b4;
+	}
+
+	.med-reason-add,
+	.med-reason-edit {
+		border: 1px dashed #c4b8d6;
+		background: transparent;
+		border-radius: 0.4rem;
+		padding: 0.02rem 0.34rem;
+		font-family: var(--font-ui);
+		font-size: 0.66rem;
+		font-weight: 600;
+		color: #8a7ea3;
+		cursor: pointer;
+	}
+
+	.med-reason-edit {
+		border-style: solid;
+		border-color: transparent;
+		color: #7a8fa0;
+	}
+
+	.med-reason-add:hover,
+	.med-reason-edit:hover {
+		color: #4d3a63;
+		border-color: #a98dba;
+	}
+
+	/* The medication doubles as the edit affordance — it looks like text until hovered. */
+	.med-tx-name {
+		border: 0;
+		background: none;
+		padding: 0;
+		font-family: var(--font-ui);
+		font-size: 0.74rem;
+		color: #526b81;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	.med-tx-name:hover {
+		color: #4d3a63;
+		text-decoration: underline;
+	}
+
+	.med-tx-edit {
+		border: 1px solid transparent;
+		background: none;
+		border-radius: 0.4rem;
+		padding: 0.02rem 0.34rem;
+		font-family: var(--font-ui);
+		font-size: 0.66rem;
+		font-weight: 600;
+		color: #8a7ea3;
+		cursor: pointer;
+	}
+
+	.med-tx-edit:hover {
+		border-color: #a98dba;
+		color: #4d3a63;
+	}
+
 	.med-meta-row {
 		display: flex;
 		flex-wrap: wrap;
@@ -1333,10 +1643,11 @@
 		gap: 0.4rem;
 	}
 
-	.med-outbreak-toggle {
-		border: 1px solid #e0a9a9;
-		background: #fdf5f5;
-		color: #a5302f;
+	.med-outbreak-toggle,
+	.med-group-toggle {
+		border: 1px solid #cfc4dd;
+		background: #ffffff;
+		color: #7d7490;
 		border-radius: 999px;
 		padding: 0.18rem 0.6rem;
 		font-family: var(--font-ui);
@@ -1351,6 +1662,12 @@
 		background: #cf4b4b;
 		border-color: #cf4b4b;
 		color: #fff;
+	}
+
+	.med-group-toggle-open {
+		background: #ece8f3;
+		border-color: #a98dba;
+		color: #4d3a63;
 	}
 
 	.med-hint {
@@ -1408,19 +1725,42 @@
 		letter-spacing: 0.04em;
 	}
 
-	.med-stage-select {
+	/* Two independent switches: Monitor is a care state, Sick is the outbreak flag. */
+	.med-switches {
+		display: flex;
 		flex-shrink: 0;
 		align-self: flex-start;
-		min-height: 1.7rem;
-		border-radius: 999px;
-		border: 1px solid #c9bcd8;
+		gap: 0.28rem;
+	}
+
+	.med-switch {
+		border: 1px solid #cfc4dd;
 		background: #ffffff;
-		padding: 0.12rem 0.55rem;
+		color: #7d7490;
+		border-radius: 999px;
+		padding: 0.16rem 0.6rem;
 		font-family: var(--font-ui);
-		font-size: 0.68rem;
+		font-size: 0.66rem;
 		font-weight: 700;
-		color: #3c2f52;
+		letter-spacing: 0.03em;
 		cursor: pointer;
+	}
+
+	.med-switch:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.med-switch-on-monitor {
+		background: #e4f2e4;
+		border-color: #9ccf9e;
+		color: #2e6c30;
+	}
+
+	.med-switch-on-sick {
+		background: #cf4b4b;
+		border-color: #cf4b4b;
+		color: #ffffff;
 	}
 
 	.med-date-inline {

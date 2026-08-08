@@ -16,7 +16,11 @@ export interface UserProfile {
 
 export interface Treatment {
 	id: string;
+	/** The medication or procedure — "doxycycline", "ear flush". */
 	name: string;
+	/** What it's being given for — "URI", "diarrhea". This is the dog's reason for
+	 *  being on the medical list; older records only have `name`. */
+	condition?: string | null;
 	notes?: string | null;
 	startDate?: DateValue | null;
 	endDate?: DateValue | null;
