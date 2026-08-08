@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import toast from 'svelte-french-toast';
 	import type { Dog } from '$lib/types';
-	import { updateDog, setDogsSickHold } from '$lib/data/dogs';
+	import { updateDog } from '$lib/data/dogs';
 	import { patchDogInStore, refreshDogs } from '$lib/stores/dogs';
 	import {
 		addKennelPlaceholder,
@@ -22,7 +22,8 @@
 		checkInsidePlacement,
 		compareByInsidePosition,
 		getFleaBufferKeys,
-		INSIDE_GRID_COLUMNS
+		INSIDE_GRID_COLUMNS,
+		INSIDE_MOBILE_ROWS
 	} from '$lib/utils/insideKennelLayout';
 
 	export let dogs: Dog[] = [];
@@ -176,54 +177,6 @@
 		}
 	}
 
-	// --- Manage sick group (batch) ---
-	let managePanelOpen = false;
-	let checkedIds: Record<string, boolean> = {};
-	let batchReason = '';
-	let batchOrigin = '';
-	let savingBatch = false;
-
-	// Distinct transfer origins present among in-building dogs, for one-click group select.
-	$: originOptions = Array.from(
-		new Set(eligible.map((dog) => dog.origin?.trim()).filter((o): o is string => !!o))
-	).sort((a, b) => a.localeCompare(b));
-	$: selectedBatchIds = eligible.filter((dog) => checkedIds[dog.id]).map((dog) => dog.id);
-
-	function selectOrigin(origin: string) {
-		batchOrigin = origin;
-		if (!origin) return;
-		const next = { ...checkedIds };
-		for (const dog of eligible) {
-			if (dog.origin?.trim() === origin) next[dog.id] = true;
-		}
-		checkedIds = next;
-	}
-
-	function clearBatchSelection() {
-		checkedIds = {};
-		batchOrigin = '';
-	}
-
-	async function applySickHold(sick: boolean) {
-		if (!canEdit || savingBatch || selectedBatchIds.length === 0) return;
-		savingBatch = true;
-		const ids = selectedBatchIds;
-		try {
-			await setDogsSickHold(ids, sick, sick ? batchReason : null);
-			await refreshDogs();
-			toast.success(
-				`${ids.length} dog${ids.length === 1 ? '' : 's'} ${sick ? 'marked sick' : 'cleared'}.`
-			);
-			clearBatchSelection();
-			batchReason = '';
-		} catch {
-			toast.error('Could not update the sick group.');
-			await refreshDogs();
-		} finally {
-			savingBatch = false;
-		}
-	}
-
 	// --- Movement protocol ---
 	// Direction: taking dogs OUT (AM) vs bringing them IN (PM). Sick dogs never cross paths
 	// with healthy ones — out last, in first — so the panel lists the two groups in the
@@ -308,62 +261,8 @@
 		</p>
 	{/if}
 
-	{#if canEdit}
-		<div class="inside-manage">
-			<button type="button" class="inside-manage-toggle" on:click={() => (managePanelOpen = !managePanelOpen)}>
-				{managePanelOpen ? '▾' : '▸'} Manage sick group
-			</button>
-			{#if managePanelOpen}
-				<div class="inside-manage-body">
-					<div class="inside-manage-row">
-						<label class="inside-manage-label" for="inside-origin">Select a whole transfer</label>
-						<select
-							id="inside-origin"
-							class="inside-manage-select"
-							value={batchOrigin}
-							on:change={(e) => selectOrigin(e.currentTarget.value)}
-						>
-							<option value="">Choose transfer / origin…</option>
-							{#each originOptions as origin}
-								<option value={origin}>{origin}</option>
-							{/each}
-						</select>
-						<button type="button" class="inside-manage-clear" on:click={clearBatchSelection}>Clear</button>
-					</div>
-
-					<div class="inside-manage-list">
-						{#each eligible as dog (dog.id)}
-							<label class="inside-manage-check">
-								<input type="checkbox" checked={!!checkedIds[dog.id]} on:change={(e) => (checkedIds = { ...checkedIds, [dog.id]: e.currentTarget.checked })} />
-								<span>{dog.name}</span>
-								{#if dog.sickHold}<span class="inside-chip-tag">SICK</span>{/if}
-								{#if dog.origin?.trim()}<span class="inside-manage-origin">{dog.origin.trim()}</span>{/if}
-							</label>
-						{/each}
-					</div>
-
-					<div class="inside-manage-row">
-						<label class="inside-manage-label" for="inside-reason">Reason (optional)</label>
-						<input id="inside-reason" class="inside-manage-input" type="text" placeholder="e.g. Coccidia — Merced" bind:value={batchReason} />
-					</div>
-
-					<div class="inside-manage-actions">
-						<span class="inside-manage-count">{selectedBatchIds.length} selected</span>
-						<button type="button" class="inside-manage-mark" disabled={savingBatch || selectedBatchIds.length === 0} on:click={() => applySickHold(true)}>
-							{savingBatch ? '…' : 'Mark sick'}
-						</button>
-						<button type="button" class="inside-manage-unmark" disabled={savingBatch || selectedBatchIds.length === 0} on:click={() => applySickHold(false)}>
-							Clear sick
-						</button>
-					</div>
-					<p class="inside-manage-hint">Marking sick makes a dog staff-only, blocks playgroups, day-trips and yard, and removes foster-to-adopt eligibility. Clearing reverses all of it.</p>
-				</div>
-			{/if}
-		</div>
-	{/if}
-
 	<div class="inside-map-scroll">
-		<div class="inside-grid" style={`--cols: ${INSIDE_GRID_COLUMNS};`}>
+		<div class="inside-grid" style={`--cols: ${INSIDE_GRID_COLUMNS}; --mobile-rows: ${INSIDE_MOBILE_ROWS};`}>
 			{#each insideKennelCells as cell (cell.id)}
 				{@const slotDogs = assignments[cell.key] ?? []}
 				{@const blocked = cell.kind === 'blocked'}
@@ -375,7 +274,7 @@
 					} ${hoveredKey === cell.key ? 'inside-cell-hover' : ''} ${
 						flaggedKeys.has(cell.key) ? 'inside-cell-flagged' : ''
 					}`}
-					style={`grid-column: ${cell.col}; grid-row: ${cell.row};`}
+					style={`grid-column: ${cell.col}; grid-row: ${cell.row}; --m-col: ${cell.mobileCol}; --m-row: ${cell.mobileRow};`}
 					role={blocked ? undefined : 'button'}
 					tabindex={blocked || !canEdit ? undefined : 0}
 					aria-label={`Kennel ${cell.label}${cell.note ? ` — ${cell.note}` : isBuffer ? ' — flea buffer, keep empty' : ''}`}
@@ -407,7 +306,7 @@
 									on:click|stopPropagation={() => selectItem(dog.id)}
 									on:keydown|stopPropagation={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), selectItem(dog.id))}
 								>
-									{dog.name}{#if dog.inFoster}<span class="inside-chip-tag inside-chip-tag-foster">FOSTER</span>{/if}{#if dog.sickHold}<span class="inside-chip-tag">SICK</span>{/if}{#if dog.hasFleas}<span class="inside-chip-tag inside-chip-tag-flea">FLEAS</span>{/if}
+									{dog.name}{#if dog.inFoster}<span class="inside-chip-tag inside-chip-tag-foster">FOSTER</span>{/if}{#if dog.sickHold}<span class="inside-chip-tag">SICK</span>{/if}{#if dog.sickMonitor}<span class="inside-chip-tag inside-chip-tag-monitor">MON</span>{/if}{#if dog.hasFleas}<span class="inside-chip-tag inside-chip-tag-flea">FLEAS</span>{/if}
 								</span>
 							{/each}
 							{#each slotPh as ph (ph.id)}
@@ -453,7 +352,7 @@
 						on:click={() => selectItem(dog.id)}
 						on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), selectItem(dog.id))}
 					>
-						{dog.name}{#if dog.inFoster}<span class="inside-chip-tag inside-chip-tag-foster">FOSTER</span>{/if}{#if dog.sickHold}<span class="inside-chip-tag">SICK</span>{/if}{#if dog.hasFleas}<span class="inside-chip-tag inside-chip-tag-flea">FLEAS</span>{/if}
+						{dog.name}{#if dog.inFoster}<span class="inside-chip-tag inside-chip-tag-foster">FOSTER</span>{/if}{#if dog.sickHold}<span class="inside-chip-tag">SICK</span>{/if}{#if dog.sickMonitor}<span class="inside-chip-tag inside-chip-tag-monitor">MON</span>{/if}{#if dog.hasFleas}<span class="inside-chip-tag inside-chip-tag-flea">FLEAS</span>{/if}
 					</span>
 				{/each}
 				{#each unassignedPlaceholders as ph (ph.id)}
@@ -722,6 +621,9 @@
 	.inside-chip-tag-flea {
 		color: #a1670f;
 	}
+	.inside-chip-tag-monitor {
+		color: #2e6c30;
+	}
 	.inside-chip-tag-foster {
 		color: #933980;
 	}
@@ -820,129 +722,6 @@
 		font-size: 0.78rem;
 		color: #6a7c93;
 		cursor: pointer;
-	}
-
-	.inside-manage {
-		border: 1px solid #e0b6b6;
-		background: #fcf3f3;
-		border-radius: 0.9rem;
-		padding: 0.5rem 0.7rem;
-	}
-	.inside-manage-toggle {
-		border: 0;
-		background: transparent;
-		font-size: 0.82rem;
-		font-weight: 800;
-		letter-spacing: 0.02em;
-		color: #b23c3c;
-		cursor: pointer;
-		padding: 0.1rem 0;
-	}
-	.inside-manage-body {
-		margin-top: 0.5rem;
-		display: grid;
-		gap: 0.6rem;
-	}
-	.inside-manage-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	.inside-manage-label {
-		font-size: 0.72rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: #6a7c93;
-	}
-	.inside-manage-select,
-	.inside-manage-input {
-		flex: 1;
-		min-width: 0;
-		border: 1px solid #d7c1c1;
-		border-radius: 0.5rem;
-		padding: 0.34rem 0.5rem;
-		font-size: 0.82rem;
-	}
-	.inside-manage-clear {
-		border: 1px solid #d7c1c1;
-		background: #fff;
-		border-radius: 0.5rem;
-		padding: 0.34rem 0.7rem;
-		font-size: 0.76rem;
-		font-weight: 700;
-		color: #8a5b5b;
-		cursor: pointer;
-	}
-	.inside-manage-list {
-		max-height: 200px;
-		overflow-y: auto;
-		display: grid;
-		gap: 0.1rem;
-		border: 1px solid #ecd6d6;
-		border-radius: 0.6rem;
-		background: #fff;
-		padding: 0.4rem 0.5rem;
-	}
-	.inside-manage-check {
-		display: flex;
-		align-items: center;
-		gap: 0.44rem;
-		font-size: 0.84rem;
-		font-weight: 600;
-		color: #33414f;
-		padding: 0.14rem 0;
-	}
-	.inside-manage-origin {
-		margin-left: auto;
-		font-size: 0.68rem;
-		font-weight: 700;
-		color: #8a7c7c;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-	.inside-manage-actions {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	.inside-manage-count {
-		font-size: 0.76rem;
-		font-weight: 700;
-		color: #6a7c93;
-		margin-right: auto;
-	}
-	.inside-manage-mark {
-		border: 0;
-		background: #cf4b4b;
-		color: #fff;
-		border-radius: 0.5rem;
-		padding: 0.4rem 0.9rem;
-		font-size: 0.8rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-	.inside-manage-mark:disabled,
-	.inside-manage-unmark:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
-	.inside-manage-unmark {
-		border: 1px solid #cbb3b3;
-		background: #fff;
-		color: #8a5b5b;
-		border-radius: 0.5rem;
-		padding: 0.4rem 0.9rem;
-		font-size: 0.8rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-	.inside-manage-hint {
-		margin: 0;
-		font-size: 0.72rem;
-		color: #8a7070;
-		line-height: 1.4;
 	}
 
 	.inside-movement {
@@ -1082,5 +861,24 @@
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
 		color: #8a97a6;
+	}
+
+	/* Mobile: transpose the grid 90° (rows → columns) like the outdoor map, so it fits a
+	   portrait screen without horizontal scrolling. */
+	@media (max-width: 640px) {
+		.inside-grid {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			grid-template-rows: repeat(var(--mobile-rows), minmax(3.4rem, auto));
+			min-width: 0;
+		}
+		.inside-cell {
+			grid-column: var(--m-col) !important;
+			grid-row: var(--m-row) !important;
+		}
+		.inside-chip {
+			touch-action: none;
+			user-select: none;
+			-webkit-user-select: none;
+		}
 	}
 </style>

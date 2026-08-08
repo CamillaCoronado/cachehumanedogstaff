@@ -77,6 +77,7 @@ interface StoredDog {
 	microchipDate?: string | null;
 	healthProblems?: string;
 	hasFleas?: boolean;
+	handlingLevelBeforeHold?: DogHandlingLevel | null;
 	lastBathDate: string | null;
 	lastYardDate?: string | null;
 	lastBathBy: string | null;
@@ -136,6 +137,9 @@ interface StoredDog {
 	sickHold?: boolean;
 	sickHoldReason?: string | null;
 	sickHoldSince?: string | null;
+	sickMonitor?: boolean;
+	sickMonitorReason?: string | null;
+	sickMonitorSince?: string | null;
 	enrichmentResetDate?: string | null;
 	treatments?: StoredTreatment[];
 	// Deprecated single-treatment fields — migrated into `treatments` on read.
@@ -277,19 +281,15 @@ function deduplicateAgainstAsm(dogs: Dog[]): Dog[] {
 }
 
 function applyFosterHousingRules(dog: Dog): Dog {
-	// Inside kennels can hold foster dogs (brought back during an outbreak), so the inside
-	// assignment is kept regardless of foster status. Only the outdoor floor assignment is
-	// cleared for foster dogs.
+	// Both kennel maps can hold foster dogs (e.g. brought back during an outbreak), so
+	// assignments are kept regardless of foster status — just normalized. (Adoption/leaving
+	// the shelter still clears them, handled in applyStatusTransition.)
+	const trimmedOutdoor = normalizeKennelAssignment(dog.outdoorKennelAssignment);
 	const trimmedInside = normalizeKennelAssignment(dog.insideKennelAssignment);
-	if (!dog.inFoster) {
-		const trimmedOutdoor = normalizeKennelAssignment(dog.outdoorKennelAssignment);
-		if (trimmedOutdoor === dog.outdoorKennelAssignment && trimmedInside === dog.insideKennelAssignment) {
-			return dog;
-		}
-		return { ...dog, outdoorKennelAssignment: trimmedOutdoor, insideKennelAssignment: trimmedInside };
+	if (trimmedOutdoor === dog.outdoorKennelAssignment && trimmedInside === dog.insideKennelAssignment) {
+		return dog;
 	}
-	if (!dog.outdoorKennelAssignment && trimmedInside === dog.insideKennelAssignment) return dog;
-	return { ...dog, outdoorKennelAssignment: '', insideKennelAssignment: trimmedInside };
+	return { ...dog, outdoorKennelAssignment: trimmedOutdoor, insideKennelAssignment: trimmedInside };
 }
 
 function normalizeDayTripIneligibleReason(value: unknown): DayTripIneligibleReason | null {
@@ -321,6 +321,16 @@ function applyStatusTransition(current: Dog, updates: Partial<Dog>, now: Date): 
 	const leftSickHold = Boolean(current.sickHold) && !merged.sickHold;
 	if (leftIsolation || leftSickHold) {
 		merged.enrichmentResetDate = now;
+	}
+
+	// A sick or flea hold forces handling to staff-only (applied on read in deserializeDog,
+	// so it also covers dogs already marked). Once BOTH holds are cleared, restore the
+	// pre-hold level remembered in handlingLevelBeforeHold.
+	const wasHeld = Boolean(current.hasFleas) || Boolean(current.sickHold);
+	const stillHeld = Boolean(merged.hasFleas) || Boolean(merged.sickHold);
+	if (wasHeld && !stillHeld && current.handlingLevelBeforeHold) {
+		merged.handlingLevel = current.handlingLevelBeforeHold;
+		merged.handlingLevelBeforeHold = null;
 	}
 
 	if (changedToAdopted) {
@@ -396,13 +406,14 @@ function serializeDog(dog: Dog): StoredDog {
 		idealHome: dog.idealHome,
 		energyLevel: dog.energyLevel,
 		playStyles: dog.playStyles ?? [],
-		outdoorKennelAssignment: normalizeKennelAssignment(dog.inFoster ? '' : dog.outdoorKennelAssignment),
-		// Foster dogs aren't on the outdoor floor, but can be housed in an inside kennel
-		// (e.g. brought back during an outbreak), so their inside assignment is kept.
+		// Foster dogs can be housed/placed on both kennel maps (e.g. brought back during an
+		// outbreak), so their outdoor and inside assignments are kept.
+		outdoorKennelAssignment: normalizeKennelAssignment(dog.outdoorKennelAssignment),
 		insideKennelAssignment: normalizeKennelAssignment(dog.insideKennelAssignment ?? ''),
 		microchipDate: toDateString(dog.microchipDate),
 		healthProblems: dog.healthProblems ?? '',
 		hasFleas: dog.hasFleas ?? false,
+		handlingLevelBeforeHold: dog.hasFleas || dog.sickHold ? (dog.handlingLevelBeforeHold ?? null) : null,
 		lastBathDate: toDateString(dog.lastBathDate),
 		lastYardDate: toDateString(dog.lastYardDate) ?? null,
 		lastBathBy: dog.lastBathBy,
@@ -452,6 +463,9 @@ function serializeDog(dog: Dog): StoredDog {
 		sickHold: dog.sickHold ?? false,
 		sickHoldReason: dog.sickHold ? (dog.sickHoldReason ?? null) : null,
 		sickHoldSince: dog.sickHold ? (toDateString(dog.sickHoldSince) ?? null) : null,
+		sickMonitor: dog.sickMonitor ?? false,
+		sickMonitorReason: dog.sickMonitor ? (dog.sickMonitorReason ?? null) : null,
+		sickMonitorSince: dog.sickMonitor ? (toDateString(dog.sickMonitorSince) ?? null) : null,
 		enrichmentResetDate: toDateString(dog.enrichmentResetDate) ?? null,
 		treatments: (dog.treatments ?? []).map((t) => ({
 			id: t.id,
@@ -508,6 +522,22 @@ function deserializeDog(stored: StoredDog): Dog {
 	// manager_only when it was checked, so a mismatch means the level was later lowered
 	// and the stale flag should not resurrect the restriction.
 	const normalizedHandlingLevel = normalizeDogHandlingLevel(stored.handlingLevel);
+	// A sick or flea hold forces handling to staff-only. Applied here on read so it covers
+	// every held dog (including ones marked before this rule), only bumping 'volunteer' up —
+	// staff-only and manager-only are left as-is. The pre-hold level is remembered so
+	// clearing the hold restores it.
+	const holdActive = (stored.hasFleas ?? false) || (stored.sickHold ?? false);
+	const storedHoldStash =
+		stored.handlingLevelBeforeHold === 'manager_only' ||
+		stored.handlingLevelBeforeHold === 'staff_only' ||
+		stored.handlingLevelBeforeHold === 'volunteer'
+			? stored.handlingLevelBeforeHold
+			: null;
+	const holdForcesStaffOnly = holdActive && normalizedHandlingLevel === 'volunteer';
+	const effectiveHandlingLevel: DogHandlingLevel = holdForcesStaffOnly ? 'staff_only' : normalizedHandlingLevel;
+	const effectiveHoldStash: DogHandlingLevel | null = holdForcesStaffOnly
+		? (storedHoldStash ?? 'volunteer')
+		: storedHoldStash;
 	const normalizedDayTripStatus =
 		(stored.dayTripStatus ?? 'eligible') === 'ineligible' &&
 			normalizedDayTripNotes.length === 0 &&
@@ -572,6 +602,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		microchipDate: stored.microchipDate ? toDate(stored.microchipDate) : null,
 		healthProblems: stored.healthProblems ?? '',
 		hasFleas: stored.hasFleas ?? false,
+		handlingLevelBeforeHold: effectiveHoldStash,
 		lastBathDate: stored.lastBathDate ? toDate(stored.lastBathDate) : null,
 		lastYardDate: stored.lastYardDate ? toDate(stored.lastYardDate) : null,
 		lastBathBy: stored.lastBathBy ?? null,
@@ -609,7 +640,7 @@ function deserializeDog(stored: StoredDog): Dog {
 			: null),
 		dayTripPuppyOverride: stored.dayTripPuppyOverride ?? false,
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
-		handlingLevel: normalizedHandlingLevel,
+		handlingLevel: effectiveHandlingLevel,
 		inFoster: stored.inFoster ?? false,
 		inFosterSince: stored.inFosterSince ? toDate(stored.inFosterSince) : null,
 		shelterSince: stored.shelterSince ? toDate(stored.shelterSince) : null,
@@ -627,6 +658,9 @@ function deserializeDog(stored: StoredDog): Dog {
 		sickHold: stored.sickHold ?? false,
 		sickHoldReason: stored.sickHold ? (stored.sickHoldReason ?? null) : null,
 		sickHoldSince: stored.sickHold && stored.sickHoldSince ? toDate(stored.sickHoldSince) : null,
+		sickMonitor: stored.sickMonitor ?? false,
+		sickMonitorReason: stored.sickMonitor ? (stored.sickMonitorReason ?? null) : null,
+		sickMonitorSince: stored.sickMonitor && stored.sickMonitorSince ? toDate(stored.sickMonitorSince) : null,
 		enrichmentResetDate: stored.enrichmentResetDate ? toDate(stored.enrichmentResetDate) : null,
 		treatments: deserializeTreatments(stored),
 		lastSyncedAt: stored._lastSyncedAt ? toDate(stored._lastSyncedAt) : null,
@@ -953,9 +987,34 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 // the reason/date. Callers should refresh the dogs store afterwards.
 export async function setDogsSickHold(ids: string[], sick: boolean, reason?: string | null) {
 	const now = new Date();
+	// A dog marked sick can't also be on monitor — monitor is the post-illness state.
 	const updates: Partial<Dog> = sick
-		? { sickHold: true, sickHoldReason: reason?.trim() || null, sickHoldSince: now }
+		? {
+				sickHold: true,
+				sickHoldReason: reason?.trim() || null,
+				sickHoldSince: now,
+				sickMonitor: false,
+				sickMonitorReason: null,
+				sickMonitorSince: null
+			}
 		: { sickHold: false, sickHoldReason: null, sickHoldSince: null };
+	await Promise.all(ids.map((id) => updateDog(id, updates)));
+}
+
+// Puts dogs on (or takes them off) the post-illness monitor list. Putting a sick-hold
+// dog on monitor clears the hold — "done with treatment, watching for symptoms".
+export async function setDogsMonitor(ids: string[], monitor: boolean, reason?: string | null) {
+	const now = new Date();
+	const updates: Partial<Dog> = monitor
+		? {
+				sickMonitor: true,
+				sickMonitorReason: reason?.trim() || null,
+				sickMonitorSince: now,
+				sickHold: false,
+				sickHoldReason: null,
+				sickHoldSince: null
+			}
+		: { sickMonitor: false, sickMonitorReason: null, sickMonitorSince: null };
 	await Promise.all(ids.map((id) => updateDog(id, updates)));
 }
 

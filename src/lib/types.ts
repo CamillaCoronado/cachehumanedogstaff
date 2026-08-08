@@ -101,8 +101,12 @@ export interface Dog {
 	microchipDate?: DateValue | null;
 	healthProblems?: string;
 	/** Marked (in Medical) as having fleas. On the inside kennel map this puts a
-	 *  keep-empty flea buffer in the kennels on either side, since fleas can jump. */
+	 *  keep-empty flea buffer in the kennels on either side, since fleas can jump. While
+	 *  fleas are set, handlingLevel is forced to staff-only. */
 	hasFleas?: boolean;
+	/** The handling level a dog had before a sick or flea hold forced it to staff-only,
+	 *  restored when the hold clears. Null when the hold didn't change the level. */
+	handlingLevelBeforeHold?: DogHandlingLevel | null;
 	lastBathDate: DateValue | null;
 	lastBathBy: string | null;
 	/** Last logged yard time — counts as enrichment alongside day trips and playgroups. */
@@ -177,6 +181,13 @@ export interface Dog {
 	sickHold?: boolean;
 	sickHoldReason?: string | null;
 	sickHoldSince?: DateValue | null;
+	/** Watch state — the step before treatment: the dog is being observed for symptoms
+	 *  (or re-observed after finishing treatment/an outbreak). Purely informational (no
+	 *  handling/playgroup/adoption effects). Mutually exclusive with sickHold, and
+	 *  starting a treatment clears it. */
+	sickMonitor?: boolean;
+	sickMonitorReason?: string | null;
+	sickMonitorSince?: DateValue | null;
 	/** When the enrichment clock was last reset — stamped when a dog comes off an
 	 *  isolation or sick hold, so it doesn't read as instantly overdue for enrichment
 	 *  (which it couldn't get while held). The enrichment clock ignores time before this. */

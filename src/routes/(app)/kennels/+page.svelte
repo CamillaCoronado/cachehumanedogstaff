@@ -75,14 +75,13 @@
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
-	$: activeDogs = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster);
-	$: fosterDogs = activeDogs.filter((dog) => dog.inFoster);
+	$: activeDogs = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster);
 	// Dogs in isolation can't share the outdoor kennel map — they're shown as
 	// unassignable and kept out of every run/assignment calculation.
-	$: isoDogs = activeDogs.filter((dog) => !dog.inFoster && dog.isolationStatus !== 'none');
-	$: kennelEligibleDogs = activeDogs.filter(
-		(dog) => !dog.inFoster && dog.isolationStatus === 'none'
-	);
+	$: isoDogs = activeDogs.filter((dog) => dog.isolationStatus !== 'none');
+	// Foster dogs can be housed/placed on the map too (e.g. back during an outbreak).
+	$: kennelEligibleDogs = activeDogs.filter((dog) => dog.isolationStatus === 'none');
+	$: fosterDogs = kennelEligibleDogs.filter((dog) => dog.inFoster);
 	$: assignments = getAssignments(kennelEligibleDogs);
 	$: unassigned = kennelEligibleDogs.filter((dog) => !getDogRun(dog));
 	// Run keys where an intact dog shares the kennel with an intact dog of the
@@ -223,10 +222,6 @@
 
 	async function assignDog(dog: Dog, runId: RunId | null) {
 		if (!canEdit) return;
-		if (dog.inFoster && runId !== null) {
-			toast.error('Dogs in foster cannot be assigned to a kennel.');
-			return;
-		}
 		const currentRun = getDogRun(dog);
 		if (currentRun === runId) return;
 
@@ -429,7 +424,7 @@
 											<div class="kennel-dog-stack">
 												{#each slotDogs as slotDog}
 													<div
-														class={`kennel-dog ${canEdit ? 'kennel-dog-draggable' : ''} ${
+														class={`kennel-dog ${slotDog.sickHold ? 'kennel-dog-sick' : ''} ${canEdit ? 'kennel-dog-draggable' : ''} ${
 															selectedDogId === slotDog.id ? 'kennel-dog-selected' : ''
 														}`}
 														draggable={canEdit}
@@ -438,7 +433,7 @@
 														on:pointerdown={(event) => handleTouchDragStart(event, slotDog)}
 														on:click|stopPropagation={() => toggleSelect(slotDog)}
 													>
-														<span>{slotDog.name}</span>
+														<span>{slotDog.name}</span>{#if slotDog.inFoster}<span class="kennel-foster-tag">foster</span>{/if}{#if slotDog.sickHold}<span class="kennel-sick-tag">sick</span>{/if}
 													</div>
 												{/each}
 												{#each slotPlaceholders as ph (ph.id)}
@@ -484,20 +479,20 @@
 					{#if loading}
 						<p class="mt-3 text-sm text-ink-500">Loading dogs...</p>
 					{:else if kennelEligibleDogs.length === 0 && unassignedPlaceholders.length === 0}
-						<p class="mt-3 text-sm text-ink-500">All active dogs are currently in foster.</p>
+						<p class="mt-3 text-sm text-ink-500">No dogs to place.</p>
 					{:else if unassigned.length === 0 && unassignedPlaceholders.length === 0}
 						<p class="mt-3 text-sm text-ink-500">All active dogs have a run assigned.</p>
 					{:else}
 						<div class="mt-4 kennel-unassigned-list">
 							{#each unassigned as dog}
 								<div
-									class={`kennel-unassigned-row ${canEdit ? 'kennel-dog-draggable' : ''}`}
+									class={`kennel-unassigned-row ${dog.sickHold ? 'kennel-unassigned-sick' : ''} ${canEdit ? 'kennel-dog-draggable' : ''}`}
 									draggable={canEdit}
 									on:dragstart={(event) => handleDragStart(event, dog)}
 									on:dragend={handleDragEnd}
 									on:pointerdown={(event) => handleTouchDragStart(event, dog)}
 								>
-									<span>{dog.name}</span>
+									<span>{dog.name}</span>{#if dog.inFoster}<span class="kennel-foster-tag">foster</span>{/if}{#if dog.sickHold}<span class="kennel-sick-tag">sick</span>{/if}
 								</div>
 							{/each}
 							{#each unassignedPlaceholders as ph (ph.id)}
@@ -589,7 +584,7 @@
 									on:click={() => toggleSelect(dog)}
 									on:keydown={(event) => event.key === 'Enter' && toggleSelect(dog)}
 								>
-									<p class="kennel-mobile-name">{dog.name}</p>
+									<p class="kennel-mobile-name">{dog.name}{#if dog.inFoster}<span class="kennel-foster-tag">foster</span>{/if}{#if dog.sickHold}<span class="kennel-sick-tag">sick</span>{/if}</p>
 									<div class="kennel-mobile-run-row">
 										<span>Run</span>
 										<select
@@ -886,6 +881,44 @@
 		background: #fff;
 		color: #7a5c10;
 		padding: 0.02rem 0.32rem;
+	}
+
+	.kennel-dog-sick {
+		background: #fdeeee;
+		border-color: #e0a9a9;
+		color: #a5302f;
+	}
+
+	.kennel-unassigned-sick {
+		color: #a5302f;
+	}
+
+	.kennel-sick-tag {
+		flex-shrink: 0;
+		margin-left: 0.32rem;
+		border-radius: 999px;
+		border: 1px solid #e0b6b6;
+		background: #f7e3e3;
+		color: #cf4b4b;
+		font-size: 0.54rem;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		padding: 0.04rem 0.34rem;
+	}
+
+	.kennel-foster-tag {
+		flex-shrink: 0;
+		margin-left: 0.32rem;
+		border-radius: 999px;
+		border: 1px solid #d9b9d1;
+		background: #f6e9f3;
+		color: #933980;
+		font-size: 0.54rem;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		padding: 0.04rem 0.34rem;
 	}
 
 	.kennel-placeholder-remove {
