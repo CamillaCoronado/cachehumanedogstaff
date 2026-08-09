@@ -9,10 +9,10 @@
 	export let focusField: 'condition' | 'name' = 'name';
 	export let saving = false;
 
+	// Removing is a row action, not an editor one — the editor only edits.
 	const dispatch = createEventDispatcher<{
 		save: { condition: string | null; name: string; startDate: string; endDate: string; notes: string | null };
 		cancel: void;
-		remove: void;
 	}>();
 
 	let condition = treatment.condition ?? '';
@@ -95,9 +95,6 @@
 		<input class="tx-input" type="text" placeholder="Optional" bind:value={notes} />
 	</label>
 	<div class="tx-editor-actions">
-		<button type="button" class="tx-remove" disabled={saving} on:click={() => dispatch('remove')}>
-			Remove
-		</button>
 		<button type="button" class="tx-cancel" disabled={saving} on:click={() => dispatch('cancel')}>
 			Cancel
 		</button>
@@ -160,7 +157,6 @@
 		gap: 0.3rem;
 	}
 
-	.tx-remove,
 	.tx-cancel,
 	.tx-save {
 		border-radius: 0.38rem;
@@ -171,14 +167,8 @@
 		cursor: pointer;
 	}
 
-	.tx-remove {
-		margin-right: auto;
-		border: 1px solid #e0b6b6;
-		background: #fdf5f5;
-		color: #a5302f;
-	}
-
 	.tx-cancel {
+		margin-left: auto;
 		border: 1px solid #d7d0e2;
 		background: #ffffff;
 		color: #7d7490;
@@ -190,7 +180,6 @@
 		color: #4d3a63;
 	}
 
-	.tx-remove:disabled,
 	.tx-cancel:disabled,
 	.tx-save:disabled {
 		opacity: 0.5;

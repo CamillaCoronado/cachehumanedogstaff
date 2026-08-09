@@ -62,6 +62,18 @@
 	let outbreakMode = false;
 	$: outbreakActive = outbreakMode || sickDogs.length > 0;
 
+	let menuOpen = false;
+
+	// Closes the header menu on any click outside it (the toggle lives inside, so it
+	// still opens normally).
+	function clickOutside(node: HTMLElement, onOutside: () => void) {
+		const handler = (event: MouseEvent) => {
+			if (!node.contains(event.target as Node)) onOutside();
+		};
+		document.addEventListener('click', handler, true);
+		return { destroy: () => document.removeEventListener('click', handler, true) };
+	}
+
 	function toggleOutbreakMode() {
 		outbreakMode = !outbreakMode;
 		try {
@@ -79,9 +91,10 @@
 
 	let groupReason = '';
 	let groupMedication = '';
-	let groupStage: 'treating' | 'monitor' | 'sick' = 'treating';
+	let groupStage: 'treating' | 'monitor' | 'sick' | 'clearSick' = 'treating';
 	// The group form can't target a stage whose controls are hidden.
-	$: if (!outbreakActive && groupStage === 'sick') groupStage = 'treating';
+	$: if (!outbreakActive && (groupStage === 'sick' || groupStage === 'clearSick'))
+		groupStage = 'treating';
 	let showGroupForm = false;
 	let savingSickId = '';
 	let savingGroup = false;
@@ -139,6 +152,14 @@
 		new Set(groupEligible.map((d) => d.origin?.trim()).filter((o): o is string => !!o))
 	).sort((a, b) => a.localeCompare(b));
 	$: groupSelectedIds = groupEligible.filter((d) => groupCheckedIds[d.id]).map((d) => d.id);
+
+	// Checks everyone currently flagged sick — the fast path for ending an outbreak.
+	function selectFlaggedSick() {
+		const next = { ...groupCheckedIds };
+		for (const dog of sickDogs) next[dog.id] = true;
+		groupCheckedIds = next;
+		groupStage = 'clearSick';
+	}
 
 	function selectGroupOrigin(origin: string) {
 		groupOrigin = origin;
@@ -213,10 +234,7 @@
 		}))
 		.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
 
-	// The Treatment card is ONE list: every unwell dog appears once with a stage.
-	// Sick (outbreak) trumps treating trumps monitor; the pipeline reads
-	// monitor → treating, so the list sorts sick, monitor, treating, then name.
-	const STAGE_ORDER: Record<string, number> = { sick: 0, monitor: 1, treating: 2 };
+	// Every dog needing medical attention appears once, with a stage for display.
 	$: illDogs = dogs
 		.filter(
 			(d) =>
@@ -231,10 +249,38 @@
 				return { t, daysLeft };
 			})
 		}))
-		.sort(
-			(a, b) =>
-				STAGE_ORDER[a.stage] - STAGE_ORDER[b.stage] || a.dog.name.localeCompare(b.dog.name)
-		);
+		.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
+
+	const MONITOR_GROUP = 'Monitor';
+	const UNKNOWN_GROUP = 'Reason not recorded';
+
+	// Staff report these grouped by what the dogs have — "on treatment for URI",
+	// "diarrhea and URI", "these are on monitor" — so the list is grouped the same way.
+	// A dog being treated for two things gets its own combined group, as in "Yukon and
+	// Zinnia — diarrhea and URI".
+	function careGroupLabel(dog: Dog): string {
+		if (dog.sickMonitor) return MONITOR_GROUP;
+		const conditions = treatmentConditions(dog);
+		if (conditions.length > 0) return [...conditions].sort((a, b) => a.localeCompare(b)).join(' + ');
+		return dog.sickHoldReason?.trim() || treatmentNames(dog) || UNKNOWN_GROUP;
+	}
+
+	$: careGroups = (() => {
+		const groups = new Map<string, typeof illDogs>();
+		for (const entry of illDogs) {
+			const label = careGroupLabel(entry.dog);
+			const bucket = groups.get(label);
+			if (bucket) bucket.push(entry);
+			else groups.set(label, [entry]);
+		}
+		// Illnesses first (alphabetical), then the unlabeled ones, with monitor last —
+		// it's the "nothing active" group and belongs at the bottom.
+		const rank = (label: string) =>
+			label === MONITOR_GROUP ? 2 : label === UNKNOWN_GROUP ? 1 : 0;
+		return [...groups.entries()]
+			.map(([label, dogs]) => ({ label, dogs }))
+			.sort((a, b) => rank(a.label) - rank(b.label) || a.label.localeCompare(b.label));
+	})();
 
 	function treatmentNames(dog: Dog): string | null {
 		return (dog.treatments ?? []).map((t) => t.name).join(', ') || null;
@@ -283,6 +329,44 @@
 			await refreshDogs();
 		} finally {
 			savingTx = false;
+		}
+	}
+
+	// Editing the reason attached to a sick/monitor status (as opposed to one that lives
+	// on a treatment, which the treatment editor handles).
+	let editingStatusDogId = '';
+	let editingStatusText = '';
+
+	function focusOnMount(node: HTMLInputElement) {
+		node.focus();
+		node.select();
+	}
+
+	function startEditStatusReason(dog: Dog, current: string | null) {
+		editingStatusDogId = dog.id;
+		editingStatusText = current ?? '';
+	}
+
+	function cancelEditStatusReason() {
+		editingStatusDogId = '';
+		editingStatusText = '';
+	}
+
+	async function saveStatusReason(dog: Dog) {
+		// Blur can fire after Escape unmounts the input; without this the cleared text
+		// would be saved over a good reason.
+		if (editingStatusDogId !== dog.id) return;
+		const reason = editingStatusText.trim() || null;
+		cancelEditStatusReason();
+		try {
+			await updateDog(
+				dog.id,
+				dog.sickHold ? { sickHoldReason: reason } : { sickMonitorReason: reason }
+			);
+			await refreshDogs();
+		} catch {
+			toast.error(`Could not update ${dog.name}'s reason.`);
+			await refreshDogs();
 		}
 	}
 
@@ -437,6 +521,8 @@
 		try {
 			if (groupStage === 'sick') {
 				await setDogsSickHold(ids, true, reason);
+			} else if (groupStage === 'clearSick') {
+				await setDogsSickHold(ids, false);
 			} else if (groupStage === 'monitor') {
 				await setDogsMonitor(ids, true, reason);
 			} else {
@@ -468,10 +554,12 @@
 			showGroupForm = false;
 			const label =
 				groupStage === 'sick'
-					? 'marked sick'
-					: groupStage === 'monitor'
-						? 'put on monitor'
-						: `on treatment for ${reason}`;
+					? 'flagged sick'
+					: groupStage === 'clearSick'
+						? 'no longer flagged sick'
+						: groupStage === 'monitor'
+							? 'put on monitor'
+							: `on treatment for ${reason}`;
 			toast.success(`${ids.length} dog${ids.length === 1 ? '' : 's'} ${label}.`);
 		} catch {
 			toast.error('Could not update the group.');
@@ -908,28 +996,46 @@
 						{#if sickDogs.length > 0}
 							<span class="med-pill med-pill-rose">{sickDogs.length} sick</span>
 						{/if}
-						<span class="med-pill med-pill-lilac">{treatmentDogs.length}</span>
-						<button
-							class="med-outbreak-toggle {outbreakActive ? 'med-outbreak-toggle-open' : ''}"
-							type="button"
-							aria-pressed={outbreakActive}
-							title={outbreakActive
-								? 'Turn off outbreak mode — hides the sick controls'
-								: 'Turn on outbreak mode — adds the sick (red zone) controls'}
-							on:click={toggleOutbreakMode}
-						>Outbreak</button>
-						<button
-							class="med-group-toggle {showGroupForm ? 'med-group-toggle-open' : ''}"
-							type="button"
-							title="Update a whole group of dogs at once"
-							on:click={() => (showGroupForm = !showGroupForm)}
-						>Update group</button>
+						<span class="med-pill med-pill-lilac">{illDogs.length}</span>
 						<button
 							class="med-add-toggle {showAddTx ? 'med-add-toggle-open' : ''}"
 							type="button"
 							on:click={() => (showAddTx = !showAddTx)}
 							aria-label="Add a treatment"
 						>+</button>
+						<!-- The occasional actions live behind one menu so the header stays quiet. -->
+						<div class="med-menu" use:clickOutside={() => (menuOpen = false)}>
+							<button
+								class="med-menu-toggle {menuOpen ? 'med-menu-toggle-open' : ''}"
+								type="button"
+								aria-haspopup="menu"
+								aria-expanded={menuOpen}
+								aria-label="More actions"
+								on:click={() => (menuOpen = !menuOpen)}
+							>⋯</button>
+							{#if menuOpen}
+								<div class="med-menu-panel" role="menu">
+									<button
+										class="med-menu-item"
+										type="button"
+										role="menuitem"
+										on:click={() => ((showGroupForm = !showGroupForm), (menuOpen = false))}
+									>Update a group…</button>
+									<button
+										class="med-menu-item"
+										type="button"
+										role="menuitemcheckbox"
+										aria-checked={outbreakActive}
+										on:click={() => (toggleOutbreakMode(), (menuOpen = false))}
+									>
+										Outbreak mode
+										<span class="med-menu-state {outbreakActive ? 'med-menu-state-on' : ''}">
+											{outbreakActive ? 'On' : 'Off'}
+										</span>
+									</button>
+								</div>
+							{/if}
+						</div>
 					</div>
 				</div>
 
@@ -984,6 +1090,14 @@
 									<option value={origin}>{origin}</option>
 								{/each}
 							</select>
+							{#if sickDogs.length > 0}
+								<button
+									class="med-clear typewriter"
+									type="button"
+									title="Check every dog currently flagged sick"
+									on:click={selectFlaggedSick}
+								>Select flagged ({sickDogs.length})</button>
+							{/if}
 							<button
 								class="med-clear typewriter"
 								type="button"
@@ -1007,12 +1121,14 @@
 							{/each}
 						</div>
 						<div class="med-form-row">
-							<input
-								class="med-input med-input-grow"
-								type="text"
-								placeholder="Reason (e.g. URI, diarrhea)"
-								bind:value={groupReason}
-							/>
+							{#if groupStage !== 'clearSick'}
+								<input
+									class="med-input med-input-grow"
+									type="text"
+									placeholder="Reason (e.g. URI, diarrhea)"
+									bind:value={groupReason}
+								/>
+							{/if}
 							{#if groupStage === 'treating'}
 								<input
 									class="med-input med-input-grow"
@@ -1026,6 +1142,7 @@
 								<option value="monitor">Put on monitor</option>
 								{#if outbreakActive}
 									<option value="sick">Flag sick (outbreak)</option>
+									<option value="clearSick">Clear sick flag</option>
 								{/if}
 							</select>
 							<button
@@ -1036,7 +1153,7 @@
 								{savingGroup ? '…' : `Apply to ${groupSelectedIds.length || '…'}`}
 							</button>
 						</div>
-						<p class="med-hint">"These six are on treatment for URI" → check the dogs, type URI, start treatment. Monitor means watching without meds.{#if outbreakActive} Flagging sick makes dogs staff-only and blocks playgroups, day-trips and yard.{/if}</p>
+						<p class="med-hint">"These six are on treatment for URI" → check the dogs, type URI, start treatment. Monitor means watching without meds.{#if outbreakActive} Flagging sick makes dogs staff-only and blocks playgroups, day-trips and yard; clearing the flag lifts all of it.{/if}</p>
 					</form>
 				{/if}
 
@@ -1044,88 +1161,105 @@
 					{#if illDogs.length === 0}
 						<p class="med-empty">No dogs under care.</p>
 					{:else}
-						{#each illDogs as { dog, stage, treatments } (dog.id)}
+						{#each careGroups as group (group.label)}
+						{@const isMonitor = group.label === MONITOR_GROUP}
+						<div class="med-group {isMonitor ? 'med-group-monitor' : ''}">
+							{#if isMonitor}
+								<!-- Monitor isn't an illness, so its heading is a band rather than a label. -->
+								<p class="med-monitor-head">
+									<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+										<path d="M1.8 12S5.5 5.2 12 5.2 22.2 12 22.2 12 18.5 18.8 12 18.8 1.8 12 1.8 12Z"/>
+										<circle cx="12" cy="12" r="3.2"/>
+									</svg>
+									<span class="med-monitor-title">On monitor</span>
+									<span class="med-monitor-note">watching — no meds</span>
+									<span class="med-monitor-count">{group.dogs.length}</span>
+								</p>
+							{:else}
+								<p class="med-group-head">
+									<span class="med-group-name">{group.label}</span>
+									<span class="med-group-count">{group.dogs.length}</span>
+								</p>
+							{/if}
+						{#each group.dogs as { dog, stage, treatments } (dog.id)}
 							{@const storedReason = dog.sickHoldReason ?? dog.sickMonitorReason ?? null}
 							{@const conditions = treatmentConditions(dog)}
-							<!-- The reason is the condition; the treatments below are the medications.
-							     Records with no condition fall back to the treatment name itself. -->
-							{@const reason = storedReason ?? (conditions.join(', ') || treatmentNames(dog))}
-							<!-- When the reason IS one of the treatments, that treatment's detail rides on
-							     the reason line instead of repeating the name underneath. -->
-							{@const inlineTx = treatments.find(
-								({ t }) => t.name.trim().toLowerCase() === (reason ?? '').trim().toLowerCase()
-							) ?? null}
-							{@const restTx = inlineTx ? treatments.filter((row) => row !== inlineTx) : treatments}
-							<!-- A reason derived from several treatment NAMES would just repeat the list
-							     below it; conditions are separate information, so they always show. -->
-							{@const showReason =
-								!!reason && (!!storedReason || conditions.length > 0 || !!inlineTx)}
-							<div class="med-row">
-								<div class="med-row-body">
+							<!-- A status reason that a treatment already names would just repeat below. -->
+							{@const showStatusReason =
+								!!storedReason &&
+								!conditions.some((c) => c.toLowerCase() === storedReason.toLowerCase())}
+							<div class="med-row med-row-care">
+								<div class="med-row-head">
 									<button class="med-dog-link" on:click={() => goto(`/dogs/${dog.id}`)}>
 										{dog.name}
 										{#if dog.outdoorKennelAssignment}
 											<span class="med-kennel">· K{dog.outdoorKennelAssignment}</span>
 										{/if}
 									</button>
-									{#if stage !== 'treating' || inlineTx || conditions.length > 0}
+									<div class="med-switches">
+										<button
+											type="button"
+											class="med-switch {dog.sickMonitor ? 'med-switch-on-monitor' : ''}"
+											disabled={savingSickId === dog.id}
+											aria-pressed={!!dog.sickMonitor}
+											title={dog.sickMonitor ? 'Stop watching' : 'Watch — no meds'}
+											on:click={() => toggleMonitor(dog)}
+										>Monitor</button>
+										{#if outbreakActive}
+											<button
+												type="button"
+												class="med-switch {dog.sickHold ? 'med-switch-on-sick' : ''}"
+												disabled={savingSickId === dog.id}
+												aria-pressed={!!dog.sickHold}
+												title={dog.sickHold ? 'Clear the outbreak flag' : 'Flag sick — staff-only, no playgroups or trips'}
+												on:click={() => toggleSick(dog)}
+											>Sick</button>
+										{/if}
+									</div>
+								</div>
+								<div class="med-row-body">
+									{#if stage !== 'treating'}
 										<div class="med-meta-row">
-											{#if showReason}
+											{#if editingStatusDogId === dog.id}
 												<span class="med-field-label">Reason</span>
-												<span class="med-meta">{reason}</span>
+												<input
+													class="med-reason-input"
+													type="text"
+													placeholder="Reason…"
+													bind:value={editingStatusText}
+													use:focusOnMount
+													on:blur={() => saveStatusReason(dog)}
+													on:keydown={(e) => {
+														if (e.key === 'Enter') { e.preventDefault(); saveStatusReason(dog); }
+														if (e.key === 'Escape') cancelEditStatusReason();
+													}}
+												/>
+											{:else if showStatusReason}
+												<span class="med-field-label">Reason</span>
+												<button
+													class="med-reason-value"
+													type="button"
+													title="{storedReason} — click to edit"
+													on:click={() => startEditStatusReason(dog, storedReason)}
+												>{storedReason}</button>
 											{:else if treatments.length === 0}
 												<span class="med-field-label">Reason</span>
-												<span class="med-meta med-meta-soft">not recorded</span>
-											{/if}
-											{#if inlineTx && inlineTx.daysLeft !== null}
-												<span class="med-tag {inlineTx.daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
-													{inlineTx.daysLeft > 0 ? `${inlineTx.daysLeft}d left` : 'Last day'}
-												</span>
+												<button
+													class="med-reason-value med-meta-soft"
+													type="button"
+													on:click={() => startEditStatusReason(dog, null)}
+												>not recorded</button>
 											{/if}
 											{#if stage === 'sick' && dog.sickHoldSince}
 												<span class="med-meta med-meta-soft">since {formatDate(dog.sickHoldSince)}</span>
 											{:else if stage === 'monitor' && dog.sickMonitorSince}
 												<span class="med-meta med-meta-soft">since {formatDate(dog.sickMonitorSince)}</span>
 											{/if}
-											{#if inlineTx && editingTxId !== inlineTx.t.id}
-												{#if !inlineTx.t.condition}
-													<button
-														class="med-reason-add"
-														type="button"
-														on:click={() => startEditTreatment(inlineTx.t, 'condition')}
-													>+ reason</button>
-												{:else if needsMedication(inlineTx.t) && !dog.sickMonitor}
-													<button
-														class="med-reason-add"
-														type="button"
-														on:click={() => startEditTreatment(inlineTx.t, 'name')}
-													>+ medication</button>
-												{/if}
-												<button
-													class="med-tx-edit"
-													type="button"
-													aria-label="Edit {inlineTx.t.name}"
-													on:click={() => startEditTreatment(inlineTx.t)}
-												>Edit</button>
-											{/if}
 										</div>
-										{#if inlineTx && editingTxId === inlineTx.t.id}
-											<TreatmentEditor
-												treatment={inlineTx.t}
-												focusField={editingTxFocus}
-												saving={savingTx}
-												on:save={(e) => saveTreatmentEdit(dog, inlineTx.t.id, e.detail)}
-												on:cancel={cancelEditTreatment}
-												on:remove={() => (cancelEditTreatment(), removeTreatment(dog, inlineTx.t.id))}
-											/>
-										{/if}
-										{#if inlineTx?.t.notes}
-											<p class="med-notes">{inlineTx.t.notes}</p>
-										{/if}
 									{/if}
-									{#if restTx.length > 0}
+									{#if treatments.length > 0}
 										<div class="med-tx-list">
-											{#each restTx as { t, daysLeft }}
+											{#each treatments as { t, daysLeft } (t.id)}
 												<div class="med-tx-item">
 													{#if editingTxId === t.id}
 														<TreatmentEditor
@@ -1134,49 +1268,71 @@
 															saving={savingTx}
 															on:save={(e) => saveTreatmentEdit(dog, t.id, e.detail)}
 															on:cancel={cancelEditTreatment}
-															on:remove={() => (cancelEditTreatment(), removeTreatment(dog, t.id))}
 														/>
 													{:else}
+														<!-- Reason and medication share a line; the row's actions sit under it. -->
 														<div class="med-tx-line">
-															<span class="med-field-label">{needsMedication(t) ? 'Reason' : 'Med'}</span>
+													<div class="med-tx-fields">
+															<span class="med-tx-pair">
+																<span class="med-field-label">Reason</span>
+																{#if t.condition}
+																	<button
+																		class="med-reason-value"
+																		type="button"
+																		title="{t.condition} — click to edit"
+																		on:click={() => startEditTreatment(t, 'condition')}
+																	>{t.condition}</button>
+																{:else}
+																	<button
+																		class="med-reason-add"
+																		type="button"
+																		on:click={() => startEditTreatment(t, 'condition')}
+																	>+ reason</button>
+																{/if}
+															</span>
+															<span class="med-tx-pair">
+																<span class="med-field-label">Med</span>
+																{#if needsMedication(t)}
+																	<button
+																		class="med-reason-add"
+																		type="button"
+																		on:click={() => startEditTreatment(t, 'name')}
+																	>+ medication</button>
+																{:else}
+																	<button
+																		class="med-tx-name"
+																		type="button"
+																		title="{t.name} — click to edit"
+																		on:click={() => startEditTreatment(t, 'name')}
+																	>{t.name}</button>
+																{/if}
+																{#if daysLeft !== null}
+																	<span class="med-tag {daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
+																		{daysLeft > 0 ? `${daysLeft}d left` : 'Last day'}
+																	</span>
+																{/if}
+															</span>
+													</div>
+														<div class="med-tx-actions">
 															<button
-																class="med-tx-name"
+																class="med-icon-btn"
 																type="button"
-																title="Edit treatment"
+																aria-label="Edit {t.name}"
+																title="Edit"
 																on:click={() => startEditTreatment(t)}
-															>{t.name}</button>
-															{#if !t.condition}
-																<button
-																	class="med-reason-add"
-																	type="button"
-																	on:click={() => startEditTreatment(t, 'condition')}
-																>+ reason</button>
-															{:else if needsMedication(t) && !dog.sickMonitor}
-																<button
-																	class="med-reason-add"
-																	type="button"
-																	on:click={() => startEditTreatment(t, 'name')}
-																>+ medication</button>
-															{:else if conditions.length > 1}
-																<!-- Which condition this med is for, when the dog has more than one. -->
-																<button
-																	class="med-reason-edit"
-																	type="button"
-																	title="Edit reason"
-																	on:click={() => startEditTreatment(t, 'condition')}
-																>for {t.condition}</button>
-															{/if}
-															{#if daysLeft !== null}
-																<span class="med-tag {daysLeft <= 0 ? 'med-tag-done' : 'med-tag-info'}">
-																	{daysLeft > 0 ? `${daysLeft}d left` : 'Last day'}
-																</span>
-															{/if}
+															>
+																<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7.5 18.5l-4 1 1-4Z"/><path d="M13.5 6.5l4 4"/></svg>
+															</button>
 															<button
-																class="med-tx-remove"
+																class="med-icon-btn med-icon-btn-danger"
 																type="button"
 																aria-label="Remove {t.name}"
+																title="Remove"
 																on:click={() => removeTreatment(dog, t.id)}
-															>×</button>
+															>
+																<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 6h16"/><path d="M9 6V4h6v2"/><path d="M18.5 6l-.8 13a1.6 1.6 0 0 1-1.6 1.5H7.9a1.6 1.6 0 0 1-1.6-1.5L5.5 6"/><path d="M10 10.5v6M14 10.5v6"/></svg>
+															</button>
+															</div>
 														</div>
 														{#if t.notes}
 															<p class="med-notes">{t.notes}</p>
@@ -1187,27 +1343,9 @@
 										</div>
 									{/if}
 								</div>
-								<div class="med-switches">
-									<button
-										type="button"
-										class="med-switch {dog.sickMonitor ? 'med-switch-on-monitor' : ''}"
-										disabled={savingSickId === dog.id}
-										aria-pressed={!!dog.sickMonitor}
-										title={dog.sickMonitor ? 'Stop watching' : 'Watch — no meds'}
-										on:click={() => toggleMonitor(dog)}
-									>Monitor</button>
-									{#if outbreakActive}
-										<button
-											type="button"
-											class="med-switch {dog.sickHold ? 'med-switch-on-sick' : ''}"
-											disabled={savingSickId === dog.id}
-											aria-pressed={!!dog.sickHold}
-											title={dog.sickHold ? 'Clear the outbreak flag' : 'Flag sick — staff-only, no playgroups or trips'}
-											on:click={() => toggleSick(dog)}
-										>Sick</button>
-									{/if}
-								</div>
 							</div>
+						{/each}
+						</div>
 						{/each}
 					{/if}
 				</div>
@@ -1485,6 +1623,16 @@
 		gap: 0.34rem;
 	}
 
+	/* Under Care rows carry more per dog than the other cards, so they get more air. */
+	.med-card-lilac .med-items {
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
+	.med-card-lilac .med-items > * {
+		min-width: 0;
+	}
+
 	.med-empty {
 		margin: 0;
 		padding: 0.52rem 0.5rem;
@@ -1498,15 +1646,126 @@
 	}
 
 	/* Dog row */
+	.med-group {
+		display: grid;
+		min-width: 0;
+		gap: 0.34rem;
+	}
+
+	.med-group-head {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0.1rem 0 0;
+	}
+
+	.med-group-name {
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: #4d3a63;
+	}
+
+	.med-group-count {
+		font-family: var(--font-ui);
+		font-size: 0.62rem;
+		font-weight: 700;
+		color: #7d7490;
+		background: rgba(77, 58, 99, 0.09);
+		border-radius: 999px;
+		padding: 0.02rem 0.4rem;
+	}
+
+	/* Monitor is a state, not an illness — the whole section is set apart in green. */
+	.med-group-monitor {
+		margin-top: 0.55rem;
+		padding: 0.4rem;
+		border: 1px solid rgba(58, 175, 42, 0.28);
+		border-radius: 0.6rem;
+		background: rgba(58, 175, 42, 0.06);
+	}
+
+	.med-monitor-head {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0 0 0.1rem;
+		color: #2e6c30;
+	}
+
+	.med-monitor-head svg {
+		flex-shrink: 0;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.med-monitor-title {
+		font-family: var(--font-ui);
+		font-size: 0.9rem;
+		font-weight: 800;
+		letter-spacing: 0.01em;
+	}
+
+	.med-monitor-note {
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
+		font-weight: 600;
+		color: #5f7a5f;
+	}
+
+	.med-monitor-count {
+		margin-left: auto;
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
+		font-weight: 800;
+		color: #2e6c30;
+		background: rgba(58, 175, 42, 0.16);
+		border-radius: 999px;
+		padding: 0.04rem 0.46rem;
+	}
+
 	.med-row {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
+		min-width: 0;
 		gap: 0.5rem;
-		padding: 0.44rem 0.5rem;
-		border: 1px solid rgba(96, 109, 123, 0.15);
-		border-radius: 0.28rem;
-		background: rgba(255, 255, 255, 0.5);
+		padding: 0.5rem 0.6rem;
+		border: 1px solid rgba(77, 58, 99, 0.14);
+		border-radius: 0.5rem;
+		background: rgba(255, 255, 255, 0.55);
+	}
+
+	/* Under Care rows stack: the name and its switches share a line, and the
+	   reason/medication block below them gets the card's full width. */
+	.med-row-care {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0.18rem;
+	}
+
+	.med-row-care > * {
+		min-width: 0;
+	}
+
+	.med-row-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
+	.med-row-head .med-dog-link {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.med-row-body {
@@ -1519,8 +1778,8 @@
 
 	.med-dog-link {
 		font-family: var(--font-ui);
-		font-weight: 700;
-		font-size: 0.92rem;
+		font-weight: 800;
+		font-size: 0.98rem;
 		color: #016aa5;
 		background: none;
 		border: none;
@@ -1577,8 +1836,7 @@
 		color: #9aa7b4;
 	}
 
-	.med-reason-add,
-	.med-reason-edit {
+	.med-reason-add {
 		border: 1px dashed #c4b8d6;
 		background: transparent;
 		border-radius: 0.4rem;
@@ -1590,16 +1848,37 @@
 		cursor: pointer;
 	}
 
-	.med-reason-edit {
-		border-style: solid;
-		border-color: transparent;
-		color: #7a8fa0;
-	}
-
-	.med-reason-add:hover,
-	.med-reason-edit:hover {
+	.med-reason-add:hover {
 		color: #4d3a63;
 		border-color: #a98dba;
+	}
+
+	/* Like .med-tx-name: the value itself is the edit affordance. */
+	.med-reason-value {
+		border: 0;
+		background: none;
+		padding: 0;
+		font-family: var(--font-ui);
+		font-size: 0.74rem;
+		color: #526b81;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	.med-reason-value:hover {
+		color: #4d3a63;
+		text-decoration: underline;
+	}
+
+	.med-reason-input {
+		min-width: 6rem;
+		max-width: 12rem;
+		border: 1px solid #a98dba;
+		border-radius: 0.4rem;
+		padding: 0.04rem 0.34rem;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
+		color: #33414f;
 	}
 
 	/* The medication doubles as the edit affordance — it looks like text until hovered. */
@@ -1619,55 +1898,87 @@
 		text-decoration: underline;
 	}
 
-	.med-tx-edit {
-		border: 1px solid transparent;
-		background: none;
-		border-radius: 0.4rem;
-		padding: 0.02rem 0.34rem;
-		font-family: var(--font-ui);
-		font-size: 0.66rem;
-		font-weight: 600;
-		color: #8a7ea3;
-		cursor: pointer;
-	}
-
-	.med-tx-edit:hover {
-		border-color: #a98dba;
-		color: #4d3a63;
-	}
-
 	.med-meta-row {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
+		min-width: 0;
 		gap: 0.4rem;
 	}
 
-	.med-outbreak-toggle,
-	.med-group-toggle {
-		border: 1px solid #cfc4dd;
-		background: #ffffff;
-		color: #7d7490;
+	.med-menu {
+		position: relative;
+		display: inline-flex;
+	}
+
+	.med-menu-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.5rem;
+		height: 1.5rem;
+		border: 1px solid rgba(77, 58, 99, 0.22);
 		border-radius: 999px;
-		padding: 0.18rem 0.6rem;
-		font-family: var(--font-ui);
-		font-size: 0.66rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		background: transparent;
+		color: #6f6486;
+		font-size: 0.9rem;
+		line-height: 1;
 		cursor: pointer;
 	}
 
-	.med-outbreak-toggle-open {
-		background: #cf4b4b;
-		border-color: #cf4b4b;
-		color: #fff;
+	.med-menu-toggle:hover,
+	.med-menu-toggle-open {
+		border-color: #7d6a94;
+		color: #4d3a63;
 	}
 
-	.med-group-toggle-open {
-		background: #ece8f3;
-		border-color: #a98dba;
-		color: #4d3a63;
+	.med-menu-panel {
+		position: absolute;
+		top: calc(100% + 0.3rem);
+		right: 0;
+		z-index: 20;
+		min-width: 11rem;
+		display: grid;
+		gap: 0.1rem;
+		padding: 0.24rem;
+		border: 1px solid #d9d2e4;
+		border-radius: 0.5rem;
+		background: #ffffff;
+		box-shadow: 0 8px 18px rgba(40, 53, 67, 0.16);
+	}
+
+	.med-menu-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.3rem 0.4rem;
+		border: 0;
+		border-radius: 0.35rem;
+		background: none;
+		font-family: var(--font-ui);
+		font-size: 0.76rem;
+		font-weight: 600;
+		color: #3c3450;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.med-menu-item:hover {
+		background: #f4f1f9;
+	}
+
+	.med-menu-state {
+		font-size: 0.62rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #9aa7b4;
+	}
+
+	.med-menu-state-on {
+		color: #cf4b4b;
 	}
 
 	.med-hint {
@@ -1734,6 +2045,8 @@
 	}
 
 	.med-switch {
+		flex-shrink: 0;
+		white-space: nowrap;
 		border: 1px solid #cfc4dd;
 		background: #ffffff;
 		color: #7d7490;
@@ -1813,6 +2126,53 @@
 		color: #a03232;
 	}
 
+	/* Edit and Remove ride at the right end of the treatment line, as one unit. */
+	.med-tx-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.16rem;
+		margin-left: auto;
+		padding-left: 0.4rem;
+		flex-wrap: nowrap;
+		flex-shrink: 0;
+		white-space: nowrap;
+	}
+
+	.med-icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.5rem;
+		height: 1.5rem;
+		padding: 0;
+		border: 1px solid rgba(77, 58, 99, 0.22);
+		border-radius: 0.35rem;
+		background: transparent;
+		color: #6f6486;
+		cursor: pointer;
+	}
+
+	.med-icon-btn svg {
+		width: 0.85rem;
+		height: 0.85rem;
+		display: block;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.med-icon-btn:hover {
+		border-color: #7d6a94;
+		color: #4d3a63;
+	}
+
+	.med-icon-btn-danger:hover {
+		border-color: #cf4b4b;
+		color: #a5302f;
+	}
+
 	.med-notes {
 		margin: 0.1rem 0 0;
 		font-family: var(--font-ui);
@@ -1823,51 +2183,61 @@
 
 	.med-tx-list {
 		display: grid;
-		gap: 0.26rem;
-		margin-top: 0.08rem;
+		min-width: 0;
+		gap: 0.4rem;
+		margin-top: 0.28rem;
+		padding: 0.36rem 0.46rem;
+		border-radius: 0.4rem;
+		background: rgba(77, 58, 99, 0.05);
 	}
 
 	.med-tx-item {
 		display: flex;
 		flex-direction: column;
-		gap: 0.08rem;
-		padding-bottom: 0.22rem;
-		border-bottom: 1px solid rgba(96, 109, 123, 0.12);
-	}
-
-	.med-tx-item:last-child {
-		padding-bottom: 0;
-		border-bottom: none;
+		min-width: 0;
+		gap: 0.04rem;
 	}
 
 	.med-tx-line {
 		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
+		align-items: flex-start;
+		flex-wrap: nowrap;
+		min-width: 0;
 		gap: 0.3rem;
 	}
 
-	.med-tx-remove {
-		margin-left: auto;
+	/* Reason, medication and the actions all hold one line — a long value truncates
+	   with an ellipsis rather than pushing anything onto a second row. */
+	.med-tx-fields {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-wrap: nowrap;
+		align-items: baseline;
+		gap: 0.9rem;
+	}
+
+	/* Keeps a label glued to its own value. */
+	.med-tx-pair {
 		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 1.1rem;
-		height: 1.1rem;
-		border-radius: 999px;
-		border: 1px solid rgba(96, 109, 123, 0.22);
-		background: rgba(255, 255, 255, 0.55);
-		color: #526b81;
-		font-size: 0.86rem;
-		line-height: 1;
-		cursor: pointer;
+		align-items: baseline;
+		gap: 0.3rem;
+		min-width: 0;
+	}
+
+	/* The values shrink; the labels and day-count tags never do. */
+	.med-tx-pair > .med-field-label,
+	.med-tx-pair > .med-tag {
 		flex-shrink: 0;
 	}
 
-	.med-tx-remove:hover {
-		background: rgba(207, 75, 75, 0.1);
-		border-color: rgba(207, 75, 75, 0.35);
-		color: #a03232;
+	.med-tx-pair .med-reason-value,
+	.med-tx-pair .med-tx-name,
+	.med-tx-pair .med-reason-add {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.med-clear {
