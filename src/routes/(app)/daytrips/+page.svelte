@@ -5,7 +5,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, canSetDayTripColor, resolveRole } from '$lib/utils/permissions';
-	import { setDogTripStatus, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog } from '$lib/data/dogs';
+	import { setDogTripStatus, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, setDogAwaitingEvaluation, setDogDayTripPuppyOverride } from '$lib/data/dogs';
 	import { loadDayTripData, autoImportTripsFromHiddenNotes } from '$lib/data/daytripSync';
 	import { dogs as dogsStore } from '$lib/stores/dogs';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
@@ -176,14 +176,14 @@
 	async function toggleAwaitingEval(dog: Dog) {
 		const next = !dog.awaitingEvaluation;
 		// Always mark it manually managed so the sheet-color auto-clear won't undo it.
-		await updateDog(dog.id, { awaitingEvaluation: next, evaluationAutoCleared: true });
+		await setDogAwaitingEvaluation(dog.id, next);
 		toast.success(next ? `${dog.name} marked awaiting evaluation.` : `${dog.name} cleared for evaluation.`);
 		await refresh();
 	}
 
 	async function togglePuppyOverride(dog: Dog) {
 		const next = !dog.dayTripPuppyOverride;
-		await updateDog(dog.id, { dayTripPuppyOverride: next });
+		await setDogDayTripPuppyOverride(dog.id, next);
 		toast.success(next ? `${dog.name} allowed on day trips early.` : `${dog.name} back to the 30-day puppy rule.`);
 		await refresh();
 	}
@@ -191,14 +191,26 @@
 	async function toggleOut(dog: Dog) {
 		const eligibility = getEligibility(dog);
 		if (dog.isOutOnDayTrip) {
-			await setDogTripStatus(dog.id, false);
+			try {
+				await setDogTripStatus(dog.id, false);
+			} catch (error) {
+				console.error(error);
+				toast.error(`Couldn't mark ${dog.name} as returned — the change wasn't saved.`);
+				return;
+			}
 			toast.success(`${dog.name} marked as returned.`);
 		} else {
 			if (!eligibility.eligible) {
 				toast.error(eligibility.reasons[0] ?? `${dog.name} is not eligible for day trips.`);
 				return;
 			}
-			await setDogTripStatus(dog.id, true);
+			try {
+				await setDogTripStatus(dog.id, true);
+			} catch (error) {
+				console.error(error);
+				toast.error(`Couldn't send ${dog.name} out — the change wasn't saved.`);
+				return;
+			}
 			toast.success(`${dog.name} marked as out on day trip.`);
 		}
 		await refresh();

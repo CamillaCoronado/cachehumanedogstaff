@@ -8,6 +8,20 @@ export function canAccessPlaygroups(_role: UserRole | null | undefined) {
 	return true;
 }
 
+/**
+ * Volunteers see only what a member of the public sees on the adoption site: name,
+ * photo, breed, age, sex, temperament and write-up. Everything else — medical, kennel
+ * assignments, behavioral notes, holds, warnings, day trips, feeding, cleaning — is
+ * internal.
+ *
+ * NOTE: this is a UI-level restriction only. Firestore rules cannot filter fields
+ * within a document, so an approved volunteer can still fetch the full dog record
+ * through the SDK. Closing that properly needs a public mirror collection.
+ */
+export function canViewInternalDogInfo(role: UserRole | null | undefined) {
+	return role !== 'volunteer';
+}
+
 export function canEditPlaygroups(role: UserRole | null | undefined) {
 	return role === 'admin' || role === 'manager' || role === 'staff';
 }

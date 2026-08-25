@@ -53,7 +53,17 @@
 	const _day = _now.getDay(); // 0=Sun, 5=Fri, 6=Sat
 	const _closingHour = (_day === 5 || _day === 6) ? 16 : 17; // Fri/Sat close at 5, feed ~4pm
 	let mealTime: MealTime = _now.getHours() < 12 ? 'am' : (_now.getHours() < _closingHour ? 'pm' : 'second');
-	const selectedDay = new Date();
+	// Feeding gets logged late — the board has to be able to look back at yesterday and
+	// fill it in. Everything downstream (fed map, fasting, surgery, saves) already takes a
+	// day, so this is the only thing that decides which day the page is working on.
+	function toDayInput(date: Date) {
+		return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	}
+	const todayInput = toDayInput(new Date());
+	let selectedDayInput = todayInput;
+	// Noon avoids the log landing on the neighbouring day in any timezone.
+	$: selectedDay = new Date(`${selectedDayInput}T12:00:00`);
+	$: isToday = selectedDayInput === todayInput;
 	let markingAll = false;
 	let unmarkingAll = false;
 	let notesByDog: Record<string, string> = {};
@@ -464,11 +474,28 @@
 		<div class="feeding-grid-board">
 			<div class="feeding-header">
 			<div class="feeding-title">
+				{#if !isToday}
+					<p class="feed-past-banner typewriter">Logging for {formatDate(selectedDay)} — not today.</p>
+				{/if}
 				<p class="feeding-summary whiteboard-hand erase-marker-blue">
 					{fedCount}/{mealTime === 'second' ? secondMealDogs.length : shelterDogs.length} dogs fed • {abnormalCount} abnormal stools logged
 				</p>
 			</div>
 			<div class="feeding-controls">
+				<label class="feed-day-picker">
+					<span class="feed-day-label">Day</span>
+					<input
+						class="feed-day-input"
+						type="date"
+						max={todayInput}
+						bind:value={selectedDayInput}
+					/>
+				</label>
+				{#if !isToday}
+					<button class="feed-today-btn" type="button" on:click={() => (selectedDayInput = todayInput)}>
+						Back to today
+					</button>
+				{/if}
 				<div class="meal-switch" role="group" aria-label="Meal time">
 					<button
 						class={`meal-switch-btn ${mealTime === 'am' ? 'meal-switch-btn-active' : ''}`}
@@ -1038,6 +1065,47 @@
 	.feeding-controls {
 		display: grid;
 		gap: 0.34rem;
+	}
+
+	.feed-day-picker {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.feed-day-label {
+		font-size: 11px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: #6b7d90;
+	}
+
+	.feed-day-input {
+		border: 1px solid #c8d3de;
+		border-radius: 999px;
+		padding: 6px 12px;
+		font: inherit;
+		font-size: 13px;
+		background: #fff;
+	}
+
+	.feed-today-btn {
+		border: 1px solid #c8d3de;
+		border-radius: 999px;
+		padding: 6px 14px;
+		background: #fff;
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.feed-past-banner {
+		margin: 0 0 4px;
+		display: inline-block;
+		border-radius: 999px;
+		padding: 2px 12px;
+		background: #fbf0dd;
+		color: #8a5d05;
+		font-size: 12px;
 	}
 
 	.meal-switch {

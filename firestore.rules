@@ -24,6 +24,16 @@ service cloud.firestore {
       return getUserRole() == 'staff';
     }
 
+    function isCoordinator() {
+      return getUserRole() == 'coordinator';
+    }
+
+    // Mirrors canEditDayTrips() in src/lib/utils/permissions.ts. Coordinators run the
+    // day trips board but are deliberately NOT general dog editors.
+    function canEditDayTrips() {
+      return isAdmin() || isCoordinator();
+    }
+
     function canEditPlaygroups() {
       return isAdmin() || isManager() || isStaff();
     }
@@ -40,104 +50,135 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function hasProfile() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Signing in is not the same as being let in: an admin approves each account
+    // from the Admin page before it can see or touch shelter data. Accounts created
+    // before this gate have no `approved` field, so only an explicit false is
+    // treated as pending — nobody who already had access loses it.
+    function isApproved() {
+      return hasProfile() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('approved', true) != false;
+    }
+
     function isValidRole(role) {
-      return role == 'admin' || role == 'manager' || role == 'staff' || role == 'volunteer';
+      return role == 'admin' || role == 'manager' || role == 'coordinator' ||
+        role == 'staff' || role == 'volunteer';
     }
 
     function isValidSelfProfilePayload(userId) {
       return isSelf(userId) &&
         request.resource.data.uid == request.auth.uid &&
         (request.auth.token.email == null || request.resource.data.email == request.auth.token.email) &&
-        request.resource.data.role == 'staff';
+        request.resource.data.role == 'volunteer' &&
+        request.resource.data.approved == false;
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isSelf(userId) || isApproved();
       allow create: if canManageUsers() || isValidSelfProfilePayload(userId);
       allow update: if (canManageUsers() &&
         !(resource.data.role == 'admin' && request.resource.data.role != 'admin')) ||
         (isSelf(userId) &&
           request.resource.data.uid == resource.data.uid &&
           request.resource.data.email == resource.data.email &&
-          request.resource.data.role == resource.data.role);
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.get('approved', true) == resource.data.get('approved', true));
       allow delete: if canManageUsers();
     }
 
     match /dogs/{dogId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if canEditDogs();
+      allow read: if isApproved();
+      // Coordinators run the day trips board, and its Import tab creates a placeholder
+      // record when a trip names a dog we don't have yet. Creating is additive — it can't
+      // corrupt an existing record — so it's safe to widen; editing and deleting existing
+      // dogs stay with admins and managers.
+      allow create: if canEditDogs() || canEditDayTrips();
+      allow update, delete: if canEditDogs();
       // Staff/volunteers log baths and yard time, which stamp denormalized
       // timer fields on the dog doc. Allow updates that touch only those.
-      allow update: if isAuthenticated() &&
+      allow update: if isApproved() &&
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['lastBathDate', 'lastBathBy', 'lastYardDate']);
 
+      // The day trips board writes day-trip state onto the dog doc. Coordinators own
+      // that board without being general dog editors, so scope their writes to those
+      // fields. updatedAt is included because updateDog() stamps it on every write.
+      allow update: if canEditDayTrips() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['isOutOnDayTrip', 'currentDayTripStartedAt', 'lastDayTripDate',
+                    'awaitingEvaluation', 'evaluationAutoCleared',
+                    'dayTripPuppyOverride', 'updatedAt']);
+
       match /behavioralNotes/{noteId} {
-        allow read, create: if isAuthenticated();
+        allow read, create: if isApproved();
         allow update, delete: if canEditDogs();
       }
 
       match /feedingLogs/{logId} {
-        allow read, create: if isAuthenticated();
+        allow read, create: if isApproved();
         allow update, delete: if canEditDogs();
       }
 
       match /bathLogs/{logId} {
-        allow read, create: if isAuthenticated();
+        allow read, create: if isApproved();
         allow update, delete: if canEditDogs();
       }
 
       match /yardLogs/{logId} {
-        allow read, create: if isAuthenticated();
+        allow read, create: if isApproved();
         allow update, delete: if canEditDogs();
       }
 
       match /stoolLogs/{logId} {
-        allow read, create: if isAuthenticated();
+        allow read, create: if isApproved();
         allow update, delete: if canEditDogs();
       }
 
       match /dayTripLogs/{logId} {
-        allow read, create: if isAuthenticated();
-        allow update, delete: if canEditDogs();
+        allow read, create: if isApproved();
+        allow update, delete: if canEditDogs() || canEditDayTrips();
       }
     }
 
     match /cleaningChecklists/{checklistId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow write: if canEditDogs();
     }
 
     match /cleaningCompletions/{completionId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isApproved();
     }
 
     // Shift handoff notes (cleaning page + dashboard; also written server-side
     // by the phone inbox pipeline).
     match /shiftHandoffs/{handoffId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isApproved();
     }
 
     // Shared event visitor counter (Events tab). Any signed-in user can tally.
     match /eventCounters/{counterId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isApproved();
     }
 
     // Finished events archived from the Events tab ("mark event over").
     // Editing or deleting history is manager/admin only.
     match /eventHistory/{eventId} {
-      allow read, create: if isAuthenticated();
+      allow read, create: if isApproved();
       allow update, delete: if canEditDogs();
     }
 
     match /playgroupSessions/{sessionId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create, update, delete: if canEditPlaygroups();
     }
 
     // Expected-dog placeholders on the kennels board (dogs not yet in ASM).
     match /kennelPlaceholders/{placeholderId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create, update, delete: if canEditDogs();
     }
 
@@ -149,24 +190,24 @@ service cloud.firestore {
     }
 
     match /volunteers/{volunteerId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
+      allow read: if isApproved();
+      allow create, update: if isApproved();
       allow delete: if canEditDogs();
     }
 
     // Supports collectionGroup('dayTripLogs') queries used by dashboard/day trips pages.
     match /{path=**}/dayTripLogs/{logId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
     }
 
     // Supports collectionGroup('feedingLogs') query used by dashboard to check today's feedings.
     match /{path=**}/feedingLogs/{logId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
     }
 
     // Supports collectionGroup('bathLogs') query used by bath history backfill.
     match /{path=**}/bathLogs/{logId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
     }
   }
 }

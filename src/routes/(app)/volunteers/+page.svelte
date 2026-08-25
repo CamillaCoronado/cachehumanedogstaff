@@ -130,8 +130,14 @@
 	}
 
 	async function changeStatus(id: string, status: VolunteerOrientationStatus) {
-		await updateVolunteerStatus(id, status);
-		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationStatus: status } : v);
+		try {
+			await updateVolunteerStatus(id, status);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to update status.');
+			return;
+		}
+		volunteers = volunteers.map((v) => v.id === id ? { ...v, orientationStatus: status, statusSetInApp: true } : v);
 	}
 
 	async function setIHVActive(id: string, active: boolean) {

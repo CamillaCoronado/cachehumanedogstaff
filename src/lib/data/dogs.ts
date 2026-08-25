@@ -73,6 +73,7 @@ interface StoredDog {
 	idealHome?: string;
 	energyLevel?: 'low' | 'medium' | 'high' | 'very_high' | 'unknown';
 	playStyles?: string[];
+	goHomeItems?: string[];
 	outdoorKennelAssignment: string;
 	insideKennelAssignment?: string;
 	microchipDate?: string | null;
@@ -407,6 +408,7 @@ function serializeDog(dog: Dog): StoredDog {
 		idealHome: dog.idealHome,
 		energyLevel: dog.energyLevel,
 		playStyles: dog.playStyles ?? [],
+		goHomeItems: (dog.goHomeItems ?? []).map((item) => item.trim()).filter(Boolean),
 		// Foster dogs can be housed/placed on both kennel maps (e.g. brought back during an
 		// outbreak), so their outdoor and inside assignments are kept.
 		outdoorKennelAssignment: normalizeKennelAssignment(dog.outdoorKennelAssignment),
@@ -598,6 +600,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		crateTrained: stored.crateTrained ?? 'unknown',
 		idealHome: stored.idealHome ?? '',
 		energyLevel: stored.energyLevel ?? 'unknown',
+		goHomeItems: stored.goHomeItems ?? [],
 		playStyles: (stored.playStyles ?? []).filter(
 			(s): s is DogPlayStyle => s === 'rough_and_rowdy' || s === 'gentle_and_dainty' || s === 'solo'
 		),
@@ -1396,6 +1399,7 @@ export async function recomputeLastDayTripDate(dogId: string): Promise<void> {
 		const d = toDate(log.endedAt) ?? toDate(log.startedAt);
 		if (d && (!latest || d > latest)) latest = d;
 	}
+	if (await mergeDogFields(dogId, { lastDayTripDate: toDateString(latest) })) return;
 	await updateDog(dogId, { lastDayTripDate: latest });
 }
 
@@ -1739,10 +1743,46 @@ export async function syncSheetColorsToDogs(
 	return changes;
 }
 
+/**
+ * Writes exactly the given keys onto the dog doc and nothing else.
+ *
+ * updateDog() re-serializes the whole document, so its write touches every key whose
+ * stored value differs from what serializeDog() currently produces — a stale
+ * handlingLevelBeforeHold that gets nulled, an untrimmed kennel string, a field added
+ * since that doc was last written. Firestore rules match on affectedKeys, and roles that
+ * are allowed only a short list of keys (coordinators on the day trips board) then pass
+ * for a clean document and get denied for a drifted one. Same button, same role, works
+ * for one dog and not the next.
+ *
+ * Any day-trip write a coordinator can reach must go through here, not updateDog().
+ * Returns false when Firestore isn't available, so callers can fall back to localStorage.
+ */
+async function mergeDogFields(dogId: string, fields: Record<string, unknown>): Promise<boolean> {
+	const ref = dogRef(dogId);
+	if (!ref) return false;
+	await setDoc(ref, fields, { merge: true });
+	return true;
+}
+
 export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<void> {
 	// Out-status is a pure live boolean — no timestamp is stored (currentDayTripStartedAt
 	// stays null) so the board has no lingering "out since" record.
+	if (await mergeDogFields(dogId, { isOutOnDayTrip: isOut, currentDayTripStartedAt: null })) return;
 	await updateDog(dogId, { isOutOnDayTrip: isOut, currentDayTripStartedAt: null });
+}
+
+/** Board toggle: mark a dog as awaiting evaluation, or clear it. */
+export async function setDogAwaitingEvaluation(dogId: string, awaiting: boolean): Promise<void> {
+	// evaluationAutoCleared marks it manually managed so the sheet-colour sync won't undo it.
+	const fields = { awaitingEvaluation: awaiting, evaluationAutoCleared: true };
+	if (await mergeDogFields(dogId, fields)) return;
+	await updateDog(dogId, fields);
+}
+
+/** Board toggle: let a specific under-6-month puppy out before the 30-day rule. */
+export async function setDogDayTripPuppyOverride(dogId: string, allowed: boolean): Promise<void> {
+	if (await mergeDogFields(dogId, { dayTripPuppyOverride: allowed })) return;
+	await updateDog(dogId, { dayTripPuppyOverride: allowed });
 }
 
 export async function clearDayTripLogs(dogId: string): Promise<void> {

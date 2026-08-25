@@ -26,11 +26,16 @@ export function initAuthListener() {
 			try {
 				let profile = await getUserProfile(user.uid);
 				if (!profile) {
+					// Least privilege on self sign-up: anyone with a Google account can reach
+					// this, so a new profile starts as 'volunteer' and an admin promotes it
+					// from the Admin page. Must stay in step with isValidSelfProfilePayload()
+					// in firestore.rules, which pins the role a self-created profile may claim.
 					await createUserProfile({
 						uid: user.uid,
 						email: user.email ?? '',
-						displayName: user.displayName ?? user.email ?? 'Staff Member',
-						role: 'staff'
+						displayName: user.displayName ?? user.email ?? 'New Member',
+						role: 'volunteer',
+						approved: false
 					});
 					profile = await getUserProfile(user.uid);
 				}

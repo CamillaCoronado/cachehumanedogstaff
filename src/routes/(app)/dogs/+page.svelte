@@ -4,7 +4,7 @@
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
-	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
+	import { resolveRole, canEditDogs, resolveDogHandlingLevel, canViewInternalDogInfo } from '$lib/utils/permissions';
 	import { updateDog, createDog, logBath, setDogTripStatus, returnDog, syncSheetColorsToDogs } from '$lib/data/dogs';
 	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs as refreshDogStore, patchDogInStore } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
@@ -17,7 +17,7 @@
 	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
-	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel, COMPATIBILITY_ASSUMED_NOTE } from '$lib/utils/labels';
 	import { syncVersion } from '$lib/stores/sync';
 	import {
 		tripPillClass,
@@ -87,6 +87,7 @@ const today = new Date();
 
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
+	$: canViewInternal = canViewInternalDogInfo(role);
 	$: shelterCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && !dog.inFoster && !dog.isIncoming).length;
 	$: fosterCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && dog.inFoster && !dog.isIncoming).length;
 	$: incomingCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && dog.isIncoming).length;
@@ -99,13 +100,32 @@ const today = new Date();
 		.filter((dog) => fosterOnly ? dog.inFoster : true)
 		.filter((dog) => incomingOnly ? dog.isIncoming : true)
 		.filter((dog) => hideIncoming ? !dog.isIncoming : true)
-		.filter((dog) => filterGoodWithDogs ? dog.goodWithDogs === 'yes' : true)
-		.filter((dog) => filterGoodWithCats ? dog.goodWithCats === 'yes' : true)
-		.filter((dog) => filterGoodWithKids ? dog.goodWithKids === 'yes' : true)
+		// A trait nobody has tested isn't a failed trait — it still matches the filter, but
+		// it lands in its own group below so nobody reads it as confirmed.
+		.filter((dog) => filterGoodWithDogs ? dog.goodWithDogs !== 'no' : true)
+		.filter((dog) => filterGoodWithCats ? dog.goodWithCats !== 'no' : true)
+		.filter((dog) => filterGoodWithKids ? dog.goodWithKids !== 'no' : true)
 		.filter((dog) => filterAdoptable ? getAdoptionAvailability(dog).available : true)
 		.filter((dog) => filterMedical ? isMedicalHold(dog) : true)
 		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
 		.filter((dog) => toSearchText(dog).includes(search.toLowerCase()));
+	$: compatFilterOn = filterGoodWithDogs || filterGoodWithCats || filterGoodWithKids;
+
+	function compatIsUntested(dog: Dog) {
+		return (
+			(filterGoodWithDogs && dog.goodWithDogs === 'unknown') ||
+			(filterGoodWithCats && dog.goodWithCats === 'unknown') ||
+			(filterGoodWithKids && dog.goodWithKids === 'unknown')
+		);
+	}
+
+	$: dogGroups = compatFilterOn
+		? [
+				{ label: null, dogs: sortedDogs.filter((dog) => !compatIsUntested(dog)) },
+				{ label: 'Not yet tested', dogs: sortedDogs.filter(compatIsUntested) }
+			].filter((group) => group.dogs.length > 0)
+		: [{ label: null, dogs: sortedDogs }];
+
 	$: sortedDogs = [...filteredDogs].sort((a, b) => {
 		const direction = sortDir === 'asc' ? 1 : -1;
 		if (sortKey === 'days') {
@@ -313,14 +333,26 @@ const today = new Date();
 	async function handleTripToggle(dog: Dog) {
 		const eligibility = getTripEligibility(dog);
 		if (dog.isOutOnDayTrip) {
-			await setDogTripStatus(dog.id, false);
+			try {
+				await setDogTripStatus(dog.id, false);
+			} catch (error) {
+				console.error(error);
+				toast.error(`Couldn't mark ${dog.name} as returned — the change wasn't saved.`);
+				return;
+			}
 			toast.success(`${dog.name} marked as returned.`);
 		} else {
 			if (!eligibility.eligible) {
 				toast.error(eligibility.reasons[0] ?? `${dog.name} is not eligible for day trips.`);
 				return;
 			}
-			await setDogTripStatus(dog.id, true);
+			try {
+				await setDogTripStatus(dog.id, true);
+			} catch (error) {
+				console.error(error);
+				toast.error(`Couldn't send ${dog.name} out — the change wasn't saved.`);
+				return;
+			}
 			toast.success(`${dog.name} marked as out on day trip.`);
 		}
 		await refreshDogs();
@@ -573,8 +605,16 @@ const today = new Date();
 			{:else if sortedDogs.length === 0}
 				<div class="dogs-state marker-line marker-muted">no dogs match filters</div>
 			{:else}
+				{#each dogGroups as group}
+				{#if group.label}
+					<div class="compat-group-head">
+						<p class="compat-group-title typewriter">{group.label}</p>
+						<span class="compat-group-count">{group.dogs.length}</span>
+						<p class="compat-group-note">Assumed friendly — no one has tested this yet.</p>
+					</div>
+				{/if}
 				<div class="dogs-card-grid">
-					{#each sortedDogs as dog}
+					{#each group.dogs as dog}
 						{@const tripEligibility = getTripEligibility(dog)}
 					{@const expandedPillType = expandedPill.get(dog.id) ?? null}
 						{@const bathDue = isBathDue(dog, today)}
@@ -609,7 +649,9 @@ const today = new Date();
 									<div class="dog-card-headline">
 										<a class="dog-name-link" href={`/dogs/${dog.id}`}>{dog.name}</a>
 										{#if dog.breed}<p class="dog-breed">{dog.breed}</p>{/if}
-										<p class="dog-kennel typewriter">kennel: {dog.outdoorKennelAssignment || 'unassigned'}</p>
+										{#if canViewInternal}
+											<p class="dog-kennel typewriter">kennel: {dog.outdoorKennelAssignment || 'unassigned'}</p>
+										{/if}
 									</div>
 									{#if dog.status !== 'active'}
 										<span class="days-tag days-tag-archived typewriter">Adopted</span>
@@ -617,6 +659,7 @@ const today = new Date();
 										<span class="days-tag typewriter">{daysSince(dog.intakeDate, today) ?? 0} days</span>
 									{/if}
 								</header>
+								{#if canViewInternal}
 								<div class="card-status-icons" role="group" aria-label="Dog status">
 									<button class={`card-status-pill ${handlingColorClass(effectiveHandlingLevel)} ${expandedPillType === 'handling' ? 'pill-active' : ''}`} on:click|stopPropagation={() => togglePill(dog.id, 'handling')} aria-pressed={expandedPillType === 'handling'} aria-label="Handling level">
 										<span class="card-pill-icon" aria-hidden="true">
@@ -666,6 +709,7 @@ const today = new Date();
 										{/if}
 									</p>
 								{/if}
+								{/if}
 
 								<div class="card-facts">
 									<p><span>Age</span><strong class="card-fact-value">{formatAge(dog.dateOfBirth, today)}</strong></p>
@@ -684,9 +728,11 @@ const today = new Date();
 											<p><span>Energy</span><strong class="card-fact-value">{energyLabel(dog.energyLevel)}</strong></p>
 											<p><span>Best Home</span><strong class="card-fact-value">{dog.idealHome || 'Not documented'}</strong></p>
 										</div>
+										<p class="compat-note">{COMPATIBILITY_ASSUMED_NOTE}</p>
 									</div>
 								</details>
 
+								{#if canViewInternal}
 								<details class="card-kennel-section">
 									<summary>
 										<span class="summary-label">Pending items <span class="dog-details-count">{cardPendingItems.length}</span></span>
@@ -755,19 +801,23 @@ const today = new Date();
 											return to shelter
 										</button>
 									{:else}
+										{@const tripBlocked = !dog.isOutOnDayTrip && !tripEligibility.eligible}
 										<button
-											class="action-btn"
+											class={`action-btn ${tripBlocked ? 'action-btn-blocked' : ''}`}
 											on:click={() => handleTripToggle(dog)}
-											disabled={!dog.isOutOnDayTrip && !tripEligibility.eligible}
+											aria-disabled={tripBlocked}
+											title={tripBlocked ? (tripEligibility.reasons[0] ?? 'Not eligible for day trips') : ''}
 										>
 											{dog.isOutOnDayTrip ? 'mark returned' : 'send out'}
 										</button>
 									{/if}
 								</div>
+								{/if}
 							</div>
 						</div>
 					{/each}
 				</div>
+				{/each}
 			{/if}
 		</section>
 	</div>
@@ -1730,9 +1780,54 @@ const today = new Date();
 		background: #dff0df;
 	}
 
+	.compat-group-head {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin: 22px 0 10px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid #e0e6ec;
+	}
+
+	.compat-group-title {
+		margin: 0;
+		font-size: 12px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: #6b7d90;
+	}
+
+	.compat-group-count {
+		border-radius: 999px;
+		background: #f1f4f8;
+		color: #43556a;
+		font-size: 11px;
+		padding: 1px 9px;
+	}
+
+	.compat-group-note {
+		margin: 0;
+		flex: 1 1 100%;
+		font-size: 11px;
+		color: #8194a6;
+	}
+
+	.compat-note {
+		margin-top: 6px;
+		font-size: 11px;
+		color: #6b7d90;
+	}
+
 	.action-btn:disabled {
 		opacity: 0.55;
 		cursor: not-allowed;
+	}
+
+	/* Ineligible reads as muted but stays clickable — clicking is how you find out why. */
+	.action-btn-blocked {
+		opacity: 0.62;
+		border-style: dashed;
 	}
 
 	.modal-actions {

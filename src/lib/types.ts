@@ -8,6 +8,11 @@ export interface UserProfile {
 	email: string;
 	displayName: string;
 	role: UserRole;
+	/**
+	 * Whether an admin has let this account in. Absent on accounts created before the
+	 * approval gate — treat undefined as approved, matching isApproved() in firestore.rules.
+	 */
+	approved?: boolean;
 	// E.164 (e.g. +14355550134) — the phone-inbox allowlist (docs/phone-inbox-plan.md)
 	phoneNumber?: string | null;
 	createdAt: DateValue;
@@ -98,6 +103,11 @@ export interface Dog {
 	/** Observed play styles (a dog can have more than one, e.g. rough with matched
 	 *  dogs and gentle with small ones). Empty/unset = needs a play assessment. */
 	playStyles?: DogPlayStyle[];
+	/**
+	 * Things that came in with the dog and have to leave with it — bed, toy, its own food,
+	 * leftover meds. Kept as a plain list so the front desk can check them off at adoption.
+	 */
+	goHomeItems?: string[];
 	outdoorKennelAssignment: string;
 	/** Inside kennel assignment — free-text label parsed the same way as
 	 *  outdoorKennelAssignment, but for the indoor sick/healthy-zone map. */
@@ -261,6 +271,12 @@ export interface Volunteer {
 	photosOk: boolean;
 	leashCommitment: boolean;
 	orientationStatus: VolunteerOrientationStatus;
+	/**
+	 * Set once someone changes the status from inside the app (e.g. marking a no-show at
+	 * the front desk). The sheet sync then stops overwriting orientationStatus for this
+	 * volunteer, so a manual call isn't silently undone on the next run.
+	 */
+	statusSetInApp?: boolean;
 	isEstablished: boolean;
 	isNonActive?: boolean;
 	trainingSteps?: { point: boolean; pointPending: boolean; trained: boolean; computer: boolean; moved: boolean };

@@ -28,6 +28,7 @@ export async function createUserProfile(params: {
 	email: string;
 	displayName: string;
 	role: UserRole;
+	approved: boolean;
 }) {
 	if (!db) throw new Error('Firestore is not available.');
 	const ref = doc(db, 'users', params.uid);
@@ -36,9 +37,21 @@ export async function createUserProfile(params: {
 		email: params.email,
 		displayName: params.displayName,
 		role: params.role,
+		approved: params.approved,
 		createdAt: serverTimestamp(),
 		updatedAt: serverTimestamp()
 	});
+}
+
+/** Let an account in, or put it back to pending. Admin only — enforced by the rules. */
+export async function setUserApproved(uid: string, approved: boolean) {
+	if (!db) throw new Error('Firestore is not available.');
+	await updateDoc(doc(db, 'users', uid), { approved, updatedAt: serverTimestamp() });
+}
+
+/** Accounts predating the approval gate have no field — undefined means approved. */
+export function isProfileApproved(profile: UserProfile | null | undefined): boolean {
+	return Boolean(profile) && profile!.approved !== false;
 }
 
 export async function updateUserProfile(uid: string, updates: Partial<UserProfile>) {

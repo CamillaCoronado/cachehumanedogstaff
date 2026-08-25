@@ -1,6 +1,6 @@
 <script lang="ts">
 	import toast from 'svelte-french-toast';
-	import { listUserProfiles, updateUserProfile } from '$lib/data/users';
+	import { listUserProfiles, updateUserProfile, setUserApproved, isProfileApproved } from '$lib/data/users';
 	import { formatPhoneNumber, normalizePhoneNumber } from '$lib/utils/phone';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
@@ -239,6 +239,27 @@
 			usersError = error instanceof Error ? error.message : 'Unable to load users.';
 		} finally {
 			usersLoading = false;
+		}
+	}
+
+	async function toggleApproval(user: EditableUser) {
+		const next = !isProfileApproved(user);
+		if (user.uid === currentUserId && !next) {
+			toast.error('You can\'t set your own account back to pending.');
+			return;
+		}
+		savingUserId = user.uid;
+		try {
+			await setUserApproved(user.uid, next);
+			users = users.map((entry) =>
+				entry.uid === user.uid ? { ...entry, approved: next, updatedAt: new Date() } : entry
+			);
+			toast.success(next ? `${user.displayName || user.email} approved.` : `${user.displayName || user.email} set back to pending.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to change approval.');
+		} finally {
+			savingUserId = null;
 		}
 	}
 
@@ -534,11 +555,22 @@
 										{#if user.uid === currentUserId}
 											<span class="current-user-badge">Current account</span>
 										{/if}
+										{#if !isProfileApproved(user)}
+											<span class="pending-badge">Awaiting approval</span>
+										{/if}
 									</div>
 								</div>
 
 								<div class="user-actions">
 									<span class="status-meta">Updated {formatDateTime(user.updatedAt)}</span>
+									<button
+										class={`action-btn ${isProfileApproved(user) ? '' : 'action-btn-approve'}`}
+										type="button"
+										on:click={() => toggleApproval(user)}
+										disabled={savingUserId === user.uid}
+									>
+										{isProfileApproved(user) ? 'Set to pending' : 'Approve'}
+									</button>
 									<button
 										class="action-btn"
 										type="button"
@@ -856,6 +888,22 @@
 		gap: 0.28rem;
 		min-width: 0;
 		flex: 1 1 18rem;
+	}
+
+	.pending-badge {
+		display: inline-block;
+		border-radius: 999px;
+		padding: 1px 10px;
+		background: #fbf0dd;
+		color: #8a5d05;
+		font-size: 11px;
+		letter-spacing: 0.04em;
+	}
+
+	.action-btn-approve {
+		border-color: #b9d9b3;
+		background: #edf7ed;
+		color: #24601f;
 	}
 
 	.role-chip-admin {

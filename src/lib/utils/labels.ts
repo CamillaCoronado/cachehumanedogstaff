@@ -17,10 +17,20 @@ export function energyLabel(value: EnergyLevel | null | undefined): string {
 	return 'Unknown';
 }
 
+/** Legend for the marker compatibilityLabel() puts on an untested trait. */
+export const COMPATIBILITY_ASSUMED_NOTE =
+	'* Not yet tested — assumed friendly until we learn otherwise.';
+
+/**
+ * An untested trait reads as "Yes*", not "Unknown" or "No". A dog nobody has tried with
+ * cats isn't a dog that failed with cats, and showing it as a negative costs adoptions.
+ * The marker keeps it honest — display only; the stored value stays 'unknown', which is
+ * what playgroup eligibility and every other rule still branch on.
+ */
 export function compatibilityLabel(value: Compatibility | null | undefined): string {
 	if (value === 'yes') return 'Yes';
 	if (value === 'no') return 'No';
-	return 'Unknown';
+	return 'Yes*';
 }
 
 export function pottyLabel(value: PottyTrainedStatus | null | undefined): string {

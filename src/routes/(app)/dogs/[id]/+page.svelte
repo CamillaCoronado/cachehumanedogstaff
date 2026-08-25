@@ -6,7 +6,7 @@
 	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
-	import { resolveRole, canEditDogs, resolveDogHandlingLevel } from '$lib/utils/permissions';
+	import { resolveRole, canEditDogs, resolveDogHandlingLevel, canViewInternalDogInfo } from '$lib/utils/permissions';
 	import {
 		getDog,
 		updateDog,
@@ -52,7 +52,7 @@
 		document.body.appendChild(node);
 		return { destroy() { node.remove(); } };
 	}
-	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel, COMPATIBILITY_ASSUMED_NOTE } from '$lib/utils/labels';
 	import { PLAY_STYLE_LABELS } from '$lib/utils/playgroupRecommendations';
 	import { syncVersion } from '$lib/stores/sync';
 
@@ -100,6 +100,7 @@
 	$: if ($syncVersion > 0 && dogId) void getDog(dogId).then((d) => { if (d) dog = d; });
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
+	$: canViewInternal = canViewInternalDogInfo(role);
 	$: bathIsEligible = dog ? bathEligible(dog.surgeryDate, today) : true;
 	$: feedToday = dog ? !isSurgeryToday(dog.surgeryDate, today) : true;
 	$: treatmentSummary = (dog?.treatments ?? []).map((t) => {
@@ -458,17 +459,66 @@
 		}
 	}
 
+	let newGoHomeItem = '';
+	let savingGoHome = false;
+
+	async function addGoHomeItem() {
+		const item = newGoHomeItem.trim();
+		if (!dog || !item || savingGoHome) return;
+		if ((dog.goHomeItems ?? []).some((existing) => existing.toLowerCase() === item.toLowerCase())) {
+			toast.error(`"${item}" is already on the list.`);
+			return;
+		}
+		savingGoHome = true;
+		try {
+			await updateDog(dog.id, { goHomeItems: [...(dog.goHomeItems ?? []), item] });
+			newGoHomeItem = '';
+			await loadAll();
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to add that item.');
+		} finally {
+			savingGoHome = false;
+		}
+	}
+
+	async function removeGoHomeItem(item: string) {
+		if (!dog || savingGoHome) return;
+		savingGoHome = true;
+		try {
+			await updateDog(dog.id, { goHomeItems: (dog.goHomeItems ?? []).filter((entry) => entry !== item) });
+			await loadAll();
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to remove that item.');
+		} finally {
+			savingGoHome = false;
+		}
+	}
+
 	async function handleTripToggle() {
 		if (!dog) return;
 		if (dog.isOutOnDayTrip) {
-			await setDogTripStatus(dog.id, false);
+			try {
+				await setDogTripStatus(dog.id, false);
+			} catch (error) {
+				console.error(error);
+				toast.error("Couldn't mark this dog as returned — the change wasn't saved.");
+				return;
+			}
 			toast.success('Dog marked as returned.');
 		} else {
 			if (!dayTripEligibility.eligible) {
 				toast.error(dayTripEligibility.reasons[0] ?? 'Dog is not eligible for day trips.');
 				return;
 			}
-			await setDogTripStatus(dog.id, true);
+			try {
+				await setDogTripStatus(dog.id, true);
+			} catch (error) {
+				console.error(error);
+				toast.error("Couldn't send this dog out — the change wasn't saved.");
+				return;
+			}
 			toast.success('Dog marked as out on day trip.');
 		}
 		await loadAll();
@@ -621,7 +671,7 @@
 					<div class="kennel-clip" aria-hidden="true"></div>
 					<div class="kennel-sheet-inner">
 						<p class="kennel-name kennel-name-top">{dog.name}</p>
-						{#if dog.warningNotes}
+						{#if dog.warningNotes && canViewInternal}
 							<div class="dog-warning-banner" role="alert">
 								<span class="dog-warning-icon" aria-hidden="true">⚠</span>
 								<p>{dog.warningNotes}</p>
@@ -736,6 +786,7 @@
 									</div>
 								</details>
 
+								{#if canViewInternal}
 								<details class="kennel-section">
 									<summary>Intake & Shelter</summary>
 									<div class="kennel-section-body kennel-facts">
@@ -782,24 +833,28 @@
 									</div>
 								</details>
 
+								{/if}
+
 								<details class="kennel-section">
 									<summary>Behavior & Home Fit</summary>
 									<div class="kennel-section-body kennel-facts">
 										<p><span>Description:</span> <strong class="detail-note">{dog.description || 'No additional profile notes logged yet.'}</strong></p>
-										{#if dog.hiddenComments}
-											{@const visibleComments = dog.hiddenComments.replace(/\s*Day Trip Notes\s+\d{1,2}\/\d{1,2}\s*:[\s\S]*/i, '').trim()}
-											{#if visibleComments}
-												<p><span>Hidden Comments:</span> <strong class="detail-note">{visibleComments}</strong></p>
+										{#if canViewInternal}
+											{#if dog.hiddenComments}
+												{@const visibleComments = dog.hiddenComments.replace(/\s*Day Trip Notes\s+\d{1,2}\/\d{1,2}\s*:[\s\S]*/i, '').trim()}
+												{#if visibleComments}
+													<p><span>Hidden Comments:</span> <strong class="detail-note">{visibleComments}</strong></p>
+												{/if}
 											{/if}
-										{/if}
-										{#if dog.entryReason}
-											<p><span>Reason for Entry:</span> <strong class="detail-note">{dog.entryReason}</strong></p>
-										{/if}
-										{#if dog.holdNotes}
-											<p><span>Hold Notes:</span> <strong class="detail-note">{dog.holdNotes}</strong></p>
-										{/if}
-										{#if dog.healthProblems}
-											<p><span>Health Problems:</span> <strong class="detail-note">{dog.healthProblems}</strong></p>
+											{#if dog.entryReason}
+												<p><span>Reason for Entry:</span> <strong class="detail-note">{dog.entryReason}</strong></p>
+											{/if}
+											{#if dog.holdNotes}
+												<p><span>Hold Notes:</span> <strong class="detail-note">{dog.holdNotes}</strong></p>
+											{/if}
+											{#if dog.healthProblems}
+												<p><span>Health Problems:</span> <strong class="detail-note">{dog.healthProblems}</strong></p>
+											{/if}
 										{/if}
 										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
 										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
@@ -816,10 +871,11 @@
 										{#if dog.playgroupReadyDate}
 											<p><span>Playgroup Ready From:</span> <strong class="detail-value">{formatDate(dog.playgroupReadyDate)}</strong></p>
 										{/if}
-										{#if dog.evaluationNotes}
+										{#if dog.evaluationNotes && canViewInternal}
 											<p><span>Evaluation Notes:</span> <strong class="detail-note">{dog.evaluationNotes}</strong></p>
 										{/if}
 										<p><span>Best Home Fit:</span> <strong class="detail-value">{dog.idealHome || 'Not yet documented'}</strong></p>
+										<p class="compat-note">{COMPATIBILITY_ASSUMED_NOTE}</p>
 									</div>
 								</details>
 							</div>
@@ -828,6 +884,7 @@
 				</div>
 				</article>
 
+					{#if canViewInternal}
 					<aside class="kennel-whiteboard">
 					{#if whiteboardNote}
 						<p class={`whiteboard-note ${whiteboardNoteToneClass}`}>{whiteboardNote}</p>
@@ -943,14 +1000,18 @@
 						Log Bath
 					</button>
 					<button
-						class="w-full rounded-full border border-ink-200 px-4 py-2 text-xs"
+						class={`w-full rounded-full border border-ink-200 px-4 py-2 text-xs ${!dog.isOutOnDayTrip && !dayTripEligibility.eligible ? 'trip-btn-blocked' : ''}`}
 						on:click={handleTripToggle}
-						disabled={!dog.isOutOnDayTrip && !dayTripEligibility.eligible}
+						aria-disabled={!dog.isOutOnDayTrip && !dayTripEligibility.eligible}
+						title={!dog.isOutOnDayTrip && !dayTripEligibility.eligible
+							? (dayTripEligibility.reasons[0] ?? 'Not eligible for day trips')
+							: ''}
 					>
 						{dog.isOutOnDayTrip ? 'Mark Returned' : 'Send Out on Day Trip'}
 					</button>
 				</div>
 				</aside>
+					{/if}
 			</div>
 		{/if}
 
@@ -962,6 +1023,51 @@
 				</div>
 			</div>
 		{/if}
+
+		{#if canViewInternal}
+		<div class="go-home-card">
+			<div class="go-home-head">
+				<h3 class="go-home-title">Goes home with {dog.name}</h3>
+				<span class="go-home-count">{(dog.goHomeItems ?? []).length}</span>
+			</div>
+			<p class="go-home-hint">Bed, toy, their own food, leftover meds — anything that has to leave with them.</p>
+			{#if (dog.goHomeItems ?? []).length === 0}
+				<p class="go-home-empty">Nothing listed yet.</p>
+			{:else}
+				<ul class="go-home-list">
+					{#each dog.goHomeItems ?? [] as item}
+						<li class="go-home-item">
+							<span>{item}</span>
+							{#if canEdit}
+								<button
+									class="go-home-remove"
+									type="button"
+									on:click={() => removeGoHomeItem(item)}
+									disabled={savingGoHome}
+									aria-label={`Remove ${item}`}
+								>
+									×
+								</button>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if canEdit}
+				<form class="go-home-add" on:submit|preventDefault={addGoHomeItem}>
+					<input
+						class="go-home-input"
+						type="text"
+						placeholder="Add an item…"
+						bind:value={newGoHomeItem}
+						disabled={savingGoHome}
+					/>
+					<button class="go-home-btn" type="submit" disabled={savingGoHome || !newGoHomeItem.trim()}>
+						Add
+					</button>
+				</form>
+			{/if}
+		</div>
 
 		<div class="grid gap-4 lg:grid-cols-2">
 			<div class="rounded-3xl bg-white p-6 shadow-card">
@@ -1188,6 +1294,8 @@
 				</div>
 			</div>
 		</div>
+
+		{/if}
 
 		{#if canEdit}
 			<div class="flex flex-wrap gap-3">
@@ -1978,6 +2086,119 @@
 	.whiteboard-actions {
 		display: grid;
 		gap: 0.36rem;
+	}
+
+	.go-home-card {
+		border-radius: 24px;
+		background: #fff;
+		padding: 24px;
+		box-shadow: 0 1px 2px rgba(22, 32, 43, 0.06), 0 8px 20px -12px rgba(22, 32, 43, 0.18);
+		margin-bottom: 16px;
+	}
+
+	.go-home-head {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.go-home-title {
+		margin: 0;
+		font-size: 13px;
+		font-weight: 600;
+		letter-spacing: 0.2em;
+		text-transform: uppercase;
+		color: #6b7d90;
+	}
+
+	.go-home-count {
+		border-radius: 999px;
+		background: #e9f2fb;
+		color: #2f435c;
+		font-size: 11px;
+		padding: 1px 9px;
+	}
+
+	.go-home-hint {
+		margin: 6px 0 14px;
+		font-size: 12px;
+		color: #8194a6;
+	}
+
+	.go-home-empty {
+		margin: 0;
+		font-size: 14px;
+		color: #6b7d90;
+	}
+
+	.go-home-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.go-home-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		border: 1px solid #d9e0e8;
+		border-radius: 999px;
+		padding: 5px 6px 5px 14px;
+		font-size: 14px;
+	}
+
+	.go-home-remove {
+		border: none;
+		background: none;
+		cursor: pointer;
+		font-size: 16px;
+		line-height: 1;
+		color: #8194a6;
+		padding: 0 6px;
+	}
+
+	.go-home-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	.go-home-add {
+		display: flex;
+		gap: 8px;
+		margin-top: 16px;
+	}
+
+	.go-home-input {
+		flex: 1 1 auto;
+		border: 1px solid #d9e0e8;
+		border-radius: 999px;
+		padding: 8px 16px;
+		font: inherit;
+		font-size: 14px;
+	}
+
+	.go-home-btn {
+		border: 1px solid #c8d3de;
+		border-radius: 999px;
+		background: #e9f2fb;
+		color: #2f435c;
+		padding: 8px 20px;
+		font-size: 13px;
+		cursor: pointer;
+	}
+
+	.go-home-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+	/* Ineligible reads as muted but stays clickable — clicking is how you find out why. */
+	.trip-btn-blocked {
+		opacity: 0.62;
+		border-style: dashed;
+	}
+
+	.compat-note {
+		margin-top: 6px;
+		font-size: 11px;
+		color: #6b7d90;
 	}
 
 	.kennel-edit-sheet {

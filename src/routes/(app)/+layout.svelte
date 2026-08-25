@@ -7,10 +7,11 @@
 
 	injectAnalytics({ mode: dev ? 'development' : 'production' });
 	import { authReady, authUser, authProfile, initAuthListener } from '$lib/stores/auth';
+	import { isProfileApproved } from '$lib/data/users';
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
-	import { canAccessVolunteers, canAccessDayTrips, canEditDogs } from '$lib/utils/permissions';
+	import { canAccessVolunteers, canAccessDayTrips, canEditDogs, canViewInternalDogInfo } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { syncVersion } from '$lib/stores/sync';
 	import { readJson, writeJson } from '$lib/utils/storage';
@@ -35,9 +36,10 @@
 			| 'admin';
 	};
 
+	const dogsTab: TabItem = { href: '/dogs', label: 'Dogs', colorClass: 'tab-accent', icon: 'dogs' };
 	const baseTabs: TabItem[] = [
 		{ href: '/', label: 'Dashboard', colorClass: 'tab-blue', icon: 'dashboard' },
-		{ href: '/dogs', label: 'Dogs', colorClass: 'tab-accent', icon: 'dogs' },
+		dogsTab,
 		{ href: '/kennels', label: 'Kennels', colorClass: 'tab-green', icon: 'kennels' },
 		{ href: '/feeding', label: 'Feeding', colorClass: 'tab-blue', icon: 'feeding' },
 		{ href: '/cleaning', label: 'Cleaning', colorClass: 'tab-green', icon: 'cleaning' }
@@ -129,6 +131,12 @@
 		}
 	});
 
+	// Hiding the tab only hides the link; a typed or bookmarked URL still lands.
+	$: if ($authReady && $authProfile && !canViewInternalDogInfo($authProfile.role)
+		&& currentPath !== '/dogs' && !currentPath.startsWith('/dogs/')) {
+		goto('/dogs');
+	}
+
 	$: if ($authReady && !$authUser) {
 		goto('/login');
 	}
@@ -208,19 +216,26 @@
 
 	$: currentPath = $page.url.pathname;
 	$: isAdmin = $authProfile?.role === 'admin';
+	// A profile that hasn't loaded yet isn't "pending" — only an explicit false is.
+	$: awaitingApproval = Boolean($authProfile) && !isProfileApproved($authProfile);
 
 	$: canViewVolunteers = canAccessVolunteers($authProfile?.role);
 	$: canViewDayTrips = canAccessDayTrips($authProfile?.role);
-	$: tabs = [
-		...baseTabs,
-		playgroupsTab,
-		medicalTab,
-		...(canViewDayTrips ? [dayTripsTab] : []),
-		eventsTab,
-		// volunteers tab hidden until ready
-		// ...(canViewVolunteers ? [volunteersTab] : []),
-		...(isAdmin ? [adminTab] : [])
-	];
+	$: canViewInternal = canViewInternalDogInfo($authProfile?.role);
+	// Volunteers get the dog directory only — the same ground a member of the public
+	// covers on the adoption site. Every other board is internal.
+	$: tabs = canViewInternal
+		? [
+				...baseTabs,
+				playgroupsTab,
+				medicalTab,
+				...(canViewDayTrips ? [dayTripsTab] : []),
+				eventsTab,
+				// volunteers tab hidden until ready
+				// ...(canViewVolunteers ? [volunteersTab] : []),
+				...(isAdmin ? [adminTab] : [])
+			]
+		: [dogsTab];
 	$: {
 		const i = tabs.findIndex(
 			(tab) => currentPath === tab.href || (tab.href !== '/' && currentPath.startsWith(`${tab.href}/`))
@@ -275,6 +290,22 @@
 						Preparing your workspace...
 					{/if}
 				</p>
+			</div>
+		</div>
+	</div>
+{:else if awaitingApproval}
+	<div class="shelter-shell">
+		<div class="shell-wrap loading-wrap">
+			<div class="loading-note">
+				<p class="loading-note-tag typewriter">Cache Humane Society</p>
+				<p class="loading-note-text whiteboard-hand erase-marker-blue">
+					You're signed in as {$authUser?.email ?? 'this account'}. An admin needs to
+					approve you before you can see shelter records — ask Elizabeth to add you
+					from the Admin page, then reload.
+				</p>
+				<button class="pending-signout typewriter" on:click={handleLogout} disabled={loggingOut}>
+					{loggingOut ? 'Signing out...' : 'Sign out'}
+				</button>
 			</div>
 		</div>
 	</div>
@@ -933,6 +964,20 @@
 		color: var(--layout-ink);
 		text-shadow: none;
 	}
+
+	.pending-signout {
+		margin-top: 18px;
+		border: 1px solid #c8d3de;
+		background: #fff;
+		border-radius: 999px;
+		padding: 8px 20px;
+		font-size: 12px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+
+	.pending-signout:disabled { opacity: 0.55; cursor: not-allowed; }
 
 	.lead-role {
 		margin: 0;

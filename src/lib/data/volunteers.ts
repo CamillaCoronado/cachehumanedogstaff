@@ -49,10 +49,24 @@ export async function listVolunteers(): Promise<Volunteer[]> {
 	return snap.docs.map((d) => d.data() as Volunteer);
 }
 
+/**
+ * Ids whose orientationStatus was last set from inside the app. The sheet is the source
+ * of truth for everything else, but it has no idea who actually turned up today — that
+ * gets recorded at the front desk, and a sync must not overwrite it.
+ */
+async function appManagedStatusIds(): Promise<Set<string>> {
+	if (!db) return new Set();
+	const snap = await getDocs(collection(db, COLLECTION));
+	return new Set(
+		snap.docs.filter((d) => (d.data() as Volunteer).statusSetInApp === true).map((d) => d.id)
+	);
+}
+
 export async function syncVolunteers(rows: VolunteerSheetRow[]): Promise<number> {
 	if (!db) return 0;
 	const now = new Date();
 	let count = 0;
+	const appManaged = await appManagedStatusIds();
 
 	const validRows: VolunteerSheetRow[] = [];
 	const seenIds = new Map<string, VolunteerSheetRow>();
@@ -135,6 +149,8 @@ export async function syncVolunteers(rows: VolunteerSheetRow[]): Promise<number>
 			};
 			// Only sync orientationDate from sheet when it's present — preserve manually-set dates otherwise
 			if (row.orientationDate) volunteer.orientationDate = row.orientationDate;
+			// Same guard for status: once the front desk has set it, the sheet stops winning.
+			if (appManaged.has(id)) delete (volunteer as Partial<Volunteer>).orientationStatus;
 			// merge:true preserves internalNotes, orientationDate (when not overridden), and createdAt
 			batch.set(ref, volunteer, { merge: true });
 			count++;
@@ -149,6 +165,8 @@ export async function updateVolunteerStatus(id: string, status: import('$lib/typ
 	if (!db) return;
 	await updateDoc(doc(db, COLLECTION, id), {
 		orientationStatus: status,
+		// Claim this volunteer's status for the app so the next sheet sync leaves it alone.
+		statusSetInApp: true,
 		updatedAt: new Date()
 	});
 }
@@ -183,6 +201,7 @@ export async function syncIHVVolunteers(rows: IHVSheetRow[]): Promise<number> {
 	if (!db) return 0;
 	const now = new Date();
 	let count = 0;
+	const appManaged = await appManagedStatusIds();
 
 	for (let i = 0; i < rows.length; i += 500) {
 		const batch = writeBatch(db);
@@ -230,6 +249,7 @@ export async function syncIHVVolunteers(rows: IHVSheetRow[]): Promise<number> {
 			// Only keep orientation date if upcoming — explicitly null out past/stale dates
 			(record as Record<string, unknown>).orientationDate =
 				(!row.isEstablished && isUpcomingDate) ? row.orientationDate : null;
+			if (appManaged.has(id)) delete record.orientationStatus;
 			batch.set(ref, record, { merge: true });
 			count++;
 		}
