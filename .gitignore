@@ -21,3 +21,6 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Slack history pulled by scripts/slack-fetch.mjs — shelter chat, not ours to commit
+slack-export/
