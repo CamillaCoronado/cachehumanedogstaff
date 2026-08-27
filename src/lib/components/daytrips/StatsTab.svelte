@@ -4,6 +4,13 @@
 	import type { DayTripLog, Dog } from '$lib/types';
 	import { toDate } from '$lib/utils/dates';
 	import { durationHours, formatDuration } from '$lib/utils/daytrips';
+	import {
+		adoptabilityLabel,
+		analyzeTransferPartners,
+		LONG_STAY_DAYS,
+		MIN_SAMPLE_FOR_RATING,
+		type PartnerAnalysis
+	} from '$lib/utils/transferPartners';
 
 	Chart.register(BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, BarController, LineController);
 
@@ -12,6 +19,123 @@
 	export let activeDogs: Dog[] = [];
 
 	const now = new Date();
+
+	// ── Transfer partner adoptability ────────────────────────────────────────
+	// Run on demand rather than on mount: it walks every dog the shelter has ever
+	// had, and most visits to this tab are about day trips, not intake sources.
+	let partnerAnalysis: PartnerAnalysis | null = null;
+	let partnerError = '';
+
+	let partnerCanvas: HTMLCanvasElement | null = null;
+	let partnerChart: Chart | null = null;
+
+	function runPartnerAnalysis() {
+		partnerError = '';
+		try {
+			partnerAnalysis = analyzeTransferPartners(dogs, new Date());
+		} catch (error) {
+			console.error(error);
+			partnerAnalysis = null;
+			partnerError = 'Could not run the analysis.';
+			return;
+		}
+		// Canvas only exists once the results block renders.
+		queueMicrotask(() => drawPartnerChart());
+	}
+
+	// Bars carry ONE thing: how long these dogs take to go home. The rating is not
+	// encoded in colour — red/amber/green is unreadable for the commonest kinds of
+	// colour blindness (amber and green sit ~1 ΔE apart under protanopia), so the
+	// rating travels as text on the axis and in the table instead. The two blues are
+	// one hue at two lightnesses, which stays legible under every CVD type.
+	const BAR_RATED = '#016aa5';
+	const BAR_UNRATED = '#a8c9dd';
+
+	/**
+	 * Dashed reference line at the shelter's own median, drawn under the bars. The value
+	 * is closed over rather than passed through plugin options — Chart.js's option types
+	 * only know its built-in plugins, so a custom key there doesn't type-check.
+	 */
+	const medianLinePlugin = (value: number | null) => ({
+		id: 'medianLine',
+		beforeDatasetsDraw(chart: Chart) {
+			if (value == null) return;
+			const { ctx, chartArea, scales } = chart;
+			const x = scales.x.getPixelForValue(value);
+			if (!Number.isFinite(x)) return;
+			ctx.save();
+			ctx.strokeStyle = '#8194a6';
+			ctx.setLineDash([4, 4]);
+			ctx.lineWidth = 1;
+			ctx.beginPath();
+			ctx.moveTo(x, chartArea.top);
+			ctx.lineTo(x, chartArea.bottom);
+			ctx.stroke();
+			ctx.restore();
+		}
+	});
+
+	function drawPartnerChart() {
+		if (!partnerCanvas || !partnerAnalysis) return;
+		partnerChart?.destroy();
+
+		const plotted = partnerAnalysis.rows.filter((r) => r.medianDaysToAdoption !== null);
+		if (plotted.length === 0) return;
+
+		partnerChart = new Chart(partnerCanvas, {
+			type: 'bar',
+			plugins: [medianLinePlugin(partnerAnalysis.shelterMedianDaysToAdoption)],
+			data: {
+				labels: plotted.map((r) => r.partner),
+				datasets: [
+					{
+						label: 'Median days to adoption',
+						data: plotted.map((r) => r.medianDaysToAdoption as number),
+						backgroundColor: plotted.map((r) => (r.rating ? BAR_RATED : BAR_UNRATED)),
+						borderRadius: 4,
+						borderSkipped: false,
+						barPercentage: 0.6,
+						categoryPercentage: 0.8
+					}
+				]
+			},
+			options: {
+				indexAxis: 'y',
+				responsive: true,
+				maintainAspectRatio: false,
+				layout: { padding: { right: 28 } },
+				plugins: {
+					legend: { display: false },
+					tooltip: {
+						callbacks: {
+							label: (item) => {
+								const row = plotted[item.dataIndex];
+								return [
+									`${row.medianDaysToAdoption} days median`,
+									`${row.adopted} adopted of ${row.departed} that left`,
+									adoptabilityLabel(row.rating)
+								];
+							}
+						}
+					}
+				},
+				scales: {
+					x: {
+						beginAtZero: true,
+						title: { display: true, text: 'Median days to adoption', color: '#8194a6', font: { size: 11 } },
+						grid: { color: '#eef2f6' },
+						ticks: { color: '#8194a6', font: { size: 11 } }
+					},
+					y: {
+						grid: { display: false },
+						ticks: { color: '#43556a', font: { size: 12 } }
+					}
+				}
+			}
+		});
+	}
+
+	onDestroy(() => partnerChart?.destroy());
 
 	// ── Sheet stats state (2024/2025/2026 Day Trip Data Chart tabs) ──
 	interface MonthStat { name: string; hours: number; trips: number; }
@@ -531,7 +655,215 @@
 				<p class="dt-panel-empty">No stats found for {statsYearFilter}.</p>
 			{/if}
 
+			<div class="dt-panel tp-panel">
+				<div class="dt-stats-panel-head tp-head">
+					<div>
+						<p class="dt-panel-title">Adoptability by intake source</p>
+						<p class="dt-panel-sub">
+							How dogs from each partner actually did once they got here — built from every
+							dog on record, not just the ones still in the building.
+						</p>
+					</div>
+					<button class="tp-run-btn" type="button" on:click={runPartnerAnalysis}>
+						{partnerAnalysis ? 'Re-run' : 'Run analysis'}
+					</button>
+				</div>
+
+				{#if partnerError}
+					<p class="dt-import-error">{partnerError}</p>
+				{:else if partnerAnalysis}
+					<p class="tp-basis">
+						{partnerAnalysis.totalDogs} dogs on record · {partnerAnalysis.departedDogs} adopted
+						with a usable date{#if partnerAnalysis.shelterMedianDaysToAdoption !== null} · shelter median
+						{partnerAnalysis.shelterMedianDaysToAdoption} days to adoption{/if}
+					</p>
+
+					{#if partnerAnalysis.rows.some((r) => r.medianDaysToAdoption !== null)}
+						<div class="tp-chart-wrap">
+							<canvas bind:this={partnerCanvas}></canvas>
+						</div>
+						<p class="tp-chart-key">
+							Shorter is better. Dashed line is the shelter's own median
+							({partnerAnalysis.shelterMedianDaysToAdoption} days).
+							<span class="tp-swatch tp-swatch-rated"></span> rated
+							<span class="tp-swatch tp-swatch-unrated"></span> too few dogs to rate
+						</p>
+					{:else}
+						<p class="dt-panel-empty">No adoptions with usable dates yet — nothing to chart.</p>
+					{/if}
+
+					<div class="tp-scroll">
+						<table class="tp-table">
+							<thead>
+								<tr>
+									<th>Source</th>
+									<th>Rating</th>
+									<th class="tp-num">Dogs</th>
+									<th class="tp-num tp-group-start">Adopted</th>
+									<th class="tp-num">Transferred on</th>
+									<th class="tp-num">Put down</th>
+									<th class="tp-num tp-group-start">Median days</th>
+									<th class="tp-num tp-group-start">Behaviour</th>
+									<th class="tp-num">Medical</th>
+									<th class="tp-num tp-group-start">Here now</th>
+									<th class="tp-num">Over {LONG_STAY_DAYS}d</th>
+									<th class="tp-num">Returned*</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each partnerAnalysis.rows as row}
+									<tr>
+										<td class="tp-name">{row.partner}</td>
+										<td>
+											<span
+												class={`tp-pill tp-pill-${row.rating ?? 'unsure'}`}
+												title={row.rating
+													? undefined
+													: `Needs ${MIN_SAMPLE_FOR_RATING}+ dogs that have already left before this can be answered`}
+											>
+												{adoptabilityLabel(row.rating)}
+											</span>
+										</td>
+										<td class="tp-num">{row.total}</td>
+										<td class="tp-num tp-group-start">{row.adopted || '—'}</td>
+										<td class="tp-num">{row.transferredOut || '—'}</td>
+										<td class="tp-num">{row.euthanized || '—'}</td>
+										<td class="tp-num tp-group-start">{row.medianDaysToAdoption ?? '—'}</td>
+										<td class="tp-num tp-group-start">{row.behaviorSupport || '—'}</td>
+										<td class="tp-num">{row.medicalSupport || '—'}</td>
+										<td class="tp-num tp-group-start">{row.current}</td>
+										<td class="tp-num">{row.longStayNow || '—'}</td>
+										<td class="tp-num">{row.returned || '—'}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+
+					<p class="tp-foot">
+						A rating needs at least {MIN_SAMPLE_FOR_RATING} dogs that have already left, and weighs
+						three things: how often they were adopted rather than transferred on or put down, how
+						their time here compared with the shelter median, and how many arrived needing
+						behavioural or medical support. Dogs still in kennels count toward the support figure
+						but never toward the outcome ones — they haven't had an outcome yet.
+					</p>
+					<p class="tp-foot">
+						*Returns are shown but deliberately left out of the rating — a dog coming back
+						reflects the match we made and the adopter, not the shelter that sent it.
+					</p>
+
+					{#if partnerAnalysis.unmatchedOrigins.length > 0}
+						<p class="tp-foot tp-unmatched">
+							Not matched to a known partner: {partnerAnalysis.unmatchedOrigins.join(' · ')}
+						</p>
+					{/if}
+				{:else}
+					<p class="dt-panel-empty">Run it to see how each source's dogs have done.</p>
+				{/if}
+			</div>
+
 <style>
+	.tp-panel { margin-top: 16px; }
+	.tp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+	.tp-run-btn {
+		border: 1px solid #c8d3de;
+		border-radius: 999px;
+		background: #e9f2fb;
+		color: #2f435c;
+		padding: 8px 20px;
+		font-size: 13px;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.tp-basis {
+		margin: 12px 0 0;
+		font-size: 12px;
+		color: #6b7d90;
+	}
+
+	.tp-scroll { overflow-x: auto; margin-top: 12px; }
+
+	.tp-chart-wrap {
+		position: relative;
+		height: 260px;
+		margin-top: 16px;
+	}
+
+	.tp-chart-key {
+		margin: 10px 0 0;
+		font-size: 11.5px;
+		color: #8194a6;
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.tp-swatch {
+		display: inline-block;
+		width: 11px;
+		height: 11px;
+		border-radius: 3px;
+		margin-left: 6px;
+	}
+
+	.tp-swatch-rated { background: #016aa5; }
+	.tp-swatch-unrated { background: #a8c9dd; }
+
+	.tp-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 13px;
+	}
+
+	.tp-table th {
+		text-align: left;
+		font-size: 10.5px;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #8194a6;
+		font-weight: 600;
+		padding: 0 10px 7px 0;
+		white-space: nowrap;
+	}
+
+	.tp-table td {
+		padding: 8px 10px 8px 0;
+		border-top: 1px solid #eef2f6;
+		white-space: nowrap;
+	}
+
+	.tp-name { font-weight: 600; }
+
+	/* Hairline between the outcome / speed / condition / current-kennel groups. */
+	.tp-group-start { border-left: 1px solid #eef2f6; padding-left: 12px; }
+	.tp-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+	.tp-pill {
+		display: inline-block;
+		border-radius: 999px;
+		padding: 2px 10px;
+		font-size: 11px;
+		white-space: nowrap;
+	}
+
+	.tp-pill-high { background: #e6f4e3; color: #24601f; }
+	.tp-pill-moderate { background: #fbf0dd; color: #8a5d05; }
+	.tp-pill-low { background: #fbeaea; color: #a33; }
+	.tp-pill-unsure { background: #f1f4f8; color: #6b7d90; }
+
+	.tp-foot {
+		margin: 14px 0 0;
+		font-size: 11.5px;
+		line-height: 1.6;
+		color: #8194a6;
+		max-width: 70ch;
+	}
+
+	.tp-unmatched { color: #a8730c; }
+
 
 
 	/* ── Loading ── */
