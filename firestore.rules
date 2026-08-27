@@ -28,18 +28,14 @@ service cloud.firestore {
       return getUserRole() == 'coordinator';
     }
 
-    // Mirrors canEditDayTrips() in src/lib/utils/permissions.ts. Coordinators run the
-    // day trips board but are deliberately NOT general dog editors.
-    function canEditDayTrips() {
-      return isAdmin() || isCoordinator();
-    }
-
     function canEditPlaygroups() {
-      return isAdmin() || isManager() || isStaff();
+      return isAdmin() || isManager() || isCoordinator() || isStaff();
     }
 
+    // Coordinators have everything a manager has, plus the day trips board and the
+    // volunteer roster, so they are general dog editors too.
     function canEditDogs() {
-      return isAdmin() || isManager();
+      return isAdmin() || isManager() || isCoordinator();
     }
 
     function canManageUsers() {
@@ -92,26 +88,12 @@ service cloud.firestore {
 
     match /dogs/{dogId} {
       allow read: if isApproved();
-      // Coordinators run the day trips board, and its Import tab creates a placeholder
-      // record when a trip names a dog we don't have yet. Creating is additive — it can't
-      // corrupt an existing record — so it's safe to widen; editing and deleting existing
-      // dogs stay with admins and managers.
-      allow create: if canEditDogs() || canEditDayTrips();
-      allow update, delete: if canEditDogs();
+      allow create, update, delete: if canEditDogs();
       // Staff/volunteers log baths and yard time, which stamp denormalized
       // timer fields on the dog doc. Allow updates that touch only those.
       allow update: if isApproved() &&
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['lastBathDate', 'lastBathBy', 'lastYardDate']);
-
-      // The day trips board writes day-trip state onto the dog doc. Coordinators own
-      // that board without being general dog editors, so scope their writes to those
-      // fields. updatedAt is included because updateDog() stamps it on every write.
-      allow update: if canEditDayTrips() &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['isOutOnDayTrip', 'currentDayTripStartedAt', 'lastDayTripDate',
-                    'awaitingEvaluation', 'evaluationAutoCleared',
-                    'dayTripPuppyOverride', 'updatedAt']);
 
       match /behavioralNotes/{noteId} {
         allow read, create: if isApproved();
@@ -140,7 +122,7 @@ service cloud.firestore {
 
       match /dayTripLogs/{logId} {
         allow read, create: if isApproved();
-        allow update, delete: if canEditDogs() || canEditDayTrips();
+        allow update, delete: if canEditDogs();
       }
     }
 
@@ -165,7 +147,7 @@ service cloud.firestore {
     }
 
     // Finished events archived from the Events tab ("mark event over").
-    // Editing or deleting history is manager/admin only.
+    // Editing or deleting history is dog-editor only.
     match /eventHistory/{eventId} {
       allow read, create: if isApproved();
       allow update, delete: if canEditDogs();
@@ -183,7 +165,7 @@ service cloud.firestore {
     }
 
     match /pendingPlaygroups/{docId} {
-      // Read and mark-processed by managers/admins only
+      // Read and mark-processed by dog editors only
       allow read, update: if canEditDogs();
       // Create and delete are server-only (firebase-admin SDK bypasses rules)
       allow create, delete: if false;

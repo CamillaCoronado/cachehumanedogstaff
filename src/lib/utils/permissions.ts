@@ -1,7 +1,7 @@
 import type { DogHandlingLevel, UserProfile, UserRole } from '$lib/types';
 
 export function canEditDogs(role: UserRole | null | undefined) {
-	return role === 'admin' || role === 'manager';
+	return role === 'admin' || role === 'manager' || role === 'coordinator';
 }
 
 export function canAccessPlaygroups(_role: UserRole | null | undefined) {
@@ -23,7 +23,7 @@ export function canViewInternalDogInfo(role: UserRole | null | undefined) {
 }
 
 export function canEditPlaygroups(role: UserRole | null | undefined) {
-	return role === 'admin' || role === 'manager' || role === 'staff';
+	return role === 'admin' || role === 'manager' || role === 'coordinator' || role === 'staff';
 }
 
 export function canAccessDayTrips(role: UserRole | null | undefined) {
@@ -35,7 +35,7 @@ export function canEditDayTrips(role: UserRole | null | undefined) {
 }
 
 export function canSetDayTripColor(role: UserRole | null | undefined) {
-	return role === 'admin' || role === 'manager';
+	return role === 'admin' || role === 'manager' || role === 'coordinator';
 }
 
 export function canAccessVolunteers(role: UserRole | null | undefined) {

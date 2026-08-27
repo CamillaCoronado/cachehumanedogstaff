@@ -1749,12 +1749,9 @@ export async function syncSheetColorsToDogs(
  * updateDog() re-serializes the whole document, so its write touches every key whose
  * stored value differs from what serializeDog() currently produces — a stale
  * handlingLevelBeforeHold that gets nulled, an untrimmed kennel string, a field added
- * since that doc was last written. Firestore rules match on affectedKeys, and roles that
- * are allowed only a short list of keys (coordinators on the day trips board) then pass
- * for a clean document and get denied for a drifted one. Same button, same role, works
- * for one dog and not the next.
+ * since that doc was last written. Board toggles should not be rewriting unrelated
+ * fields as a side effect, so they merge just the keys they mean to change.
  *
- * Any day-trip write a coordinator can reach must go through here, not updateDog().
  * Returns false when Firestore isn't available, so callers can fall back to localStorage.
  */
 async function mergeDogFields(dogId: string, fields: Record<string, unknown>): Promise<boolean> {
