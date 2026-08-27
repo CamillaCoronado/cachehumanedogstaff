@@ -65,6 +65,14 @@ service cloud.firestore {
         role == 'staff' || role == 'volunteer';
     }
 
+    // Only checked when a write actually changes the role. Approving an account sends
+    // the whole document back, so demanding a recognised role on every update would
+    // make any doc carrying a legacy or missing role unapprovable rather than fixable.
+    function setsValidRole() {
+      return request.resource.data.get('role', '') == resource.data.get('role', '') ||
+        isValidRole(request.resource.data.get('role', ''));
+    }
+
     function isValidSelfProfilePayload(userId) {
       return isSelf(userId) &&
         request.resource.data.uid == request.auth.uid &&
@@ -75,8 +83,9 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isSelf(userId) || isApproved();
-      allow create: if canManageUsers() || isValidSelfProfilePayload(userId);
-      allow update: if (canManageUsers() &&
+      allow create: if (canManageUsers() && isValidRole(request.resource.data.get('role', ''))) ||
+        isValidSelfProfilePayload(userId);
+      allow update: if (canManageUsers() && setsValidRole() &&
         !(resource.data.role == 'admin' && request.resource.data.role != 'admin')) ||
         (isSelf(userId) &&
           request.resource.data.uid == resource.data.uid &&
