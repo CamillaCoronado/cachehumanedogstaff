@@ -2,24 +2,44 @@
  * Pulls Slack channel history to local JSON so it can be analyzed offline.
  *
  * Usage:
- *   node scripts/slack-fetch.mjs                 # every channel the bot is in
- *   node scripts/slack-fetch.mjs general feeding # only these channels (name or ID)
+ *   node scripts/slack-fetch.mjs dog-staff --since 2026-01-01
+ *   node scripts/slack-fetch.mjs                 # every channel the bot is in, all history
  *
  * Needs SLACK_BOT_TOKEN in .env with scopes:
  *   channels:history, channels:read, users:read   (public channels)
  *   groups:history,   groups:read                 (private channels, optional)
  *
  * Output lands in slack-export/ (gitignored) — one file per channel, plus users.json.
- * Re-running is safe: it resumes from the newest message already saved rather than
- * re-downloading the whole channel.
+ * The channel file is rewritten as it goes, so killing a long pull keeps what it had.
+ * Re-running resumes from the newest message already saved.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 const OUT_DIR = 'slack-export';
 const PAGE_SIZE = 200;
-// conversations.history is Slack tier 3: ~50 requests/minute. Stay under it.
+// conversations.history/replies are Slack tier 3: ~50 requests/minute. Stay under it.
 const PAGE_DELAY_MS = 1300;
+// Thread fetching is one request per thread, so a busy channel spends most of its
+// time here. Checkpoint often enough that an interrupt costs little.
+const CHECKPOINT_EVERY = 10;
+
+const argv = process.argv.slice(2);
+function flag(name) {
+	const i = argv.indexOf(`--${name}`);
+	return i === -1 ? null : argv[i + 1];
+}
+// Channel names are the positional args — everything that isn't a flag or its value.
+const flagIndices = new Set();
+for (const [i, a] of argv.entries()) if (a.startsWith('--')) { flagIndices.add(i); flagIndices.add(i + 1); }
+const wanted = argv.filter((_, i) => !flagIndices.has(i)).map((a) => a.toLowerCase().replace(/^#/, ''));
+
+const sinceArg = flag('since');
+const sinceTs = sinceArg ? Math.floor(new Date(`${sinceArg}T00:00:00`).getTime() / 1000) : null;
+if (sinceArg && !Number.isFinite(sinceTs)) {
+	console.error(`Bad --since "${sinceArg}" — use YYYY-MM-DD.`);
+	process.exit(1);
+}
 
 function loadEnv() {
 	// Vite injects .env for the app, but a standalone script gets nothing.
@@ -62,35 +82,45 @@ async function slack(token, method, params = {}) {
 }
 
 /** Walks a cursor-paginated endpoint, collecting `key` from each page. */
-async function paginate(token, method, params, key, stopAtTs = null) {
+async function paginate(token, method, params, key, stopAtTs = null, label = null) {
 	const items = [];
 	let cursor;
 	do {
 		const body = await slack(token, method, { ...params, limit: PAGE_SIZE, cursor });
 		if (!body) return items;
-		const page = body[key] ?? [];
-		for (const item of page) {
+		for (const item of body[key] ?? []) {
 			// Resuming: everything at or below the newest saved ts is already on disk.
 			if (stopAtTs && Number(item.ts) <= Number(stopAtTs)) return items;
 			items.push(item);
 		}
 		cursor = body.response_metadata?.next_cursor || undefined;
 		if (cursor) {
-			process.stdout.write(`\r  ${items.length} messages…`);
+			// One line per page, not \r — stdout is block-buffered when piped to a log,
+			// so carriage-return progress never appears until the process exits.
+			if (label) console.log(`  ${label}: ${items.length} so far…`);
 			await sleep(PAGE_DELAY_MS);
 		}
 	} while (cursor);
 	return items;
 }
 
-function newestSavedTs(file) {
-	if (!existsSync(file)) return null;
+const channelFile = (name) => join(OUT_DIR, `${name}.json`);
+
+function readSaved(name) {
+	const file = channelFile(name);
+	if (!existsSync(file)) return { messages: [] };
 	try {
-		const saved = JSON.parse(readFileSync(file, 'utf8'));
-		return saved.messages?.[0]?.ts ?? null; // Slack returns newest-first
+		return JSON.parse(readFileSync(file, 'utf8'));
 	} catch {
-		return null;
+		return { messages: [] };
 	}
+}
+
+function writeChannel(channel, messages) {
+	writeFileSync(
+		channelFile(channel.name),
+		JSON.stringify({ channel: channel.name, id: channel.id, messages }, null, 2)
+	);
 }
 
 async function main() {
@@ -102,7 +132,7 @@ async function main() {
 	}
 
 	mkdirSync(OUT_DIR, { recursive: true });
-	const wanted = process.argv.slice(2).map((a) => a.toLowerCase().replace(/^#/, ''));
+	if (sinceArg) console.log(`Window: ${sinceArg} → now\n`);
 
 	console.log('Fetching user directory…');
 	const users = await paginate(token, 'users.list', {}, 'members');
@@ -133,28 +163,47 @@ async function main() {
 	}
 
 	for (const channel of targets) {
-		const file = join(OUT_DIR, `${channel.name}.json`);
-		const since = newestSavedTs(file);
-		process.stdout.write(`#${channel.name}${since ? ' (resuming)' : ''}\n`);
+		const previous = readSaved(channel.name).messages ?? [];
+		const resumeFrom = previous[0]?.ts ?? null; // Slack returns newest-first
+		console.log(`#${channel.name}${resumeFrom ? ' (resuming)' : ''}`);
 
-		const fresh = await paginate(token, 'conversations.history', { channel: channel.id }, 'messages', since);
+		const fresh = await paginate(
+			token,
+			'conversations.history',
+			{ channel: channel.id, oldest: sinceTs ?? undefined },
+			'messages',
+			resumeFrom,
+			'messages'
+		);
+
+		// Save before threads: history is the bulk of the value, and thread fetching is
+		// the slow part most likely to be interrupted.
+		let messages = [...fresh, ...previous];
+		writeChannel(channel, messages);
+		console.log(`  ${fresh.length} new messages (${messages.length} total) — saved`);
 
 		// Threaded replies do not appear in history — fetch each thread separately.
 		const parents = fresh.filter((m) => m.thread_ts && m.reply_count > 0);
-		for (const parent of parents) {
+		if (parents.length) {
+			const mins = Math.ceil((parents.length * PAGE_DELAY_MS) / 60000);
+			console.log(`  ${parents.length} threads to fetch (~${mins} min)`);
+		}
+		for (const [i, parent] of parents.entries()) {
 			const replies = await paginate(token, 'conversations.replies', { channel: channel.id, ts: parent.thread_ts }, 'messages');
 			parent.replies = replies.filter((r) => r.ts !== parent.ts);
+			if ((i + 1) % CHECKPOINT_EVERY === 0) {
+				writeChannel(channel, messages);
+				console.log(`  threads ${i + 1}/${parents.length}`);
+			}
 			await sleep(PAGE_DELAY_MS);
 		}
 
-		const previous = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).messages ?? [] : [];
-		const messages = [...fresh, ...previous];
-		writeFileSync(file, JSON.stringify({ channel: channel.name, id: channel.id, messages }, null, 2));
-		console.log(`\r  ${fresh.length} new, ${messages.length} total${parents.length ? `, ${parents.length} threads` : ''}`);
+		writeChannel(channel, messages);
+		console.log(`  done: ${messages.length} messages, ${parents.length} threads\n`);
 		await sleep(PAGE_DELAY_MS);
 	}
 
-	console.log(`\nDone. Wrote ${readdirSync(OUT_DIR).length} files to ${OUT_DIR}/`);
+	console.log(`Wrote ${readdirSync(OUT_DIR).length} files to ${OUT_DIR}/`);
 }
 
 main().catch((err) => {
