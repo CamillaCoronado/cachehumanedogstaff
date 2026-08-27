@@ -231,8 +231,7 @@
 				medicalTab,
 				...(canViewDayTrips ? [dayTripsTab] : []),
 				eventsTab,
-				// volunteers tab hidden until ready
-				// ...(canViewVolunteers ? [volunteersTab] : []),
+				...(canViewVolunteers ? [volunteersTab] : []),
 				...(isAdmin ? [adminTab] : [])
 			]
 		: [dogsTab];
