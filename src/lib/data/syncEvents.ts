@@ -61,29 +61,44 @@ function eventsRef() {
  * happened to run the sync. The sync reconciles Firestore with ASM, so the diff
  * exists exactly once — without this it is consumed by whoever loads the app first.
  */
-export async function recordSyncEvents(changes: SyncChange[]): Promise<void> {
-	const ref = eventsRef();
-	if (!ref || changes.length === 0) return;
-
-	const now = new Date();
-	const writes: Promise<void>[] = [];
-
+/**
+ * Groups a sync's changes into the documents that represent it — one per type, listing
+ * every dog in it. Shared by the client and server writers so both derive identical ids
+ * and neither can produce a duplicate celebration for the same sync.
+ */
+export function syncEventDocs(
+	changes: SyncChange[],
+	now: Date
+): { id: string; data: Record<string, unknown> }[] {
+	const docs: { id: string; data: Record<string, unknown> }[] = [];
 	for (const [type, matches] of Object.entries(TYPE_FILTERS) as [SyncEventType, (c: SyncChange) => boolean][]) {
 		const hits = changes.filter(matches);
 		if (hits.length === 0) continue;
 		const dogIds = hits.map((c) => c.id);
-		const id = eventId(type, dogIds, now);
-		writes.push(
-			setDoc(doc(ref, id), {
+		docs.push({
+			id: eventId(type, dogIds, now),
+			data: {
 				type,
 				dogIds,
 				dogNames: hits.map((c) => c.name),
 				createdAt: now.toISOString()
-			})
-		);
+			}
+		});
 	}
+	return docs;
+}
 
-	await Promise.all(writes);
+/**
+ * Records what a sync observed so every user sees it, not just the browser that
+ * happened to run the sync. The sync reconciles Firestore with ASM, so the diff
+ * exists exactly once — without this it is consumed by whoever loads the app first.
+ */
+export async function recordSyncEvents(changes: SyncChange[]): Promise<void> {
+	const ref = eventsRef();
+	if (!ref || changes.length === 0) return;
+	await Promise.all(
+		syncEventDocs(changes, new Date()).map(({ id, data }) => setDoc(doc(ref, id), data))
+	);
 }
 
 /**

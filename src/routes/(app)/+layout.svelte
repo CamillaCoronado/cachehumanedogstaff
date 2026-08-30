@@ -12,9 +12,9 @@
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
 	import { toDate } from '$lib/utils/dates';
-	import { canAccessVolunteers, canAccessDayTrips, canEditDogs, canViewInternalDogInfo } from '$lib/utils/permissions';
-	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
-	import { recordSyncEvents, listUnseenSyncEvents } from '$lib/data/syncEvents';
+	import { canAccessVolunteers, canAccessDayTrips, canViewInternalDogInfo } from '$lib/utils/permissions';
+	import type { SyncChange } from '$lib/data/asm-sync';
+	import { listUnseenSyncEvents } from '$lib/data/syncEvents';
 	import { updateUserProfile } from '$lib/data/users';
 	import { syncVersion } from '$lib/stores/sync';
 	import { readJson, writeJson } from '$lib/utils/storage';
@@ -220,30 +220,13 @@
 		}
 	}
 
-	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !asmAttempted) {
+	// Everyone triggers a sync, not just dog editors. The reconcile runs on the server
+	// with admin credentials, so a staff member can keep ASM current without being able
+	// to write dog documents — and ASM changes no longer wait for an admin to log in.
+	$: if ($authReady && $authUser && $authProfile && !asmAttempted) {
 		asmAttempted = true;
 		asmSyncing = true;
-		void syncAnimalsFromASM()
-			.then((result) => {
-				asmSyncedAt = new Intl.DateTimeFormat('en-US', {
-					hour: 'numeric',
-					minute: '2-digit',
-					hour12: true
-				}).format(new Date());
-				if (result.changes.length > 0) {
-					syncVersion.update((v) => v + 1);
-					asmChanges = result.changes;
-					asmLastChangedAt = asmSyncedAt;
-					writeJson(STORAGE_KEY, { changes: asmChanges, changedAt: asmLastChangedAt });
-					asmLogVisible = true;
-				}
-
-				// Publish what this sync saw so every user gets the celebration, then show
-				// it here through the same path they use.
-				void recordSyncEvents(result.changes)
-					.catch((err: unknown) => console.error('[sync events]', err))
-					.then(() => showUnseenSyncEvents());
-			})
+		void runServerSync()
 			.catch((err: unknown) => {
 				asmError = err instanceof Error ? err.message : 'Sync failed';
 				console.error('[ASM sync]', asmError);
@@ -251,6 +234,37 @@
 			.finally(() => {
 				asmSyncing = false;
 			});
+	}
+
+	async function runServerSync() {
+		const token = await $authUser?.getIdToken();
+		if (!token) return;
+
+		const res = await fetch('/api/asm/sync', {
+			method: 'POST',
+			headers: { authorization: `Bearer ${token}` }
+		});
+		if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
+		const result: { synced: boolean; changes: SyncChange[] } = await res.json();
+
+		if (result.synced) {
+			asmSyncedAt = new Intl.DateTimeFormat('en-US', {
+				hour: 'numeric',
+				minute: '2-digit',
+				hour12: true
+			}).format(new Date());
+			if (result.changes.length > 0) {
+				syncVersion.update((v) => v + 1);
+				asmChanges = result.changes;
+				asmLastChangedAt = asmSyncedAt;
+				writeJson(STORAGE_KEY, { changes: asmChanges, changedAt: asmLastChangedAt });
+				asmLogVisible = true;
+			}
+		}
+
+		// Read the shared record either way: someone else's sync minutes ago may hold
+		// events this user has not seen.
+		await showUnseenSyncEvents();
 	}
 
 	$: currentPath = $page.url.pathname;

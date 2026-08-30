@@ -1,7 +1,4 @@
-import { doc, writeBatch, getDocs, collection } from 'firebase/firestore';
-import { db } from '$lib/firebase/config';
 import { isPuppyAge } from '$lib/utils/dates';
-import { readJson, writeJson } from '$lib/utils/storage';
 
 export type SyncChange = {
 	id: string;
@@ -18,6 +15,31 @@ export type SyncResult = {
 };
 
 export type ArchiveOutcome = 'adopted' | 'transferred' | 'euthanized';
+
+/**
+ * Everything the sync needs from the outside world. The reconcile logic below is the
+ * same wherever it runs; only the plumbing differs, so it is injected rather than
+ * imported. The server implementation uses firebase-admin, which bypasses the security
+ * rules — which is the point: staff cannot write dog documents, so the sync cannot run
+ * in their browser, and gating it on admins meant ASM changes went unrecorded until a
+ * dog editor happened to open the app.
+ */
+export interface SyncEnvironment {
+	/** Every dog document, keyed by document id. */
+	listDogs(): Promise<Map<string, Record<string, unknown>>>;
+	/** Merge-writes a chunk of documents. Chunking to Firestore's limit is the caller's job. */
+	commit(writes: { id: string; data: Record<string, unknown> }[]): Promise<void>;
+	/** Active ASM animals, or null when ASM is unreachable or unconfigured. */
+	fetchAnimals(): Promise<AsmAnimal[] | null>;
+	fetchRecentAdoptions(days: number): Promise<{ id: string; shelterCode: string; adoptedAt: string }[]>;
+	/**
+	 * Cross-sync bookkeeping (which dog and adoption ids were already seen). This used to
+	 * live in localStorage, which made "new arrival" a per-browser notion — every browser
+	 * discovered the same arrival separately, and a shared record could not exist.
+	 */
+	readState<T>(key: string, fallback: T): Promise<T>;
+	writeState(key: string, value: unknown): Promise<void>;
+}
 
 const FIELD_LABELS: Record<string, string> = {
 	name: 'Name',
@@ -78,7 +100,7 @@ function formatSyncValue(key: string, value: unknown): string | null {
 }
 
 // Raw shape returned by ASM API (ALL_CAPS field names)
-interface AsmAnimal {
+export interface AsmAnimal {
 	ID: number;
 	ANIMALNAME: string;
 	SPECIESNAME: string;
@@ -302,21 +324,10 @@ function defaultStoredFields(now: string) {
  *
  * Returns a SyncResult describing what was added, changed, or archived.
  */
-export async function syncAnimalsFromASM(): Promise<SyncResult> {
-	if (!db) throw new Error('Firestore not available');
-
-	// 1. Fetch from ASM via server-side proxy (avoids CORS)
-	const res = await fetch('/api/asm');
-	if (!res.ok) {
-		// 503 = credentials not configured (local dev), 502 = ASM unreachable — skip silently
-		if (res.status === 502 || res.status === 503) {
-			return { changes: [] };
-		}
-		let detail = '';
-		try { detail = (await res.json()).message ?? ''; } catch { /* ignore */ }
-		throw new Error(`ASM proxy error ${res.status}${detail ? `: ${detail}` : ''}`);
-	}
-	const allAnimals: AsmAnimal[] = await res.json();
+export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResult> {
+	// 1. Fetch from ASM. A null payload means unreachable or unconfigured — skip silently.
+	const allAnimals = await env.fetchAnimals();
+	if (!allAnimals) return { changes: [] };
 
 	// 2. Filter: dogs on shelter or in foster (not adopted/transferred/deceased)
 	const dogs = allAnimals.filter(
@@ -327,8 +338,7 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	);
 
 	// 3. Fetch existing docs to diff against
-	const snapshot = await getDocs(collection(db, 'dogs'));
-	const existingDocs = new Map(snapshot.docs.map((d) => [d.id, d.data()]));
+	const existingDocs = await env.listDogs();
 
 	const now = new Date().toISOString();
 	const BATCH_SIZE = 499;
@@ -337,10 +347,9 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	// Add any newly seen dogs to changes as isNew:true so they get saved to localStorage
 	// and the overlay keeps firing until the user explicitly closes it.
 	const KNOWN_DOG_IDS_KEY = 'asm_known_dog_ids';
-	const knownSet = new Set(readJson<string[]>(KNOWN_DOG_IDS_KEY, []));
-	const newlyArrivedAnimals = dogs.filter(d => !knownSet.has(String(d.ID)));
-	// Update known IDs now — overlay persistence handled by overlayAcked in STORAGE_KEY
-	writeJson(KNOWN_DOG_IDS_KEY, dogs.map(d => String(d.ID)));
+	const knownSet = new Set(await env.readState<string[]>(KNOWN_DOG_IDS_KEY, []));
+	const newlyArrivedAnimals = dogs.filter((d) => !knownSet.has(String(d.ID)));
+	await env.writeState(KNOWN_DOG_IDS_KEY, dogs.map((d) => String(d.ID)));
 
 	// 4. Determine which dogs need writing (new or changed ASM fields)
 	type PendingWrite = { animal: AsmAnimal; isNew: boolean; changedFields: string[] };
@@ -392,17 +401,16 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 
 	// 5. Write only changed/new dogs in batches
 	for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-		const batch = writeBatch(db);
+		const writes: { id: string; data: Record<string, unknown> }[] = [];
 		for (const { animal, isNew } of pending.slice(i, i + BATCH_SIZE)) {
 			const docId = String(animal.ID);
-			const ref = doc(db, 'dogs', docId);
 			const asmFields = applyPhotoPrecedence(asmToStoredFields(animal, now), existingDocs.get(docId));
 			// Puppies don't need evaluation — never flag them.
 			const isPuppy = isPuppyAge(asmFields.dateOfBirth);
 			if (isNew) {
 				const defaults = defaultStoredFields(now);
 				if (isPuppy) defaults.awaitingEvaluation = false;
-				batch.set(ref, { id: docId, ...defaults, ...asmFields }, { merge: true });
+				writes.push({ id: docId, data: { id: docId, ...defaults, ...asmFields } });
 			} else {
 				const existing = existingDocs.get(docId);
 				const returningFromFoster = existing?.inFoster === true && asmFields.inFoster === false;
@@ -416,10 +424,13 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 					...(returningFromFoster || leavingIncoming ? { shelterSince: now } : {}),
 					...(needsEvalFlag ? { awaitingEvaluation: true } : {})
 				};
-				batch.set(ref, Object.keys(extra).length ? { ...asmFields, ...extra } : asmFields, { merge: true });
+				writes.push({
+					id: docId,
+					data: Object.keys(extra).length ? { ...asmFields, ...extra } : asmFields
+				});
 			}
 		}
-		await batch.commit();
+		await env.commit(writes);
 	}
 
 	// Backfill awaitingEvaluation for existing dogs with recent intake where the
@@ -434,17 +445,17 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 			continue;
 		}
 		if (data.awaitingEvaluation !== undefined) continue;
-		const intakeMs = data.intakeDate ? new Date(data.intakeDate).getTime() : 0;
+		const intakeMs = data.intakeDate ? new Date(data.intakeDate as string).getTime() : 0;
 		if (intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000) {
 			evalBackfill.push({ id: docId, flag: true });
 		}
 	}
 	for (let i = 0; i < evalBackfill.length; i += BATCH_SIZE) {
-		const batch = writeBatch(db);
-		for (const { id, flag } of evalBackfill.slice(i, i + BATCH_SIZE)) {
-			batch.set(doc(db, 'dogs', id), { awaitingEvaluation: flag }, { merge: true });
-		}
-		await batch.commit();
+		await env.commit(
+			evalBackfill
+				.slice(i, i + BATCH_SIZE)
+				.map(({ id, flag }) => ({ id, data: { awaitingEvaluation: flag } }))
+		);
 	}
 
 	const currentAsmIds = new Set(dogs.map((a) => a.ID));
@@ -458,23 +469,18 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 	let newAdoptionIds: string[] = [];
 
 	try {
-		const recentRes = await fetch('/api/asm/recent-adoptions?days=14');
-		if (recentRes.ok) {
-			const recentAdoptions: { id: string; shelterCode: string; adoptedAt: string }[] = await recentRes.json();
+		const recentAdoptions = await env.fetchRecentAdoptions(14);
 
-			// Compare to previously known adoption IDs to find NEW ones
-			const knownSet = new Set(readJson<string[]>(KNOWN_ADOPTIONS_KEY, []));
-			newAdoptionIds = recentAdoptions.map(a => a.id).filter(id => !knownSet.has(id));
+		// Compare to previously known adoption IDs to find NEW ones
+		const knownAdoptions = new Set(await env.readState<string[]>(KNOWN_ADOPTIONS_KEY, []));
+		newAdoptionIds = recentAdoptions.map((a) => a.id).filter((id) => !knownAdoptions.has(id));
+		await env.writeState(KNOWN_ADOPTIONS_KEY, recentAdoptions.map((a) => a.id));
 
-			// Update stored known IDs
-			writeJson(KNOWN_ADOPTIONS_KEY, recentAdoptions.map(a => a.id));
-
-			// Only build outcomes for NEW adoptions
-			for (const a of recentAdoptions.filter(a => newAdoptionIds.includes(a.id))) {
-				if (a.shelterCode) {
-					shelterCodeOutcomes.set(a.shelterCode, 'adopted');
-					if (a.adoptedAt) movementDateByShelterCode.set(a.shelterCode, a.adoptedAt);
-				}
+		// Only build outcomes for NEW adoptions
+		for (const a of recentAdoptions.filter((a) => newAdoptionIds.includes(a.id))) {
+			if (a.shelterCode) {
+				shelterCodeOutcomes.set(a.shelterCode, 'adopted');
+				if (a.adoptedAt) movementDateByShelterCode.set(a.shelterCode, a.adoptedAt);
 			}
 		}
 	} catch { /* ignore */ }
@@ -491,7 +497,7 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
 		if (deceased) movementDateByShelterCode.set(a.SHELTERCODE, deceased);
 	}
 
-	const archived = await markStaleAsmDogsArchived(currentAsmIds, shelterCodeOutcomes, movementDateByShelterCode);
+	const archived = await markStaleAsmDogsArchived(env, currentAsmIds, shelterCodeOutcomes, movementDateByShelterCode);
 
 	const archivedChanges: SyncChange[] = archived.map(({ id, name, outcome }) => ({
 		id,
@@ -542,18 +548,16 @@ export async function syncAnimalsFromASM(): Promise<SyncResult> {
  * Safe to call after syncAnimalsFromASM().
  */
 export async function markStaleAsmDogsArchived(
+	env: SyncEnvironment,
 	currentAsmIds: Set<number>,
 	shelterCodeOutcomes: Map<string, ArchiveOutcome> = new Map(),
 	movementDateByShelterCode: Map<string, string> = new Map()
 ): Promise<{ id: string; name: string; outcome: ArchiveOutcome }[]> {
-	if (!db) throw new Error('Firestore not available');
-
-	const snapshot = await getDocs(collection(db, 'dogs'));
-	const staleDocs = snapshot.docs.filter((d) => {
-		const data = d.data();
+	const allDocs = await env.listDogs();
+	const staleDocs = [...allDocs].filter(([id, data]) => {
 		if (data.status === 'adopted' || data.status === 'transferred' || data.status === 'euthanized') return false;
 		const asmId = data.asmId as number | undefined;
-		const idAsNum = /^\d+$/.test(d.id) ? Number(d.id) : undefined;
+		const idAsNum = /^\d+$/.test(id) ? Number(id) : undefined;
 		const effectiveAsmId = asmId ?? idAsNum;
 		const shelterCode = data.asmShelterCode as string | undefined;
 		const missedByAsmId = effectiveAsmId !== undefined && !currentAsmIds.has(effectiveAsmId);
@@ -566,15 +570,14 @@ export async function markStaleAsmDogsArchived(
 	const BATCH_SIZE = 499;
 	const now = new Date().toISOString();
 	for (let i = 0; i < staleDocs.length; i += BATCH_SIZE) {
-		const batch = writeBatch(db);
-		for (const staleDoc of staleDocs.slice(i, i + BATCH_SIZE)) {
-			const staleData = staleDoc.data();
+		const writes: { id: string; data: Record<string, unknown> }[] = [];
+		for (const [staleId, staleData] of staleDocs.slice(i, i + BATCH_SIZE)) {
 			const shelterCode = staleData.asmShelterCode as string | undefined;
 			const outcome: ArchiveOutcome = (shelterCode && shelterCodeOutcomes.get(shelterCode)) || 'adopted';
 			// Fall back to the archive time so leftShelterDate is always set — the
 			// movements summary counts departures strictly by this field.
 			const movementDate = (shelterCode ? movementDateByShelterCode.get(shelterCode) : null) ?? now;
-			batch.set(staleDoc.ref, {
+			writes.push({ id: staleId, data: {
 				status: outcome,
 				outdoorKennelAssignment: '',
 				insideKennelAssignment: '',
@@ -586,14 +589,14 @@ export async function markStaleAsmDogsArchived(
 				leftShelterDate: movementDate,
 				updatedAt: now,
 				_lastSyncedAt: now
-			}, { merge: true });
+			} });
 		}
-		await batch.commit();
+		await env.commit(writes);
 	}
 
-	return staleDocs.map((d) => {
-		const shelterCode = d.data().asmShelterCode as string | undefined;
+	return staleDocs.map(([id, data]) => {
+		const shelterCode = data.asmShelterCode as string | undefined;
 		const outcome: ArchiveOutcome = (shelterCode && shelterCodeOutcomes.get(shelterCode)) || 'adopted';
-		return { id: d.id, name: (d.data().name as string | undefined) ?? d.id, outcome };
+		return { id, name: (data.name as string | undefined) ?? id, outcome };
 	});
 }

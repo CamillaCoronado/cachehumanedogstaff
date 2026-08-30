@@ -1,5 +1,6 @@
 import { cert, getApp, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 import { env } from '$env/dynamic/private';
 
 function getAdminApp() {
@@ -21,4 +22,9 @@ function getAdminApp() {
 
 export function getAdminDb() {
 	return getFirestore(getAdminApp());
+}
+
+/** Auth bound to the same credentialed app, for verifying client ID tokens. */
+export function getAdminAuth() {
+	return getAuth(getAdminApp());
 }

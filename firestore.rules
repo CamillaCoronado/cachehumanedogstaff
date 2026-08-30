@@ -169,8 +169,15 @@ service cloud.firestore {
     // sync), read by everyone, and never edited after the fact.
     match /syncEvents/{eventId} {
       allow read: if isApproved();
-      allow create: if canEditDogs();
-      allow update, delete: if isAdmin();
+      // Written server-side by /api/asm/sync, where firebase-admin bypasses these rules.
+      // No client writes any more, which is what lets a staff member's visit record a
+      // sync without granting them dog-edit rights.
+      allow write: if false;
+    }
+
+    // Cross-sync bookkeeping (last sync time, seen ASM ids). Server-only.
+    match /syncState/{key} {
+      allow read, write: if false;
     }
 
     match /playgroupSessions/{sessionId} {
