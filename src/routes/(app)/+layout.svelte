@@ -162,10 +162,9 @@
 	$: if ($authReady && $authUser && $authProfile && !overlayCheckStarted) {
 		overlayCheckStarted = true;
 		seenStamp = $authProfile.lastSeenSyncEventAt ?? null;
-		if (seenStamp) void showUnseenSyncEvents();
-		// Never stamped: a first sight, not a backlog. Start the clock now so the next
-		// visit shows everything from here rather than the whole archive at once.
-		else void markSyncEventsSeen(new Date());
+		// No stamp is fine — the lookback window covers that case, so a first login
+		// picks up from roughly where the browser's local state left off.
+		void showUnseenSyncEvents();
 	}
 
 	async function showUnseenSyncEvents() {

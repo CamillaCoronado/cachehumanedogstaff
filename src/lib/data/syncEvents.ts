@@ -14,6 +14,12 @@ export interface SyncEvent {
 	createdAt: Date;
 }
 
+/**
+ * How far back a look can reach. Bounds the unseen-event query as the collection
+ * grows, and is also where an account with no stamp starts from.
+ */
+const LOOKBACK_DAYS = 14;
+
 /** Mirrors the overlay grouping: one event per type per sync, listing every dog in it. */
 const TYPE_FILTERS: Record<SyncEventType, (change: SyncChange) => boolean> = {
 	adoption: (c) => c.isArchived,
@@ -74,21 +80,21 @@ export async function recordSyncEvents(changes: SyncChange[]): Promise<void> {
 }
 
 /**
- * Everything created after `since`, oldest first so the queue plays in the order things
- * actually happened. Deliberately uncapped: a person away for three weeks has missed
- * three weeks of arrivals and adoptions, and trimming that to a recent window would
- * quietly decide on their behalf which ones did not matter.
+ * Events created after `since`, oldest first so the queue plays in the order things
+ * actually happened, and never reaching further back than the lookback window.
  *
- * A null `since` means this account has never been stamped. That is a first sight, not
- * a backlog — the caller stamps the present and shows nothing, rather than replaying
- * the shelter's entire history at someone on their first login.
+ * An account with no stamp starts from the window too, so a first login lands on
+ * roughly what the browser would have had locally rather than the whole archive.
  */
 export async function listUnseenSyncEvents(since: DateValue | null | undefined): Promise<SyncEvent[]> {
 	const ref = eventsRef();
-	const seenAt = toDate(since ?? null);
-	if (!ref || !seenAt) return [];
+	if (!ref) return [];
 
-	const snapshot = await getDocs(query(ref, where('createdAt', '>', seenAt.toISOString())));
+	const window = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+	const seenAt = toDate(since ?? null);
+	const cutoff = seenAt && seenAt > window ? seenAt : window;
+
+	const snapshot = await getDocs(query(ref, where('createdAt', '>', cutoff.toISOString())));
 	return snapshot.docs
 		.map((d) => {
 			const data = d.data();
