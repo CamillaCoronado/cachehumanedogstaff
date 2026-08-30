@@ -194,22 +194,38 @@ export function parseFeedingMessage(
 	// Scan verb-phrase by verb-phrase, attributing the names between the previous phrase
 	// and this one. Staff routinely write without punctuation — "River uno ate half Tasha
 	// thor Linda doug didnt" — so clause splitting on commas alone loses half the dogs.
-	let cursor = 0;
-	let searchFrom = 0;
+	const hits: { index: number; end: number; amount: AmountEaten; colonLed: boolean }[] = [];
+	for (let from = 0; ; ) {
+		const hit = nextAmount(working, from);
+		if (!hit) break;
+		const end = hit.index + hit.length;
+		// "Didn't eat: Nala, Buck   Ate half: Daffodil, Dot" — a colon turns the phrase
+		// into a heading and its dogs follow it. Read as subject-first this parses exactly
+		// backwards, handing each list to the wrong verb.
+		hits.push({ index: hit.index, end, amount: hit.amount, colonLed: /^\s*:/.test(working.slice(end)) });
+		from = end;
+	}
+
 	let lastAmount: AmountEaten | null = null;
 	let lastPhraseHadNames = false;
-	for (;;) {
-		const hit = nextAmount(working, searchFrom);
-		if (!hit) break;
-		// A dog belongs to a verb only within the same sentence. Scanning back to the
-		// previous verb instead swept up whole paragraphs: "Stony is currently in time
-		// out for day trips … stuffed toys were in the dryer …" tagged nine dogs as
-		// having refused food because a feeding word appeared later in the message.
-		const windowStart = Math.max(cursor, sentenceStart(working, hit.index));
-		const names = namesIn(working.slice(windowStart, hit.index), roster);
+	let cursor = 0;
+	for (const [i, hit] of hits.entries()) {
+		let names: string[];
+		if (hit.colonLed) {
+			// Its list runs to the next verb phrase, or to the end.
+			const stop = hits[i + 1]?.index ?? working.length;
+			names = namesIn(working.slice(hit.end, stop), roster);
+			cursor = stop;
+		} else {
+			// A dog belongs to a verb only within the same sentence. Scanning back to the
+			// previous verb instead swept up whole paragraphs: "Stony is currently in time
+			// out for day trips … stuffed toys were in the dryer …" tagged nine dogs as
+			// having refused food because a feeding word appeared later in the message.
+			const windowStart = Math.max(cursor, sentenceStart(working, hit.index));
+			names = namesIn(working.slice(windowStart, hit.index), roster);
+			cursor = hit.end;
+		}
 		for (const name of names) push(name, hit.amount);
-		cursor = hit.index + hit.length;
-		searchFrom = cursor;
 		lastAmount = hit.amount;
 		lastPhraseHadNames = names.length > 0;
 	}

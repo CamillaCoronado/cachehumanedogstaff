@@ -154,6 +154,38 @@ describe('parseFeedingMessage', () => {
 		expect(result.entries.map((e) => e.name)).toEqual(['Duke']);
 	});
 
+	it('reads colon-led headings, where the dogs follow the verb', () => {
+		// Real format. Read as subject-first this parses exactly backwards — the dogs
+		// that did not eat get recorded as having eaten half.
+		const result = parseFeedingMessage(
+			"Didn't eat: Nala, Buck Ate half: Daffodil, Dot, Thor",
+			['Nala', 'Buck', 'Daffodil', 'Dot', 'Thor']
+		);
+		expect(result.entries).toEqual([
+			{ name: 'Nala', amountEaten: 'none' },
+			{ name: 'Buck', amountEaten: 'none' },
+			{ name: 'Daffodil', amountEaten: 'half' },
+			{ name: 'Dot', amountEaten: 'half' },
+			{ name: 'Thor', amountEaten: 'half' }
+		]);
+	});
+
+	it('still reads subject-first lists when there is no colon', () => {
+		const result = parseFeedingMessage(
+			"Garth, Daffodil, Buck, Nala didn't eat. Tulip, Dot, Wiley ate half.",
+			['Garth', 'Daffodil', 'Buck', 'Nala', 'Tulip', 'Dot', 'Wiley']
+		);
+		expect(result.entries).toEqual([
+			{ name: 'Garth', amountEaten: 'none' },
+			{ name: 'Daffodil', amountEaten: 'none' },
+			{ name: 'Buck', amountEaten: 'none' },
+			{ name: 'Nala', amountEaten: 'none' },
+			{ name: 'Tulip', amountEaten: 'half' },
+			{ name: 'Dot', amountEaten: 'half' },
+			{ name: 'Wiley', amountEaten: 'half' }
+		]);
+	});
+
 	it('returns nothing useful without a roster', () => {
 		// Names here are overwhelmingly lowercase, so there is no safe way to spot them
 		// without knowing the dogs. Better empty than invented.
