@@ -14,12 +14,6 @@ export interface SyncEvent {
 	createdAt: Date;
 }
 
-/**
- * Celebrations older than this are not worth showing on a stale login, and the
- * window keeps the unseen-event query bounded as the collection grows.
- */
-const LOOKBACK_DAYS = 14;
-
 /** Mirrors the overlay grouping: one event per type per sync, listing every dog in it. */
 const TYPE_FILTERS: Record<SyncEventType, (change: SyncChange) => boolean> = {
 	adoption: (c) => c.isArchived,
@@ -80,20 +74,21 @@ export async function recordSyncEvents(changes: SyncChange[]): Promise<void> {
 }
 
 /**
- * Events created after `since` (or within the lookback window on a first run),
- * oldest first so the overlay queue plays in the order things actually happened.
+ * Everything created after `since`, oldest first so the queue plays in the order things
+ * actually happened. Deliberately uncapped: a person away for three weeks has missed
+ * three weeks of arrivals and adoptions, and trimming that to a recent window would
+ * quietly decide on their behalf which ones did not matter.
+ *
+ * A null `since` means this account has never been stamped. That is a first sight, not
+ * a backlog — the caller stamps the present and shows nothing, rather than replaying
+ * the shelter's entire history at someone on their first login.
  */
 export async function listUnseenSyncEvents(since: DateValue | null | undefined): Promise<SyncEvent[]> {
 	const ref = eventsRef();
-	if (!ref) return [];
-
-	const window = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 	const seenAt = toDate(since ?? null);
-	// A stamp older than the window would re-show long-past celebrations to someone
-	// returning from vacation; the window wins in that case.
-	const cutoff = seenAt && seenAt > window ? seenAt : window;
+	if (!ref || !seenAt) return [];
 
-	const snapshot = await getDocs(query(ref, where('createdAt', '>', cutoff.toISOString())));
+	const snapshot = await getDocs(query(ref, where('createdAt', '>', seenAt.toISOString())));
 	return snapshot.docs
 		.map((d) => {
 			const data = d.data();

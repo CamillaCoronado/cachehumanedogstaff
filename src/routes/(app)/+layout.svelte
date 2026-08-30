@@ -11,6 +11,7 @@
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { normalizeText } from '$lib/utils/labels';
+	import { toDate } from '$lib/utils/dates';
 	import { canAccessVolunteers, canAccessDayTrips, canEditDogs, canViewInternalDogInfo } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
 	import { recordSyncEvents, listUnseenSyncEvents } from '$lib/data/syncEvents';
@@ -63,6 +64,7 @@
 	let overlayCheckStarted = false;
 	let overlayCheckInFlight = false;
 	let seenStamp: DateValue | null = null;
+	let batchNewest: Date | null = null;
 	let asmSyncing = false;
 	let asmSyncedAt: string | null = null;
 	let asmError: string | null = null;
@@ -73,7 +75,7 @@
 	import { getDog } from '$lib/data/dogs';
 	import type { DateValue, Dog } from '$lib/types';
 	import { confetti } from '@neoconfetti/svelte';
-	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer' | 'incoming'; dogs: Dog[] };
+	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer' | 'incoming'; dogs: Dog[]; eventAt?: Date };
 	let overlayQueue: OverlayItem[] = [];
 	let currentOverlay: OverlayItem | null = null;
 
@@ -84,12 +86,32 @@
 	}
 
 	function advanceOverlay() {
+		// Record progress as each one is dismissed. Stamping the whole batch on arrival
+		// meant closing the tab after the first overlay marked the rest seen, and they
+		// were never shown again.
+		if (currentOverlay?.eventAt) void markSyncEventsSeen(currentOverlay.eventAt);
+
 		if (overlayQueue.length > 0) {
 			currentOverlay = overlayQueue[0];
 			overlayQueue = overlayQueue.slice(1);
 		} else {
 			currentOverlay = null;
+			// The batch is finished, so anything in it that produced no overlay — an event
+			// whose dogs have since been deleted — is caught up too.
+			if (batchNewest) {
+				void markSyncEventsSeen(batchNewest);
+				batchNewest = null;
+			}
 		}
+	}
+
+	async function markSyncEventsSeen(at: Date) {
+		const current = toDate(seenStamp ?? null);
+		if (current && current >= at) return;
+		seenStamp = at;
+		const uid = $authUser?.uid;
+		if (!uid) return;
+		await updateUserProfile(uid, { lastSeenSyncEventAt: at }).catch(() => {});
 	}
 
 	function portal(node: HTMLElement) {
@@ -140,7 +162,10 @@
 	$: if ($authReady && $authUser && $authProfile && !overlayCheckStarted) {
 		overlayCheckStarted = true;
 		seenStamp = $authProfile.lastSeenSyncEventAt ?? null;
-		void showUnseenSyncEvents();
+		if (seenStamp) void showUnseenSyncEvents();
+		// Never stamped: a first sight, not a backlog. Start the clock now so the next
+		// visit shows everything from here rather than the whole archive at once.
+		else void markSyncEventsSeen(new Date());
 	}
 
 	async function showUnseenSyncEvents() {
@@ -158,21 +183,18 @@
 					const dogs = (await Promise.all(event.dogIds.map((id) => getDog(id)))).filter(
 						(d): d is Dog => d !== null
 					);
-					return dogs.length > 0 ? { type: event.type, dogs } : null;
+					return dogs.length > 0 ? { type: event.type, dogs, eventAt: event.createdAt } : null;
 				})
 			);
-			const pending = items.filter((i): i is OverlayItem => i !== null);
+			const pending: OverlayItem[] = items.filter((i) => i !== null) as OverlayItem[];
+			if (pending.length === 0) return;
 
-			// Stamp regardless of whether anything rendered: an event whose dogs have all
-			// been deleted is still seen, and re-checking it every load is pure cost.
-			const newest = events[events.length - 1].createdAt;
-			seenStamp = newest;
-			await updateUserProfile(uid, { lastSeenSyncEventAt: newest }).catch(() => {});
+			batchNewest = events[events.length - 1].createdAt;
 
-			if (pending.length > 0 && !currentOverlay) {
-				overlayQueue = pending;
-				advanceOverlay();
-			}
+			// Append rather than replace: a sync landing while someone is still clicking
+			// through an earlier batch used to discard the new one entirely.
+			overlayQueue = [...overlayQueue, ...pending];
+			if (!currentOverlay) advanceOverlay();
 		} catch (err) {
 			console.error('[sync events]', err);
 		} finally {
