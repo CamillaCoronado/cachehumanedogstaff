@@ -186,6 +186,24 @@ describe('parseFeedingMessage', () => {
 		]);
 	});
 
+	it('does not read every "didn\'t" as a refusal to eat', () => {
+		// Real message. The bare fallback used to fire on any "didn't", turning a note
+		// about water into a feeding record.
+		expect(parse("Also yesterday Buck didn't drink water outside at all").entries).toEqual([]);
+		expect(parse("Duke was very defensive this morning and we didn't handle him").entries).toEqual([]);
+	});
+
+	it('still reads a trailing bare "didnt"', () => {
+		const result = parse('River uno ate half Tasha thor Linda doug didnt');
+		expect(result.entries.find((e) => e.name === 'Doug')?.amountEaten).toBe('none');
+	});
+
+	it('recognises the second meal as its own slot', () => {
+		// Real message. Filed as morning it contradicts whatever the AM report already said.
+		expect(parse('Cookie vomitted a lot and ate a little of second meal').mealTime).toBe('second');
+		expect(parse('Buck ate half of his 2nd meal').mealTime).toBe('second');
+	});
+
 	it('returns nothing useful without a roster', () => {
 		// Names here are overwhelmingly lowercase, so there is no safe way to spot them
 		// without knowing the dogs. Better empty than invented.

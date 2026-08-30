@@ -30,6 +30,9 @@ const UNDO = has('undo');
 const EXPAND_BLANKETS = has('expand-blankets');
 const CHANNEL = flag('channel', 'dog-staff');
 const SHOW = Number(flag('show', 20));
+const REPORT = has('report');
+// The app only wants this year; anything earlier is history nobody will look at.
+const SINCE = new Date(`${flag('since', '2026-01-01')}T00:00:00`).getTime();
 
 const SOURCE = 'slack';
 const LOGGED_BY = 'slack-import';
@@ -67,13 +70,22 @@ function dayKey(date) {
 }
 
 /**
- * Only 11% of messages state AM or PM, so the rest is inferred from when the message
- * was posted. Noon is the split, which is imperfect — the busiest hours straddle it —
- * so the flag is recorded on the log rather than hidden.
+ * The shelter feeds again at 3pm, so a message posted at 1pm is still reporting the
+ * morning feed. Splitting at noon — the obvious choice — would misfile most of the
+ * midday reports, and 10am–1pm is the busiest window in the channel.
  */
+const PM_FEED_HOUR = 15;
+/** Posts within an hour either side of the changeover are the ones most likely misfiled. */
+const BOUNDARY_HOURS = 1;
+
 function resolveMealTime(parsed, postedAt) {
 	if (parsed.mealTime) return { mealTime: parsed.mealTime, inferred: false };
-	return { mealTime: postedAt.getHours() < 12 ? 'am' : 'pm', inferred: true };
+	const hour = postedAt.getHours();
+	return {
+		mealTime: hour < PM_FEED_HOUR ? 'am' : 'pm',
+		inferred: true,
+		boundary: Math.abs(hour - PM_FEED_HOUR) <= BOUNDARY_HOURS
+	};
 }
 
 function messagesFrom(file) {
@@ -99,6 +111,53 @@ async function undo(store) {
 		done += Math.min(400, snap.docs.length - i);
 		console.log(`  deleted ${done}/${snap.size}`);
 	}
+}
+
+/**
+ * What to distrust, rather than what was produced. Totals look fine even when
+ * individual records are wrong, so this surfaces the specific shapes most likely to be
+ * a bad read.
+ */
+function reportProblems(planned) {
+	const line = (t) => console.log(t);
+	line(`\n${'='.repeat(70)}\nWHAT TO CHECK\n${'='.repeat(70)}`);
+
+	// 1. Two messages disagreeing about the same dog, day and meal. One of them is wrong,
+	//    and a re-run would silently keep whichever was written last.
+	const slots = new Map();
+	for (const p of planned) {
+		const key = `${p.dogId}|${p.date}|${p.mealTime}`;
+		if (!slots.has(key)) slots.set(key, []);
+		slots.get(key).push(p);
+	}
+	const conflicts = [...slots.values()].filter(
+		(g) => new Set(g.map((x) => x.amountEaten)).size > 1
+	);
+	line(`\n1. Contradictions — same dog, same meal, different amounts: ${conflicts.length}`);
+	for (const g of conflicts.slice(0, 8)) {
+		line(`   ${g[0].date} ${g[0].mealTime} ${g[0].dogName}: ${g.map((x) => x.amountEaten).join(' vs ')}`);
+		for (const x of g) line(`      "${x.text.slice(0, 100)}"`);
+	}
+
+	// 2. Posts near the 3pm changeover, where the inferred meal is a coin flip.
+	const boundary = planned.filter((p) => p.boundary);
+	line(`\n2. Posted near the 3pm feed, so AM/PM is a guess: ${boundary.length}`);
+	for (const p of boundary.slice(0, 6)) {
+		line(`   ${p.date} ${String(p.postedAt.getHours()).padStart(2, '0')}:${String(p.postedAt.getMinutes()).padStart(2, '0')} -> ${p.mealTime}  ${p.dogName} ${p.amountEaten}`);
+	}
+
+	// 3. One message naming a lot of dogs is either a genuine roll-call or an over-match.
+	const big = [...new Map(planned.filter((p) => p.entryCount >= 8).map((p) => [p.slackTs, p])).values()];
+	line(`\n3. Messages naming 8+ dogs at once: ${big.length}`);
+	for (const p of big.slice(0, 5)) line(`   ${p.entryCount} dogs: "${p.text.slice(0, 110)}"`);
+
+	// 4. 'all' is the least distinctive reading — the bare "ate" fallback lands here, so
+	//    it is where a misread is most likely to hide.
+	const alls = planned.filter((p) => p.amountEaten === 'all');
+	line(`\n4. Logged as ate-everything (from a bare "ate"): ${alls.length}`);
+	for (const p of alls.slice(0, 6)) line(`   ${p.dogName}: "${p.text.slice(0, 105)}"`);
+
+	line(`\n${'='.repeat(70)}`);
 }
 
 async function main() {
@@ -163,7 +222,8 @@ async function main() {
 		// "do not feed" is an instruction about a meal that never happened. It is parsed
 		// so it cannot be mistaken for a record — and then deliberately not written.
 		const postedAt = new Date(Number(m.ts) * 1000);
-		const { mealTime, inferred } = resolveMealTime(parsed, postedAt);
+		if (postedAt.getTime() < SINCE) continue;
+		const { mealTime, inferred, boundary } = resolveMealTime(parsed, postedAt);
 
 		for (const entry of parsed.entries) {
 			const dogId = resolveDog(entry.name, postedAt);
@@ -181,6 +241,9 @@ async function main() {
 				mealTime,
 				amountEaten: entry.amountEaten,
 				mealTimeInferred: inferred,
+				boundary: Boolean(boundary),
+				postedAt,
+				entryCount: parsed.entries.length,
 				slackTs: String(m.ts),
 				text: m.text.replace(/\s+/g, ' ').trim()
 			});
@@ -202,6 +265,8 @@ async function main() {
 	for (const p of planned.slice(0, SHOW)) {
 		console.log(`  ${p.date} ${p.mealTime}${p.mealTimeInferred ? '?' : ' '} ${p.dogName.padEnd(16)} ${p.amountEaten}`);
 	}
+
+	if (REPORT) reportProblems(planned);
 
 	if (!WRITE) {
 		console.log(`\nPreview only. Nothing written. Re-run with --write to commit.`);

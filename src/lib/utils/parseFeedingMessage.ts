@@ -40,7 +40,11 @@ const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
 	{ re: /ate\s+(?:everything|their\s+food|his\s+food|her\s+food)/i, amount: 'all' },
 	{ re: /\bfinished\b/i, amount: 'all' },
 	// Bare verbs last: they are the fallback once every qualified form has missed.
-	{ re: /\bdid(?:n'?t|nt)\b(?!\s+eat)/i, amount: 'none' },
+	// A trailing "didnt" carries the meaning on its own — "Tasha thor Linda doug didnt".
+	// Only at the end of a clause, though: mid-sentence it almost always belongs to a
+	// different verb, and matching it turned "didn't drink water", "didn't handle him"
+	// and "didn't get to it" into records of dogs refusing food.
+	{ re: /\bdid(?:n'?t|nt)\b(?=\s*$|\s*[.,;•!?])/i, amount: 'none' },
 	{ re: /\bate\b/i, amount: 'all' }
 ];
 
@@ -48,6 +52,9 @@ const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
 // the roster can tell "Buck" from "Bruno has bad poop".
 const MEAL_AM = /\b(?:this\s+)?(?:morning|breakfast|am|a\.m\.)\b/i;
 const MEAL_PM = /\b(?:this\s+)?(?:dinner|evening|tonight|pm|p\.m\.|supper)\b/i;
+// The third feed of the day is its own slot in the schema. Without this, a note about
+// it lands on the morning and contradicts whatever was already logged there.
+const MEAL_SECOND = /\b(?:second|2nd)\s+meal\b/i;
 
 const DO_NOT_FEED = /\b(?:do\s+not|don'?t)\s+feed\b\s*:?\s*/i;
 const EVERYONE = /\b(?:everyone|every\s?body|every\s?one|all(?:\s+(?:the|of\s+the))?\s+dogs?)\b/i;
@@ -239,7 +246,15 @@ export function parseFeedingMessage(
 		for (const name of namesIn(sameSentence, roster)) push(name, lastAmount);
 	}
 
-	const mealTime: MealTime | null = MEAL_AM.test(text) ? 'am' : MEAL_PM.test(text) ? 'pm' : null;
+	// Checked first: "second meal" also contains no am/pm cue, but a message can mention
+	// both ("didn't eat this morning, ate half of second meal") and the specific wins.
+	const mealTime: MealTime | null = MEAL_SECOND.test(text)
+		? 'second'
+		: MEAL_AM.test(text)
+			? 'am'
+			: MEAL_PM.test(text)
+				? 'pm'
+				: null;
 
 	return { entries, allAte, doNotFeed, mealTime };
 }
