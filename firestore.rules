@@ -162,6 +162,17 @@ service cloud.firestore {
       allow update, delete: if canEditDogs();
     }
 
+    // What the last ASM sync observed — adoptions, fosters, transfers, arrivals.
+    // The sync reconciles Firestore with ASM, so the diff exists exactly once; writing
+    // it here is what lets every user see the celebration instead of only the browser
+    // that happened to run the sync. Written by dog editors (the only ones who can
+    // sync), read by everyone, and never edited after the fact.
+    match /syncEvents/{eventId} {
+      allow read: if isApproved();
+      allow create: if canEditDogs();
+      allow update, delete: if isAdmin();
+    }
+
     match /playgroupSessions/{sessionId} {
       allow read: if isApproved();
       allow create, update, delete: if canEditPlaygroups();

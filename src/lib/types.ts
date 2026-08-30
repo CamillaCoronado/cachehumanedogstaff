@@ -15,6 +15,8 @@ export interface UserProfile {
 	approved?: boolean;
 	// E.164 (e.g. +14355550134) — the phone-inbox allowlist (docs/phone-inbox-plan.md)
 	phoneNumber?: string | null;
+	/** Newest syncEvents entry this user has been shown, so celebrations play once per person. */
+	lastSeenSyncEventAt?: DateValue | null;
 	createdAt: DateValue;
 	updatedAt: DateValue;
 }

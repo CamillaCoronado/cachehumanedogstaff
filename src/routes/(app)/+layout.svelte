@@ -13,6 +13,8 @@
 	import { normalizeText } from '$lib/utils/labels';
 	import { canAccessVolunteers, canAccessDayTrips, canEditDogs, canViewInternalDogInfo } from '$lib/utils/permissions';
 	import { syncAnimalsFromASM, type SyncChange } from '$lib/data/asm-sync';
+	import { recordSyncEvents, listUnseenSyncEvents } from '$lib/data/syncEvents';
+	import { updateUserProfile } from '$lib/data/users';
 	import { syncVersion } from '$lib/stores/sync';
 	import { readJson, writeJson } from '$lib/utils/storage';
 	import PhotoDebugPanel from '$lib/components/debug/PhotoDebugPanel.svelte';
@@ -58,8 +60,9 @@
 	let animating = false;
 	let mobileNavOpen = false;
 	let asmAttempted = false;
-	let storedOverlayChanges: SyncChange[] | null = null;
-	let storedOverlayAttempted = false;
+	let overlayCheckStarted = false;
+	let overlayCheckInFlight = false;
+	let seenStamp: DateValue | null = null;
 	let asmSyncing = false;
 	let asmSyncedAt: string | null = null;
 	let asmError: string | null = null;
@@ -68,7 +71,7 @@
 	let asmLogVisible = false;
 
 	import { getDog } from '$lib/data/dogs';
-	import type { Dog } from '$lib/types';
+	import type { DateValue, Dog } from '$lib/types';
 	import { confetti } from '@neoconfetti/svelte';
 	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer' | 'incoming'; dogs: Dog[] };
 	let overlayQueue: OverlayItem[] = [];
@@ -86,7 +89,6 @@
 			overlayQueue = overlayQueue.slice(1);
 		} else {
 			currentOverlay = null;
-			ackStoredOverlay();
 		}
 	}
 
@@ -96,13 +98,7 @@
 	}
 
 	const STORAGE_KEY = 'asm_last_changes';
-	type StoredSyncState = { changes: SyncChange[]; changedAt: string; overlayAcked?: boolean };
-
-	// Ack the sync-change overlay so it doesn't re-show on the next load.
-	function ackStoredOverlay() {
-		const parsed = readJson<StoredSyncState | null>(STORAGE_KEY, null);
-		if (parsed) writeJson(STORAGE_KEY, { ...parsed, overlayAcked: true });
-	}
+	type StoredSyncState = { changes: SyncChange[]; changedAt: string };
 
 	beforeNavigate(({ from, to }) => {
 		const fromIdx = tabs.findIndex(t => t.href === from?.url.pathname);
@@ -121,13 +117,9 @@
 		initAuthListener();
 		const parsed = readJson<StoredSyncState | null>(STORAGE_KEY, null);
 		if (parsed) {
+			// Feeds the sync-log panel only; overlays now come from the shared record.
 			asmChanges = parsed.changes;
 			asmLastChangedAt = parsed.changedAt;
-			if (!parsed.overlayAcked && parsed.changes.some(
-				(c) => c.isArchived || c.isTransferredOut || c.isNew || c.fields.some((f) => f === 'Foster (yes)')
-			)) {
-				storedOverlayChanges = parsed.changes;
-			}
 		}
 	});
 
@@ -141,30 +133,51 @@
 		goto('/login');
 	}
 
-	$: if ($authReady && $authUser && storedOverlayChanges && !storedOverlayAttempted) {
-		storedOverlayAttempted = true;
-		const changes = storedOverlayChanges;
-		// Ack immediately so a browser close before the user clicks "Close" doesn't re-show on next load
-		ackStoredOverlay();
-		const buildOverlay = async (filtered: SyncChange[], type: OverlayItem['type']): Promise<OverlayItem | null> => {
-			if (filtered.length === 0) return null;
-			try {
-				const dogs = (await Promise.all(filtered.map((c) => getDog(c.id)))).filter((d): d is Dog => d !== null);
-				return dogs.length > 0 ? { type, dogs } : null;
-			} catch { return null; }
-		};
-		Promise.all([
-			buildOverlay(changes.filter((c) => c.isArchived), 'adoption'),
-			buildOverlay(changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)')), 'foster'),
-			buildOverlay(changes.filter((c) => c.isTransferredOut), 'transfer'),
-			buildOverlay(changes.filter((c) => c.isNew), 'incoming'),
-		]).then((items) => {
+	// Every approved user reads the shared record of what the last sync saw. Only dog
+	// editors can run the sync itself (it writes dog docs), so before this existed the
+	// celebration was visible to whoever's browser happened to win the race, and to
+	// nobody else — staff never saw it at all.
+	$: if ($authReady && $authUser && $authProfile && !overlayCheckStarted) {
+		overlayCheckStarted = true;
+		seenStamp = $authProfile.lastSeenSyncEventAt ?? null;
+		void showUnseenSyncEvents();
+	}
+
+	async function showUnseenSyncEvents() {
+		const uid = $authUser?.uid;
+		// The sync path calls this too. Serialise both callers through one in-flight
+		// promise so a sync finishing mid-check cannot replay the same events.
+		if (!uid || overlayCheckInFlight) return;
+		overlayCheckInFlight = true;
+		try {
+			const events = await listUnseenSyncEvents(seenStamp);
+			if (events.length === 0) return;
+
+			const items = await Promise.all(
+				events.map(async (event) => {
+					const dogs = (await Promise.all(event.dogIds.map((id) => getDog(id)))).filter(
+						(d): d is Dog => d !== null
+					);
+					return dogs.length > 0 ? { type: event.type, dogs } : null;
+				})
+			);
 			const pending = items.filter((i): i is OverlayItem => i !== null);
+
+			// Stamp regardless of whether anything rendered: an event whose dogs have all
+			// been deleted is still seen, and re-checking it every load is pure cost.
+			const newest = events[events.length - 1].createdAt;
+			seenStamp = newest;
+			await updateUserProfile(uid, { lastSeenSyncEventAt: newest }).catch(() => {});
+
 			if (pending.length > 0 && !currentOverlay) {
 				overlayQueue = pending;
 				advanceOverlay();
 			}
-		});
+		} catch (err) {
+			console.error('[sync events]', err);
+		} finally {
+			overlayCheckInFlight = false;
+		}
 	}
 
 	$: if ($authReady && $authUser && $authProfile && canEditDogs($authProfile.role) && !asmAttempted) {
@@ -185,25 +198,11 @@
 					asmLogVisible = true;
 				}
 
-				const buildOverlay = async (ids: string[], type: OverlayItem['type']): Promise<OverlayItem | null> => {
-					if (ids.length === 0) return null;
-					try {
-						const dogs = (await Promise.all(ids.map((id) => getDog(id)))).filter((d): d is Dog => d !== null);
-						return dogs.length > 0 ? { type, dogs } : null;
-					} catch {
-						return null;
-					}
-				};
-
-				Promise.all([
-					buildOverlay(result.changes.filter((c) => c.isArchived).map(c => c.id), 'adoption'),
-					buildOverlay(result.changes.filter((c) => c.fields.some((f) => f === 'Foster (yes)')).map(c => c.id), 'foster'),
-					buildOverlay(result.changes.filter((c) => c.isTransferredOut).map(c => c.id), 'transfer'),
-					buildOverlay(result.changes.filter((c) => c.isNew).map(c => c.id), 'incoming'),
-				]).then((items) => {
-					overlayQueue = items.filter((item): item is OverlayItem => item !== null);
-					advanceOverlay();
-				});
+				// Publish what this sync saw so every user gets the celebration, then show
+				// it here through the same path they use.
+				void recordSyncEvents(result.changes)
+					.catch((err: unknown) => console.error('[sync events]', err))
+					.then(() => showUnseenSyncEvents());
 			})
 			.catch((err: unknown) => {
 				asmError = err instanceof Error ? err.message : 'Sync failed';
