@@ -75,7 +75,7 @@
 	import { getDog } from '$lib/data/dogs';
 	import type { DateValue, Dog } from '$lib/types';
 	import { confetti } from '@neoconfetti/svelte';
-	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer' | 'incoming'; dogs: Dog[]; eventAt?: Date };
+	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer' | 'incoming' | 'returned'; dogs: Dog[]; eventAt?: Date };
 	let overlayQueue: OverlayItem[] = [];
 	let currentOverlay: OverlayItem | null = null;
 
@@ -103,6 +103,12 @@
 				batchNewest = null;
 			}
 		}
+	}
+
+	/** Back after leaving — a re-entry dated later than the original intake. */
+	function isReturning(dog: Dog): boolean {
+		const intake = toDate(dog.intakeDate ?? null)?.getTime() ?? 0;
+		return (dog.reentryDates ?? []).some((d) => (toDate(d)?.getTime() ?? 0) > intake);
 	}
 
 	async function markSyncEventsSeen(at: Date) {
@@ -177,15 +183,28 @@
 			const events = await listUnseenSyncEvents(seenStamp);
 			if (events.length === 0) return;
 
-			const items = await Promise.all(
+			const built = await Promise.all(
 				events.map(async (event) => {
 					const dogs = (await Promise.all(event.dogIds.map((id) => getDog(id)))).filter(
 						(d): d is Dog => d !== null
 					);
-					return dogs.length > 0 ? { type: event.type, dogs, eventAt: event.createdAt } : null;
+					if (dogs.length === 0) return [];
+
+					// A dog the sync sees as incoming may be coming back rather than
+					// arriving for the first time. Same rule the movements summary uses:
+					// a re-entry later than the original intake means it returned.
+					if (event.type === 'incoming') {
+						const back = dogs.filter(isReturning);
+						const fresh = dogs.filter((d) => !isReturning(d));
+						return [
+							...(fresh.length ? [{ type: 'incoming' as const, dogs: fresh, eventAt: event.createdAt }] : []),
+							...(back.length ? [{ type: 'returned' as const, dogs: back, eventAt: event.createdAt }] : [])
+						];
+					}
+					return [{ type: event.type, dogs, eventAt: event.createdAt }];
 				})
 			);
-			const pending: OverlayItem[] = items.filter((i) => i !== null) as OverlayItem[];
+			const pending: OverlayItem[] = built.flat();
 			if (pending.length === 0) return;
 
 			batchNewest = events[events.length - 1].createdAt;
@@ -602,10 +621,16 @@
 			<button class="foster-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
 		</div>
 	</div>
-{:else if currentOverlay?.type === 'incoming'}
+{:else if currentOverlay?.type === 'incoming' || currentOverlay?.type === 'returned'}
 	<div class="incoming-overlay" use:portal role="presentation" on:click={advanceOverlay}>
 		<div class="incoming-moment">
-			<p class="incoming-heading">New arrival{currentOverlay.dogs.length > 1 ? 's' : ''} at the shelter 🐾</p>
+			<p class="incoming-heading">
+				{#if currentOverlay.type === 'returned'}
+					{currentOverlay.dogs.length > 1 ? 'Dogs have' : 'Dog has'} returned to the shelter 🐾
+				{:else}
+					New arrival{currentOverlay.dogs.length > 1 ? 's' : ''} at the shelter 🐾
+				{/if}
+			</p>
 			<div class="incoming-dogs-row">
 				{#each currentOverlay.dogs.slice(0, 5) as dog}
 					<div class="incoming-dog-item">

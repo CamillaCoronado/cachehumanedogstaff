@@ -6,6 +6,13 @@ import { toDate } from '$lib/utils/dates';
 
 export type SyncEventType = 'adoption' | 'foster' | 'transfer' | 'incoming';
 
+/**
+ * The order celebrations play in, so a sync's four events always queue the same way
+ * instead of however Firestore happened to return them — they share a timestamp, so
+ * without this the sequence is arbitrary.
+ */
+export const SYNC_EVENT_ORDER: SyncEventType[] = ['adoption', 'foster', 'incoming', 'transfer'];
+
 export interface SyncEvent {
 	id: string;
 	type: SyncEventType;
@@ -107,5 +114,9 @@ export async function listUnseenSyncEvents(since: DateValue | null | undefined):
 			};
 		})
 		.filter((e) => e.dogIds.length > 0)
-		.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+		.sort(
+			(a, b) =>
+				a.createdAt.getTime() - b.createdAt.getTime() ||
+				SYNC_EVENT_ORDER.indexOf(a.type) - SYNC_EVENT_ORDER.indexOf(b.type)
+		);
 }
