@@ -70,67 +70,24 @@ function dayKey(date) {
 }
 
 /**
- * The shelter feeds again at 3pm, so a message posted at 1pm is still reporting the
- * morning feed. Splitting at noon — the obvious choice — would misfile most of the
- * midday reports, and 10am–1pm is the busiest window in the channel.
+ * The rule, from the shelter: anything posted after 3pm is the afternoon feed, anything
+ * before it is the morning one — unless the message says "morning", which means a
+ * morning feed being reported late.
+ *
+ * An earlier version also tried to infer the slot from the order of a day's reports.
+ * That could override the clock, which is not what the shelter does.
  */
 const PM_FEED_HOUR = 15;
-/** Posts within an hour either side of the changeover are the ones most likely misfiled. */
-const BOUNDARY_HOURS = 1;
 
-function resolveMealTime(parsed, postedAt) {
-	if (parsed.mealTime) return { mealTime: parsed.mealTime, inferred: false };
-	const hour = postedAt.getHours();
-	return {
-		mealTime: hour < PM_FEED_HOUR ? 'am' : 'pm',
-		inferred: true,
-		boundary: Math.abs(hour - PM_FEED_HOUR) <= BOUNDARY_HOURS
-	};
-}
-
-/**
- * Assigns each entry to a meal slot, per dog per day.
- *
- * A message that names its meal is taken at its word. Otherwise the day's reports for
- * that dog are read in order: with two of them the first is the morning feed and the
- * second the afternoon one, whatever the clock says — which is more reliable than any
- * cutoff, since a report is written whenever someone gets to it. Only a dog with a
- * single unlabelled report that day falls back to the 3pm split.
- */
 function assignMealTimes(planned) {
-	const byDogDay = new Map();
 	for (const p of planned) {
-		const key = `${p.dogId}|${p.date}`;
-		if (!byDogDay.has(key)) byDogDay.set(key, []);
-		byDogDay.get(key).push(p);
-	}
-
-	const ORDERED = ['am', 'pm', 'second'];
-	for (const group of byDogDay.values()) {
-		group.sort((a, b) => a.postedAt - b.postedAt);
-		const unlabelled = group.filter((p) => !p.statedMealTime);
-		const taken = new Set(group.filter((p) => p.statedMealTime).map((p) => p.statedMealTime));
-
-		for (const p of group) {
-			if (p.statedMealTime) {
-				p.mealTime = p.statedMealTime;
-				p.mealTimeInferred = false;
-				p.boundary = false;
-				continue;
-			}
-			if (unlabelled.length > 1) {
-				// Position in the day decides it; skip slots an explicit message already claimed.
-				const slot = ORDERED.filter((s) => !taken.has(s))[unlabelled.indexOf(p)] ?? 'pm';
-				p.mealTime = slot;
-				p.mealTimeInferred = true;
-				p.boundary = false; // ordering settled it, the clock did not have to
-				continue;
-			}
-			const { mealTime, boundary } = resolveMealTime({ mealTime: null }, p.postedAt);
-			p.mealTime = mealTime;
-			p.mealTimeInferred = true;
-			p.boundary = Boolean(boundary);
+		if (p.statedMealTime) {
+			p.mealTime = p.statedMealTime;
+			p.mealTimeInferred = false;
+			continue;
 		}
+		p.mealTime = p.postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm';
+		p.mealTimeInferred = true;
 	}
 }
 
@@ -185,12 +142,11 @@ function reportProblems(planned) {
 		for (const x of g) line(`      "${x.text.slice(0, 100)}"`);
 	}
 
-	// 2. Posts near the 3pm changeover, where the inferred meal is a coin flip.
-	const boundary = planned.filter((p) => p.boundary);
-	line(`\n2. Posted near the 3pm feed, so AM/PM is a guess: ${boundary.length}`);
-	for (const p of boundary.slice(0, 6)) {
-		line(`   ${p.date} ${String(p.postedAt.getHours()).padStart(2, '0')}:${String(p.postedAt.getMinutes()).padStart(2, '0')} -> ${p.mealTime}  ${p.dogName} ${p.amountEaten}`);
-	}
+	// 2. Which slot the 3pm rule put things in.
+	const pm = planned.filter((p) => p.mealTime === 'pm').length;
+	const am = planned.filter((p) => p.mealTime === 'am').length;
+	const second = planned.filter((p) => p.mealTime === 'second').length;
+	line(`\n2. Meal slots by the 3pm rule: ${am} morning, ${pm} afternoon, ${second} second meal`);
 
 	// 3. One message naming a lot of dogs is either a genuine roll-call or an over-match.
 	const big = [...new Map(planned.filter((p) => p.entryCount >= 8).map((p) => [p.slackTs, p])).values()];
@@ -346,7 +302,7 @@ async function main() {
 			}
 			byMsg.get(p.slackTs).logs.push({
 				dog: p.dogName, amount: p.amountEaten, meal: p.mealTime,
-				inferred: p.mealTimeInferred, boundary: p.boundary
+				inferred: p.mealTimeInferred
 			});
 		}
 		const out = [...byMsg.values()].sort((a, b) => Number(b.ts) - Number(a.ts));
