@@ -44,6 +44,40 @@ function loadEnv() {
 	}
 }
 
+/**
+ * Current names straight from ASM, keyed by animal id.
+ *
+ * Firestore mirrors ASM, but a rename does not always make it across: "Belmont" was
+ * still filed under her old name Malone, colliding with the dog who actually is Malone
+ * and making every "Malone" in the chat ambiguous. ASM is the system of record for what
+ * a dog is called today, so names come from there when it knows the animal.
+ */
+async function asmNames() {
+	const { ASM_URL, ASM_ACCOUNT, ASM_USER, ASM_PASS } = process.env;
+	if (!ASM_URL || !ASM_ACCOUNT || !ASM_USER || !ASM_PASS) return new Map();
+	const base = `${ASM_URL}/asmservice?account=${encodeURIComponent(ASM_ACCOUNT)}&username=${encodeURIComponent(ASM_USER)}&password=${encodeURIComponent(ASM_PASS)}`;
+	const get = async (qs) => {
+		try {
+			const res = await fetch(`${base}&${qs}`);
+			if (!res.ok) return [];
+			const body = await res.json();
+			return Array.isArray(body) ? body : [];
+		} catch {
+			return [];
+		}
+	};
+	const [current, departed] = await Promise.all([
+		get('method=json_shelter_animals&sensitive=1'),
+		get('method=json_adopted_animals&fromdate=2026-01-01&todate=2026-12-31')
+	]);
+	const names = new Map();
+	for (const a of [...current, ...departed]) {
+		const name = String(a.ANIMALNAME ?? '').trim();
+		if (a.ID != null && name) names.set(String(a.ID), name);
+	}
+	return names;
+}
+
 function db() {
 	initializeApp({
 		credential: cert({
@@ -209,14 +243,20 @@ async function main() {
 
 	// Roster from Firestore, not ASM: the doc id is what the log has to be filed under,
 	// and a dog named in chat but absent from Firestore has nowhere to put a log.
-	const dogsSnap = await store
-		.collection('dogs')
-		.select('name', 'intakeDate', 'leftShelterDate', 'status', 'asmShelterCode')
-		.get();
+	const [dogsSnap, liveNames] = await Promise.all([
+		store.collection('dogs').select('name', 'intakeDate', 'leftShelterDate', 'status', 'asmShelterCode').get(),
+		asmNames()
+	]);
+	let renamed = 0;
 	const byName = new Map();
 	const roster = [];
 	for (const d of dogsSnap.docs) {
 		const data = d.data();
+		// ASM's name wins when it knows this animal: Firestore can be holding a name the
+		// dog no longer has, which then collides with whichever dog does have it.
+		const live = liveNames.get(d.id);
+		if (live && live !== data.name) renamed++;
+		data.name = live ?? data.name;
 		if (!data.name) continue;
 		roster.push(data.name);
 		// Names repeat across years — three Rockys, three Birdies. Keep every candidate
@@ -233,7 +273,10 @@ async function main() {
 		byName.get(data.name).push({ id: d.id, from, to, code: data.asmShelterCode ?? null });
 	}
 	const ambiguousNames = [...byName].filter(([, v]) => v.length > 1).length;
-	console.log(`Roster: ${roster.length} dogs from Firestore (${ambiguousNames} names shared by more than one dog)\n`);
+	console.log(
+		`Roster: ${roster.length} dogs (${ambiguousNames} names shared by more than one dog` +
+			`${renamed ? `, ${renamed} renamed since Firestore last synced` : ''})\n`
+	);
 
 	/** The dog of this name that was actually at the shelter on `when`. */
 	function resolveDog(name, when) {
