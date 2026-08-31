@@ -207,6 +207,10 @@ export function planFeedings(text: string, postedAt: Date, index: DogIndex): Pla
 	}
 	if (planned.length === 0) return [];
 
+	// Only the shift's round-up accounts for the dogs it does not name. A passing remark
+	// about one dog says nothing about the rest, so it records that dog and stops.
+	if (!parsed.looksLikeReport) return planned;
+
 	// A dog told not to be fed did not refuse a meal and did not eat one either.
 	const excluded = new Set(
 		parsed.doNotFeed.map((name) => resolveDogId(index, name, postedAt)).filter(Boolean) as string[]

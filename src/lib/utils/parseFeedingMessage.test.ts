@@ -322,6 +322,30 @@ describe('parseFeedingMessage', () => {
 				.toEqual([{ name: 'Frida', amountEaten: 'none' }]);
 		});
 
+		it('reads "eat" for "ate" when an amount follows', () => {
+			// Real message, and the plainest statement of how staff report: exceptions
+			// first, then everyone else accounted for in one phrase.
+			const result = parseFeedingMessage(
+				"Roe, Dot,Zane,Myla didn't eat there food. Pickles, Ace, eat half of there food all the other eat all of ther food.",
+				['Roe', 'Dot (Freya)', 'Zane', 'Myla', 'Pickles', 'Ace is the Place']
+			);
+			expect(result.entries).toEqual([
+				{ name: 'Roe', amountEaten: 'none' },
+				{ name: 'Dot (Freya)', amountEaten: 'none' },
+				{ name: 'Zane', amountEaten: 'none' },
+				{ name: 'Myla', amountEaten: 'none' },
+				{ name: 'Pickles', amountEaten: 'half' },
+				{ name: 'Ace is the Place', amountEaten: 'half' }
+			]);
+			expect(result.allAte).toBe(true);
+		});
+
+		it('does not read a bare "eat" as a meal', () => {
+			// "eat" only counts with an amount after it; on its own it is ordinary prose.
+			expect(parseFeedingMessage('I got Duke to eat and approach me with wet food', ['Duke']).entries).toEqual([]);
+			expect(parseFeedingMessage('Sammy is eating her poop so pick up as soon as she goes', ['Sammy']).entries).toEqual([]);
+		});
+
 		it('recovers a name two edits out when it is long enough', () => {
 			expect(parseFeedingMessage("scrunchy didn't eat", ['Scrunchie']).entries)
 				.toEqual([{ name: 'Scrunchie', amountEaten: 'none' }]);

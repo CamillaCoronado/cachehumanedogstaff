@@ -21,6 +21,15 @@ export interface ParsedFeedingMessage {
 	doNotFeed: string[];
 	/** Only set when the message says so; inferring from post time is the caller's call. */
 	mealTime: MealTime | null;
+	/**
+	 * Whether this reads as the shift's feeding round-up rather than a passing remark.
+	 *
+	 * It matters because a round-up reports only exceptions — everyone unnamed ate — so a
+	 * caller may fill the rest of the shelter in. "Bodhi didn't eat much, but he did have
+	 * a solid poop" says nothing about the other eighty dogs, and treating it as a
+	 * round-up would invent eighty meals from one aside.
+	 */
+	looksLikeReport: boolean;
 }
 
 /**
@@ -33,15 +42,15 @@ const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
 	{ re: /did(?:n'?t| not)\s+(?:really\s+|want\s+to\s+)?(?:eat|finish|touch)/i, amount: 'none' },
 	{ re: /would(?:n'?t| not)\s+eat/i, amount: 'none' },
 	{ re: /(?:has|have|had)(?:n'?t| not)\s+eaten/i, amount: 'none' },
-	{ re: /ate\s+(?:about\s+|around\s+)?(?:half|1\/2)/i, amount: 'half' },
+	{ re: /(?:ate|eat)\s+(?:about\s+|around\s+)?(?:half|1\/2)/i, amount: 'half' },
 	// "ate about 1/4" is a real and common way to write it.
 	{ re: /ate\s+(?:about\s+|around\s+)?(?:1\/4|1\/3|a\s+quarter|a\s+third)/i, amount: 'little' },
 	// Food on the floor is food not eaten, whatever the quantity word attached to it.
 	{ re: /spill(?:ed|t)?\s+(?:most|all|it|some|his|her|their)/i, amount: 'little' },
-	{ re: /ate\s+most/i, amount: 'most' },
-	{ re: /ate\s+(?:a\s+)?(?:little|bit|few|some)\b(?:\s+bites?)?/i, amount: 'little' },
-	{ re: /ate\s+(?:it\s+)?all\b/i, amount: 'all' },
-	{ re: /ate\s+(?:everything|their\s+food|his\s+food|her\s+food)/i, amount: 'all' },
+	{ re: /(?:ate|eat)\s+most/i, amount: 'most' },
+	{ re: /(?:ate|eat)\s+(?:a\s+)?(?:little|bit|few|some)\b(?:\s+bites?)?/i, amount: 'little' },
+	{ re: /(?:ate|eat)\s+(?:it\s+)?all\b/i, amount: 'all' },
+	{ re: /(?:ate|eat)\s+(?:everything|there\s+food|their\s+food|his\s+food|her\s+food)/i, amount: 'all' },
 	{ re: /\bfinished\b/i, amount: 'all' },
 	// Bare verbs last: they are the fallback once every qualified form has missed.
 	// A trailing "didnt" carries the meaning on its own — "Tasha thor Linda doug didnt".
@@ -73,7 +82,15 @@ const DO_NOT_FEED = /\b(?:do\s+not|don'?t)\s+feed\b\s*:?\s*/i;
 const NOT_FOOD = /^\s*of\s+(?:a\s+|the\s+|his\s+|her\s+)?(?:rubber\s+|hard\s+|chew\s+)?(?:bone|bones|toy|toys|kong|stuffing|blanket|towel|leash|poop|grass|sock)/i;
 /** "won't do second meal" is a plan for a meal that will not happen, not a report of one. */
 const SECOND_NEGATED = /\b(?:no|won'?t|wont|not)\s+(?:do\s+|doing\s+|give\s+|giving\s+)?(?:a\s+)?(?:second|2nd)\s+meal\b/i;
-const EVERYONE = /\b(?:everyone|every\s?body|every\s?one|all(?:\s+(?:the|of\s+the))?\s+dogs?)\b/i;
+const EVERYONE =
+	/\b(?:everyone|every\s?body|every\s?one|all(?:\s+(?:the|of\s+the))?\s+dogs?|all\s+(?:the\s+)?others?|the\s+rest)\b/i;
+/** "…every body else did", "everyone else finished" — the rest are accounted for outright. */
+const EVERYONE_ELSE = /\b(?:every\s?(?:one|body)|all)\s+else\b|\belse\s+(?:did|ate|finished)\b/i;
+/**
+ * A round-up is terse: names and amounts, little else. Past roughly ten words a dog it
+ * is prose that happens to mention eating.
+ */
+const MAX_WORDS_PER_DOG = 10;
 
 /** Sentence and bullet boundaries — staff separate thoughts with all of these. */
 const SENTENCE_BREAK = /[.\n•!?;]|\s-\s/;
@@ -417,5 +434,15 @@ export function parseFeedingMessage(
 				? 'am'
 				: null;
 
-	return { entries, allAte, doNotFeed, mealTime };
+	// Three ways a message reads as the round-up: it uses heading form ("Didn't eat: …"),
+	// it says outright that everyone else ate, or it is a bare list of dogs and amounts.
+	const wordCount = text.trim().split(/\s+/).length;
+	const looksLikeReport =
+		entries.length > 0 &&
+		(hits.some((h) => h.colonLed) ||
+			allAte ||
+			EVERYONE_ELSE.test(text) ||
+			(entries.length >= 2 && wordCount / entries.length <= MAX_WORDS_PER_DOG));
+
+	return { entries, allAte, doNotFeed, mealTime, looksLikeReport };
 }
