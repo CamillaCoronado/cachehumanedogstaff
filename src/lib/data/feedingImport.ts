@@ -11,13 +11,22 @@ export interface DogRecord {
 	leftShelterDate?: string | null;
 	status?: string | null;
 	asmShelterCode?: string | null;
+	// Who the feeding shift actually feeds — mirrors activeDogs/shelterDogs on the
+	// Feeding page, so "everyone else" here means the same set it means there.
+	inFoster?: boolean;
+	permanentFoster?: boolean;
+	isolationStatus?: string | null;
+	isIncoming?: boolean;
 }
 
 interface Candidate {
 	id: string;
+	name: string;
 	from: number | null;
 	to: number | null;
 	code: string | null;
+	feedable: boolean;
+	isIncoming: boolean;
 }
 
 export interface PlannedFeeding {
@@ -26,6 +35,12 @@ export interface PlannedFeeding {
 	amountEaten: AmountEaten;
 	mealTime: MealTime;
 	mealTimeInferred: boolean;
+	/**
+	 * True when the message did not name this dog. Staff report exceptions — "Buck and
+	 * Cora didn't eat" means everyone else finished — so the rest are filled in as having
+	 * eaten. An implied log never overwrites one somebody actually recorded.
+	 */
+	implied: boolean;
 }
 
 export type DogIndex = Map<string, Candidate[]>;
@@ -46,8 +61,25 @@ export function buildDogIndex(dogs: DogRecord[]): DogIndex {
 		// dog left and came back, and only the intake date moved. Treating it as current
 		// hides the dog from every report since.
 		if (to !== null && ((from !== null && to < from) || dog.status === 'active')) to = null;
+		// Isolation dogs are fed by the clinic and foster dogs are not at the shelter, so
+		// neither belongs in "everyone else" — mirroring the Feeding page's own filter.
+		//
+		// Status is deliberately not part of this. It records where a dog is *now*, so
+		// requiring 'active' would drop every dog since adopted and leave a message from
+		// February implying a meal for only the handful still here today. Whether a dog
+		// was at the shelter on a given date is what the dates are for.
+		const feedable =
+			!dog.inFoster && !dog.permanentFoster && (dog.isolationStatus ?? 'none') === 'none';
 		if (!index.has(dog.name)) index.set(dog.name, []);
-		index.get(dog.name)!.push({ id: dog.id, from, to, code: dog.asmShelterCode ?? null });
+		index.get(dog.name)!.push({
+			id: dog.id,
+			name: dog.name,
+			from,
+			to,
+			code: dog.asmShelterCode ?? null,
+			feedable,
+			isIncoming: Boolean(dog.isIncoming)
+		});
 	}
 	return index;
 }
@@ -100,10 +132,32 @@ export function resolveDogId(index: DogIndex, name: string, when: Date): string 
 	return inWindow.length === 1 ? inWindow[0].id : null;
 }
 
+/** Every dog the feeding shift would have fed that day. */
+function feedableOn(index: DogIndex, when: Date): Candidate[] {
+	const at = when.getTime();
+	const out: Candidate[] = [];
+	for (const candidates of index.values()) {
+		for (const c of candidates) {
+			if (!c.feedable || !presentOn(c, at)) continue;
+			// An incoming dog is only fed from the day it actually arrives.
+			if (c.isIncoming && (c.from === null || at < c.from - DAY_MS)) continue;
+			out.push(c);
+		}
+	}
+	return out;
+}
+
 /**
- * Reads one message into the feeding logs it implies. Returns an empty list when the
- * message says nothing about a specific dog eating — a blanket "everyone ate" and a
- * "do not feed" instruction both deliberately produce nothing.
+ * Reads one message into the feeding logs it implies.
+ *
+ * Staff report by exception: "Buck and Cora didn't eat" means every other dog finished.
+ * So the named dogs are recorded as stated and the rest of that day's feedable dogs are
+ * filled in as having eaten, marked `implied` so they can never overwrite something
+ * somebody actually observed.
+ *
+ * Returns nothing when the message names no dog — a bare "everyone ate", a "do not feed"
+ * instruction, or ordinary chatter. Without a named exception there is nothing to say
+ * the message is a feeding report at all.
  */
 export function planFeedings(text: string, postedAt: Date, index: DogIndex): PlannedFeeding[] {
 	const parsed = parseFeedingMessage(text, rosterOn(index, postedAt));
@@ -111,23 +165,49 @@ export function planFeedings(text: string, postedAt: Date, index: DogIndex): Pla
 
 	const mealTime: MealTime =
 		parsed.mealTime ?? (postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm');
+	const mealTimeInferred = !parsed.mealTime;
 
 	const planned: PlannedFeeding[] = [];
+	const named = new Set<string>();
 	for (const entry of parsed.entries) {
 		const dogId = resolveDogId(index, entry.name, postedAt);
 		if (!dogId) continue; // ambiguous or unknown — skipped, never guessed
+		named.add(dogId);
 		planned.push({
 			dogId,
 			dogName: entry.name,
 			amountEaten: entry.amountEaten,
 			mealTime,
-			mealTimeInferred: !parsed.mealTime
+			mealTimeInferred,
+			implied: false
+		});
+	}
+	if (planned.length === 0) return [];
+
+	// A dog told not to be fed did not refuse a meal and did not eat one either.
+	const excluded = new Set(
+		parsed.doNotFeed.map((name) => resolveDogId(index, name, postedAt)).filter(Boolean) as string[]
+	);
+
+	for (const dog of feedableOn(index, postedAt)) {
+		if (named.has(dog.id) || excluded.has(dog.id)) continue;
+		planned.push({
+			dogId: dog.id,
+			dogName: dog.name,
+			amountEaten: 'all',
+			mealTime,
+			mealTimeInferred,
+			implied: true
 		});
 	}
 	return planned;
 }
 
-/** Derived from the source message so a repeat delivery overwrites instead of duplicating. */
-export function feedingLogId(slackTs: string, dogId: string, mealTime: MealTime): string {
-	return `slack-${slackTs.replace('.', '-')}-${dogId}-${mealTime}`;
+/**
+ * One id per dog per meal per day, deliberately not per message: two people often report
+ * the same meal, and keying by message would give a dog two logs for one feed.
+ */
+export function feedingLogId(postedAt: Date, dogId: string, mealTime: MealTime): string {
+	const day = `${postedAt.getFullYear()}${String(postedAt.getMonth() + 1).padStart(2, '0')}${String(postedAt.getDate()).padStart(2, '0')}`;
+	return `slack-${day}-${mealTime}-${dogId}`;
 }

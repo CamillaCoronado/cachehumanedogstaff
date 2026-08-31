@@ -27,7 +27,6 @@ const flag = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d :
 
 const WRITE = has('write');
 const UNDO = has('undo');
-const EXPAND_BLANKETS = has('expand-blankets');
 const CHANNEL = flag('channel', 'dog-staff');
 const SHOW = Number(flag('show', 20));
 const REPORT = has('report');
@@ -89,13 +88,23 @@ function db() {
 	return getFirestore();
 }
 
-async function loadParser() {
-	const out = join(mkdtempSync(join(tmpdir(), 'feedparse-')), 'parser.mjs');
+/**
+ * The app's own import logic, bundled rather than reimplemented — the roster rules, the
+ * 3pm rule and the exception expansion have to mean the same thing here as they do when
+ * a message arrives live, or the two quietly disagree about what a message said.
+ */
+async function loadImport() {
+	const out = join(mkdtempSync(join(tmpdir(), 'feedimport-')), 'import.mjs');
 	await build({
-		entryPoints: ['src/lib/utils/parseFeedingMessage.ts'],
-		outfile: out, bundle: true, format: 'esm', platform: 'node', logLevel: 'error'
+		entryPoints: ['src/lib/data/feedingImport.ts'],
+		outfile: out,
+		bundle: true,
+		format: 'esm',
+		platform: 'node',
+		logLevel: 'error',
+		alias: { $lib: new URL('../src/lib', import.meta.url).pathname }
 	});
-	return (await import(out)).parseFeedingMessage;
+	return import(out);
 }
 
 /** Local calendar day, matching how the app stores and filters feeding dates. */
@@ -238,7 +247,7 @@ async function main() {
 		process.exit(1);
 	}
 
-	const parseFeedingMessage = await loadParser();
+	const { buildDogIndex, planFeedings, feedingLogId } = await loadImport();
 	const users = JSON.parse(readFileSync(join('slack-export', 'users.json'), 'utf8'));
 
 	// Roster from Firestore, not ASM: the doc id is what the log has to be filed under,
@@ -248,131 +257,42 @@ async function main() {
 		asmNames()
 	]);
 	let renamed = 0;
-	const byName = new Map();
-	const roster = [];
+	const dogRecords = [];
 	for (const d of dogsSnap.docs) {
 		const data = d.data();
 		// ASM's name wins when it knows this animal: Firestore can be holding a name the
 		// dog no longer has, which then collides with whichever dog does have it.
 		const live = liveNames.get(d.id);
 		if (live && live !== data.name) renamed++;
-		data.name = live ?? data.name;
-		if (!data.name) continue;
-		roster.push(data.name);
-		// Names repeat across years — three Rockys, three Birdies. Keep every candidate
-		// and pick by date below; keeping only the first would file a 2026 Rocky's meals
-		// onto a Rocky that left in 2024.
-		if (!byName.has(data.name)) byName.set(data.name, []);
-		const from = data.intakeDate ? new Date(data.intakeDate).getTime() : null;
-		let to = data.leftShelterDate ? new Date(data.leftShelterDate).getTime() : null;
-		// A departure earlier than the dog's own intake belongs to an earlier stay: the
-		// dog left, came back, and intakeDate moved to the return while leftShelterDate
-		// kept the old value. Shorty left in May and returned in August. Treating that
-		// stale departure as current hid him from every report since.
-		if (to !== null && ((from !== null && to < from) || data.status === 'active')) to = null;
-		byName.get(data.name).push({ id: d.id, from, to, code: data.asmShelterCode ?? null });
+		const name = live ?? data.name;
+		if (!name) continue;
+		dogRecords.push({ ...data, id: d.id, name });
 	}
-	const ambiguousNames = [...byName].filter(([, v]) => v.length > 1).length;
+	const index = buildDogIndex(dogRecords);
 	console.log(
-		`Roster: ${roster.length} dogs (${ambiguousNames} names shared by more than one dog` +
-			`${renamed ? `, ${renamed} renamed since Firestore last synced` : ''})\n`
+		`Roster: ${dogRecords.length} dogs` +
+			`${renamed ? ` (${renamed} renamed since Firestore last synced)` : ''}\n`
 	);
 
-	/** The dog of this name that was actually at the shelter on `when`. */
-	function resolveDog(name, when) {
-		const candidates = byName.get(name);
-		if (!candidates) return null;
-		if (candidates.length === 1) return candidates[0].id;
-
-		const at = when.getTime();
-		// A day of slack on the front: a message can land just before the intake stamp.
-		let inWindow = candidates.filter(
-			(c) => (c.from === null || at >= c.from - 86_400_000) && (c.to === null || at <= c.to + 86_400_000)
-		);
-
-		// A document keyed by shelter number is one ASM maintains; a UUID-keyed one is a
-		// legacy record the sync no longer touches, and several of those are stale twins
-		// still marked present long after the dog left. The shelter number wins.
-		const byShelterNumber = inWindow.filter((c) => /^\d+$/.test(c.id));
-		if (byShelterNumber.length > 0) inWindow = byShelterNumber;
-
-		// Between two shelter numbers, the dog still at the shelter is the one being
-		// written about — the other is a previous animal of the same name.
-		if (inWindow.length > 1) {
-			const stillHere = inWindow.filter((c) => c.to === null);
-			if (stillHere.length === 1) inWindow = stillHere;
-		}
-
-		// Two records are the same animal only if they carry the same shelter code. A
-		// shared intake date is not enough: the two "Malone" records are different dogs
-		// admitted the same day, one still showing a name that was later changed in ASM
-		// without the rename syncing. Picking either would file meals onto the wrong dog,
-		// so they stay ambiguous and are skipped.
-		if (inWindow.length > 1) {
-			const codes = new Set(inWindow.map((c) => c.code).filter(Boolean));
-			if (codes.size === 1) {
-				inWindow = [inWindow.slice().sort((a, b) => (b.to ?? Infinity) - (a.to ?? Infinity))[0]];
-			}
-		}
-
-		// Exactly one match is an answer; none or several is a guess, and a guess here
-		// files a real meal onto the wrong animal's medical history.
-		return inWindow.length === 1 ? inWindow[0].id : null;
-	}
-
-	/**
-	 * Only the dogs actually at the shelter on a given day. Passing the whole roster made
-	 * "Freda" ambiguous between Frida and Freya even on dates when Freya had not yet
-	 * arrived — and every extra name is another chance for a fuzzy match to go wrong.
-	 */
-	const rosterCache = new Map();
-	function rosterOn(when) {
-		const key = dayKey(when);
-		if (rosterCache.has(key)) return rosterCache.get(key);
-		const at = when.getTime();
-		const names = [];
-		for (const [name, cands] of byName) {
-			const present = cands.some(
-				(c) => (c.from === null || at >= c.from - 86_400_000) && (c.to === null || at <= c.to + 86_400_000)
-			);
-			if (present) names.push(name);
-		}
-		rosterCache.set(key, names);
-		return names;
-	}
-
 	const planned = [];
-	const skipped = { noDog: 0, blanket: 0, ambiguous: 0 };
+	let reports = 0;
 
 	for (const m of messagesFrom(file)) {
-		const postedAtForRoster = new Date(Number(m.ts) * 1000);
-		if (postedAtForRoster.getTime() < SINCE) continue;
-		const parsed = parseFeedingMessage(m.text, rosterOn(postedAtForRoster));
-		if (parsed.entries.length === 0) {
-			if (parsed.allAte) skipped.blanket++;
-			continue;
-		}
-		// "do not feed" is an instruction about a meal that never happened. It is parsed
-		// so it cannot be mistaken for a record — and then deliberately not written.
 		const postedAt = new Date(Number(m.ts) * 1000);
 		if (postedAt.getTime() < SINCE) continue;
-		const stated = parsed.mealTime;
 
-		for (const entry of parsed.entries) {
-			const dogId = resolveDog(entry.name, postedAt);
-			if (!dogId) {
-				if (byName.has(entry.name)) skipped.ambiguous++;
-				else skipped.noDog++;
-				continue;
-			}
+		// planFeedings is the app's own reading of a message, expansion included: the
+		// dogs named, plus everyone else at the shelter that day recorded as having eaten.
+		const entries = planFeedings(m.text, postedAt, index);
+		if (entries.length === 0) continue;
+		reports++;
+
+		for (const entry of entries) {
 			planned.push({
-				dogId,
-				dogName: entry.name,
+				...entry,
+				id: feedingLogId(postedAt, entry.dogId, entry.mealTime),
 				date: dayKey(postedAt),
-				statedMealTime: stated,
-				amountEaten: entry.amountEaten,
 				postedAt,
-				entryCount: parsed.entries.length,
 				author: users[m.user] ?? 'Unknown',
 				slackTs: String(m.ts),
 				text: m.text.replace(/\s+/g, ' ').trim()
@@ -380,22 +300,30 @@ async function main() {
 		}
 	}
 
-	assignMealTimes(planned);
+	// Two people often report the same meal. One record per dog per meal per day, and a
+	// dog someone actually named beats one filled in from the exceptions.
+	const bySlot = new Map();
 	for (const p of planned) {
-		// Derived from the message and slot, so a second run lands on the same document.
-		p.id = `slack-${p.slackTs.replace('.', '-')}-${p.dogId}-${p.mealTime}`;
+		const existing = bySlot.get(p.id);
+		if (!existing || (existing.implied && !p.implied)) bySlot.set(p.id, p);
 	}
+	const deduped = [...bySlot.values()];
+	const dropped = planned.length - deduped.length;
+	planned.length = 0;
+	planned.push(...deduped);
 
 	const byAmount = {};
 	for (const p of planned) byAmount[p.amountEaten] = (byAmount[p.amountEaten] ?? 0) + 1;
 	const inferredCount = planned.filter((p) => p.mealTimeInferred).length;
 
+	const impliedCount = planned.filter((p) => p.implied).length;
+	console.log(`Reports read: ${reports}`);
 	console.log(`Feeding logs to write: ${planned.length}`);
+	console.log(`  named in a message:   ${planned.length - impliedCount}`);
+	console.log(`  everyone else (all):  ${impliedCount}`);
+	console.log(`  duplicate slots merged: ${dropped}`);
 	for (const [k, v] of Object.entries(byAmount)) console.log(`  ${k.padEnd(7)} ${v}`);
 	console.log(`\n  meal time inferred from post time: ${inferredCount} (${((inferredCount / planned.length) * 100).toFixed(0)}%)`);
-	console.log(`  skipped, dog not in Firestore:     ${skipped.noDog}`);
-	console.log(`  skipped, name matched >1 dog:      ${skipped.ambiguous}`);
-	console.log(`  blanket "everyone ate", not written: ${skipped.blanket}${EXPAND_BLANKETS ? '' : '  (use --expand-blankets to reconsider)'}`);
 
 	console.log(`\nSample:`);
 	for (const p of planned.slice(0, SHOW)) {

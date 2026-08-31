@@ -87,7 +87,17 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 
 	const dogsSnap = await db
 		.collection('dogs')
-		.select('name', 'intakeDate', 'leftShelterDate', 'status', 'asmShelterCode')
+		.select(
+			'name',
+			'intakeDate',
+			'leftShelterDate',
+			'status',
+			'asmShelterCode',
+			'inFoster',
+			'permanentFoster',
+			'isolationStatus',
+			'isIncoming'
+		)
 		.get();
 	const index = buildDogIndex(
 		dogsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DogRecord, 'id'>) }))

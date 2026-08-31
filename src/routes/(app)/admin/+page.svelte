@@ -453,7 +453,7 @@
 								</p>
 								<blockquote class="pending-quote">{pending.rawText}</blockquote>
 								<ul class="pending-entries">
-									{#each pending.entries as entry}
+									{#each pending.entries.filter((e) => !e.implied) as entry}
 										<li>
 											<span class="pending-dog">{entry.dogName}</span>
 											<span class="pending-amount">{AMOUNT_WORDS[entry.amountEaten] ?? entry.amountEaten}</span>
@@ -464,6 +464,13 @@
 										</li>
 									{/each}
 								</ul>
+								{#if pending.entries.some((e) => e.implied)}
+									<p class="pending-implied">
+										Everyone else &mdash; {pending.entries.filter((e) => e.implied).length} other
+										{pending.entries.filter((e) => e.implied).length === 1 ? 'dog' : 'dogs'} &mdash; will be
+										logged as <strong>ate all</strong>. Any dog already logged for this meal is left alone.
+									</p>
+								{/if}
 								<div class="pending-actions">
 									<button
 										class="action-btn"
@@ -1039,6 +1046,14 @@
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: #6b6459;
+	}
+	.pending-implied {
+		margin: 0;
+		font-size: 0.82rem;
+		color: #6b6459;
+		padding: 7px 10px;
+		background: #f2efe8;
+		border-radius: 3px;
 	}
 	.pending-time {
 		font-size: 0.78rem;

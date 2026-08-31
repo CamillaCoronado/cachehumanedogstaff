@@ -326,6 +326,8 @@ export interface PendingFeeding {
 		amountEaten: AmountEaten;
 		mealTime: MealTime;
 		mealTimeInferred: boolean;
+		/** Not named in the message — filled in because staff report only exceptions. */
+		implied: boolean;
 	}[];
 }
 
