@@ -110,10 +110,18 @@ describe('parseFeedingMessage', () => {
 		expect(result.entries.map((e) => e.name)).toEqual(['Frankie', 'Dandelion', 'Frito Pie', 'Cora']);
 	});
 
-	it('reads an explicit meal time when stated, and nothing when not', () => {
+	it('only reads "morning", because that is the one meal staff name', () => {
+		// Which feed it is is normally obvious from when it was posted, so nobody says.
+		// A morning feed reported late says "morning" precisely because it no longer is.
 		expect(parse("Only dog that didn't eat this morning was as Buck.").mealTime).toBe('am');
 		expect(parse('Reina did not eat breakfast.').mealTime).toBe('am');
 		expect(parse("Stony and Fred didn't eat").mealTime).toBeNull();
+	});
+
+	it('does not treat evening narration as a meal designation', () => {
+		// These turn up constantly as ordinary prose, not as a label for which feed.
+		expect(parse("Finn has liquidy poop so he is to have a bland diet tonight").mealTime).toBeNull();
+		expect(parse("Buck didn't eat, clinic will see him this evening").mealTime).toBeNull();
 	});
 
 	it('keeps the first statement about a dog when it is mentioned twice', () => {

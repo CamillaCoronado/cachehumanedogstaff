@@ -14,7 +14,7 @@
  * its document id is derived from that message. So a re-run overwrites rather than
  * duplicates, and --undo can find and remove exactly what this wrote and nothing else.
  */
-import { readFileSync, existsSync, mkdtempSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { build } from 'esbuild';
@@ -86,6 +86,52 @@ function resolveMealTime(parsed, postedAt) {
 		inferred: true,
 		boundary: Math.abs(hour - PM_FEED_HOUR) <= BOUNDARY_HOURS
 	};
+}
+
+/**
+ * Assigns each entry to a meal slot, per dog per day.
+ *
+ * A message that names its meal is taken at its word. Otherwise the day's reports for
+ * that dog are read in order: with two of them the first is the morning feed and the
+ * second the afternoon one, whatever the clock says — which is more reliable than any
+ * cutoff, since a report is written whenever someone gets to it. Only a dog with a
+ * single unlabelled report that day falls back to the 3pm split.
+ */
+function assignMealTimes(planned) {
+	const byDogDay = new Map();
+	for (const p of planned) {
+		const key = `${p.dogId}|${p.date}`;
+		if (!byDogDay.has(key)) byDogDay.set(key, []);
+		byDogDay.get(key).push(p);
+	}
+
+	const ORDERED = ['am', 'pm', 'second'];
+	for (const group of byDogDay.values()) {
+		group.sort((a, b) => a.postedAt - b.postedAt);
+		const unlabelled = group.filter((p) => !p.statedMealTime);
+		const taken = new Set(group.filter((p) => p.statedMealTime).map((p) => p.statedMealTime));
+
+		for (const p of group) {
+			if (p.statedMealTime) {
+				p.mealTime = p.statedMealTime;
+				p.mealTimeInferred = false;
+				p.boundary = false;
+				continue;
+			}
+			if (unlabelled.length > 1) {
+				// Position in the day decides it; skip slots an explicit message already claimed.
+				const slot = ORDERED.filter((s) => !taken.has(s))[unlabelled.indexOf(p)] ?? 'pm';
+				p.mealTime = slot;
+				p.mealTimeInferred = true;
+				p.boundary = false; // ordering settled it, the clock did not have to
+				continue;
+			}
+			const { mealTime, boundary } = resolveMealTime({ mealTime: null }, p.postedAt);
+			p.mealTime = mealTime;
+			p.mealTimeInferred = true;
+			p.boundary = Boolean(boundary);
+		}
+	}
 }
 
 function messagesFrom(file) {
@@ -172,6 +218,7 @@ async function main() {
 	}
 
 	const parseFeedingMessage = await loadParser();
+	const users = JSON.parse(readFileSync(join('slack-export', 'users.json'), 'utf8'));
 
 	// Roster from Firestore, not ASM: the doc id is what the log has to be filed under,
 	// and a dog named in chat but absent from Firestore has nowhere to put a log.
@@ -200,11 +247,23 @@ async function main() {
 		const candidates = byName.get(name);
 		if (!candidates) return null;
 		if (candidates.length === 1) return candidates[0].id;
+
 		const at = when.getTime();
 		// A day of slack on the front: a message can land just before the intake stamp.
-		const inWindow = candidates.filter(
+		let inWindow = candidates.filter(
 			(c) => (c.from === null || at >= c.from - 86_400_000) && (c.to === null || at <= c.to + 86_400_000)
 		);
+
+		// Most "duplicates" are one animal recorded twice — a legacy UUID-keyed document
+		// and the ASM-numbered one the sync maintains, same name, same intake date. The
+		// ASM-numbered record is the live one, so prefer it rather than discarding a real
+		// dog as ambiguous.
+		if (inWindow.length > 1) {
+			const sameDog = new Set(inWindow.map((c) => c.from)).size === 1;
+			const asmKeyed = inWindow.filter((c) => /^\d+$/.test(c.id));
+			if (sameDog && asmKeyed.length === 1) inWindow = asmKeyed;
+		}
+
 		// Exactly one match is an answer; none or several is a guess, and a guess here
 		// files a real meal onto the wrong animal's medical history.
 		return inWindow.length === 1 ? inWindow[0].id : null;
@@ -223,7 +282,7 @@ async function main() {
 		// so it cannot be mistaken for a record — and then deliberately not written.
 		const postedAt = new Date(Number(m.ts) * 1000);
 		if (postedAt.getTime() < SINCE) continue;
-		const { mealTime, inferred, boundary } = resolveMealTime(parsed, postedAt);
+		const stated = parsed.mealTime;
 
 		for (const entry of parsed.entries) {
 			const dogId = resolveDog(entry.name, postedAt);
@@ -235,19 +294,22 @@ async function main() {
 			planned.push({
 				dogId,
 				dogName: entry.name,
-				// Derived from the message, so a second run lands on the same document.
-				id: `slack-${String(m.ts).replace('.', '-')}-${dogId}-${mealTime}`,
 				date: dayKey(postedAt),
-				mealTime,
+				statedMealTime: stated,
 				amountEaten: entry.amountEaten,
-				mealTimeInferred: inferred,
-				boundary: Boolean(boundary),
 				postedAt,
 				entryCount: parsed.entries.length,
+				author: users[m.user] ?? 'Unknown',
 				slackTs: String(m.ts),
 				text: m.text.replace(/\s+/g, ' ').trim()
 			});
 		}
+	}
+
+	assignMealTimes(planned);
+	for (const p of planned) {
+		// Derived from the message and slot, so a second run lands on the same document.
+		p.id = `slack-${p.slackTs.replace('.', '-')}-${p.dogId}-${p.mealTime}`;
 	}
 
 	const byAmount = {};
@@ -268,6 +330,27 @@ async function main() {
 
 	if (REPORT) reportProblems(planned);
 
+	if (has('review')) {
+		// Grouped by source message, because that is the unit a person can actually judge:
+		// read what was written, see what it produced, decide if it is right.
+		const byMsg = new Map();
+		for (const p of planned) {
+			if (!byMsg.has(p.slackTs)) {
+				byMsg.set(p.slackTs, {
+					ts: p.slackTs, author: p.author, text: p.text,
+					at: p.postedAt.toISOString(), date: p.date, logs: []
+				});
+			}
+			byMsg.get(p.slackTs).logs.push({
+				dog: p.dogName, amount: p.amountEaten, meal: p.mealTime,
+				inferred: p.mealTimeInferred, boundary: p.boundary
+			});
+		}
+		const out = [...byMsg.values()].sort((a, b) => Number(b.ts) - Number(a.ts));
+		writeFileSync('slack-export/review.json', JSON.stringify({ total: planned.length, messages: out }, null, 2));
+		console.log(`\nWrote slack-export/review.json (${out.length} messages, ${planned.length} logs)`);
+	}
+
 	if (!WRITE) {
 		console.log(`\nPreview only. Nothing written. Re-run with --write to commit.`);
 		return;
@@ -283,9 +366,9 @@ async function main() {
 				date: new Date(`${p.date}T12:00:00`).toISOString(),
 				mealTime: p.mealTime,
 				amountEaten: p.amountEaten,
-				notes: null,
+				notes: `via Slack — ${p.author}: "${p.text.slice(0, 180)}"`,
 				loggedBy: LOGGED_BY,
-				loggedByName: LOGGED_BY_NAME,
+				loggedByName: `${p.author} (via Slack)`,
 				createdAt: now,
 				// Provenance, so these are findable and removable as a set.
 				source: SOURCE,

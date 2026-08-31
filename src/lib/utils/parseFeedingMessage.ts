@@ -50,8 +50,16 @@ const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
 
 // Built once per call from the roster; a message is mostly ordinary prose and only
 // the roster can tell "Buck" from "Bruno has bad poop".
-const MEAL_AM = /\b(?:this\s+)?(?:morning|breakfast|am|a\.m\.)\b/i;
-const MEAL_PM = /\b(?:this\s+)?(?:dinner|evening|tonight|pm|p\.m\.|supper)\b/i;
+/**
+ * Which feed a report is about is normally derived from when it was posted — staff do
+ * not label it, because at the time it is obvious. The exception is a morning feed
+ * reported late, which says "morning" precisely because it no longer is.
+ *
+ * There is deliberately no PM pattern. "dinner", "tonight" and "this evening" turn up
+ * constantly as ordinary narration ("Duke was defensive this morning", "clinic will see
+ * him tonight") and reading them as meal designations mislabels far more than it fixes.
+ */
+const MEAL_AM = /\b(?:this\s+)?(?:morning|breakfast)\b/i;
 // The third feed of the day is its own slot in the schema. Without this, a note about
 // it lands on the morning and contradicts whatever was already logged there.
 const MEAL_SECOND = /\b(?:second|2nd)\s+meal\b/i;
@@ -246,15 +254,9 @@ export function parseFeedingMessage(
 		for (const name of namesIn(sameSentence, roster)) push(name, lastAmount);
 	}
 
-	// Checked first: "second meal" also contains no am/pm cue, but a message can mention
-	// both ("didn't eat this morning, ate half of second meal") and the specific wins.
-	const mealTime: MealTime | null = MEAL_SECOND.test(text)
-		? 'second'
-		: MEAL_AM.test(text)
-			? 'am'
-			: MEAL_PM.test(text)
-				? 'pm'
-				: null;
+	// Checked first: a message can mention both ("didn't eat this morning, ate half of
+	// second meal") and the more specific slot wins. Null means derive it.
+	const mealTime: MealTime | null = MEAL_SECOND.test(text) ? 'second' : MEAL_AM.test(text) ? 'am' : null;
 
 	return { entries, allAte, doNotFeed, mealTime };
 }
