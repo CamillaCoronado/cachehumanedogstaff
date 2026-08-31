@@ -6,6 +6,8 @@
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
+	import { listPendingFeedings, acceptPendingFeeding, dismissPendingFeeding } from '$lib/data/pendingFeedings';
+	import type { PendingFeeding } from '$lib/types';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -14,6 +16,57 @@
 	};
 
 	const roleOptions: UserRole[] = ['admin', 'manager', 'coordinator', 'staff', 'volunteer'];
+
+	let pendingFeedings: PendingFeeding[] = [];
+	let pendingLoading = false;
+	let pendingBusyId: string | null = null;
+
+	const AMOUNT_WORDS: Record<string, string> = {
+		all: 'ate all',
+		most: 'ate most',
+		half: 'ate half',
+		little: 'ate little',
+		none: "didn't eat"
+	};
+
+	async function loadPendingFeedings() {
+		pendingLoading = true;
+		try {
+			pendingFeedings = await listPendingFeedings();
+		} catch (error) {
+			console.error(error);
+			toast.error('Could not load feeding messages.');
+		} finally {
+			pendingLoading = false;
+		}
+	}
+
+	async function acceptFeeding(pending: PendingFeeding) {
+		pendingBusyId = pending.id;
+		try {
+			const written = await acceptPendingFeeding(pending, $authProfile);
+			pendingFeedings = pendingFeedings.filter((p) => p.id !== pending.id);
+			toast.success(`Logged ${written} feeding${written === 1 ? '' : 's'}.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Could not save those feedings.');
+		} finally {
+			pendingBusyId = null;
+		}
+	}
+
+	async function dismissFeeding(pending: PendingFeeding) {
+		pendingBusyId = pending.id;
+		try {
+			await dismissPendingFeeding(pending.id);
+			pendingFeedings = pendingFeedings.filter((p) => p.id !== pending.id);
+		} catch (error) {
+			console.error(error);
+			toast.error('Could not dismiss that message.');
+		} finally {
+			pendingBusyId = null;
+		}
+	}
 
 	let users: EditableUser[] = [];
 	let usersLoaded = false;
@@ -228,6 +281,12 @@
 		return 'role-chip-volunteer';
 	}
 
+	$: if ($authReady && $authProfile?.role === 'admin' && !pendingLoading && pendingFeedings.length === 0 && !pendingLoaded) {
+		pendingLoaded = true;
+		void loadPendingFeedings();
+	}
+	let pendingLoaded = false;
+
 	async function loadUsers() {
 		usersLoading = true;
 		usersError = '';
@@ -350,6 +409,70 @@
 		</div>
 
 		<div class="admin-grid">
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">From Slack</p>
+						<h3 class="section-title">Feeding messages waiting for approval</h3>
+						<p class="section-copy">
+							Feeding reports posted in Slack, read into logs. The dog and the amount come from the
+							message; the meal is taken from when it was posted unless the message says otherwise.
+							<strong>Nothing reaches a dog's record until you accept it.</strong>
+						</p>
+					</div>
+					<button class="action-btn" type="button" on:click={loadPendingFeedings} disabled={pendingLoading}>
+						{pendingLoading ? 'Loading…' : 'Refresh'}
+					</button>
+				</div>
+
+				{#if pendingFeedings.length === 0}
+					<p class="empty-note">
+						{pendingLoading ? 'Checking for new messages…' : 'Nothing waiting — every feeding message has been handled.'}
+					</p>
+				{:else}
+					<ul class="pending-list">
+						{#each pendingFeedings as pending (pending.id)}
+							<li class="pending-item">
+								<p class="pending-meta">
+									<strong>{pending.author}</strong>
+									<span>{formatDateTime(pending.postedAt)}</span>
+								</p>
+								<blockquote class="pending-quote">{pending.rawText}</blockquote>
+								<ul class="pending-entries">
+									{#each pending.entries as entry}
+										<li>
+											<span class="pending-dog">{entry.dogName}</span>
+											<span class="pending-amount">{AMOUNT_WORDS[entry.amountEaten] ?? entry.amountEaten}</span>
+											<span class="pending-meal" class:pending-meal-guessed={entry.mealTimeInferred}>
+												{entry.mealTime === 'second' ? '2nd meal' : entry.mealTime}
+											</span>
+										</li>
+									{/each}
+								</ul>
+								<div class="pending-actions">
+									<button
+										class="action-btn"
+										type="button"
+										on:click={() => acceptFeeding(pending)}
+										disabled={pendingBusyId === pending.id}
+									>
+										{pendingBusyId === pending.id ? 'Saving…' : `Log ${pending.entries.length} feeding${pending.entries.length === 1 ? '' : 's'}`}
+									</button>
+									<button
+										class="ghost-btn"
+										type="button"
+										on:click={() => dismissFeeding(pending)}
+										disabled={pendingBusyId === pending.id}
+									>
+										Dismiss
+									</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
@@ -843,6 +966,76 @@
 	}
 
 	.error-note,
+	.pending-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 14px;
+	}
+	.pending-item {
+		border: 1px solid var(--line, #d8d2c4);
+		border-radius: 4px;
+		padding: 12px 14px;
+		display: grid;
+		gap: 9px;
+	}
+	.pending-meta {
+		margin: 0;
+		display: flex;
+		gap: 10px;
+		align-items: baseline;
+		font-size: 0.78rem;
+		color: #6b6459;
+	}
+	.pending-quote {
+		margin: 0;
+		padding-left: 11px;
+		border-left: 2px solid var(--line, #d8d2c4);
+		font-size: 0.94rem;
+		line-height: 1.5;
+	}
+	.pending-entries {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 3px;
+	}
+	.pending-entries li {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 96px 74px;
+		gap: 10px;
+		align-items: baseline;
+		font-size: 0.86rem;
+		padding: 3px 0;
+	}
+	.pending-dog {
+		font-weight: 600;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.pending-amount {
+		color: #6b6459;
+	}
+	.pending-meal {
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #6b6459;
+	}
+	/* A guessed meal time is the one part of a row that is not straight from the text. */
+	.pending-meal-guessed::after {
+		content: ' ?';
+		font-weight: 700;
+	}
+	.pending-actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
 	.empty-note {
 		margin: 0.9rem 0 0;
 		padding: 0.8rem 0.9rem;

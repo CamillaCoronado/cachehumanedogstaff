@@ -308,6 +308,27 @@ export interface YardLog {
 	loggedByName: string;
 }
 
+/**
+ * A feeding message from Slack, waiting for an admin to accept or dismiss it. Nothing
+ * reaches a dog's history until someone approves it.
+ */
+export interface PendingFeeding {
+	id: string;
+	rawText: string;
+	author: string;
+	slackTs: string;
+	postedAt: string;
+	receivedAt: string;
+	processed: boolean;
+	entries: {
+		dogId: string;
+		dogName: string;
+		amountEaten: AmountEaten;
+		mealTime: MealTime;
+		mealTimeInferred: boolean;
+	}[];
+}
+
 export interface FeedingLog {
 	id: string;
 	date: DateValue;

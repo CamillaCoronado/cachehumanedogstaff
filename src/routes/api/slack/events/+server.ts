@@ -2,6 +2,7 @@ import { json, error, text } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
+import { buildDogIndex, planFeedings, type DogRecord } from '$lib/data/feedingImport';
 import { getAdminDb } from '$lib/firebase/admin';
 
 const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000; // 5 minutes
@@ -26,10 +27,46 @@ function verifySlackSignature(
 	}
 }
 
+/**
+ * Reads a feeding message and queues what it found for an admin to approve. Nothing is
+ * written to a dog's history here — the Admin page decides.
+ *
+ * Failures are logged rather than thrown: Slack retries anything that is not a 200
+ * within three seconds, and a retry would not fix a parse or a write problem.
+ */
+async function queueFeeding(rawText: string, event: Record<string, unknown>): Promise<void> {
+	try {
+		const adminDb = getAdminDb();
+		const snapshot = await adminDb
+			.collection('dogs')
+			.select('name', 'intakeDate', 'leftShelterDate', 'status', 'asmShelterCode')
+			.get();
+		const dogs: DogRecord[] = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DogRecord, 'id'>) }));
+
+		const slackTs = String(event.ts ?? '');
+		const postedAt = new Date(Number(slackTs) * 1000);
+		const entries = planFeedings(rawText, postedAt, buildDogIndex(dogs));
+		if (entries.length === 0) return; // nothing about a specific dog eating
+
+		// Keyed by message, so a Slack retry updates the same pending item.
+		await adminDb.collection('pendingFeedings').doc(slackTs.replace('.', '-')).set({
+			rawText,
+			author: String(event.user ?? ''),
+			slackTs,
+			postedAt: postedAt.toISOString(),
+			receivedAt: new Date().toISOString(),
+			processed: false,
+			entries
+		});
+	} catch (e) {
+		console.error('[Slack webhook] Feeding queue failed:', e);
+	}
+}
+
 export async function POST({ request }) {
 	const rawBody = await request.text();
 
-	const { SLACK_SIGNING_SECRET, SLACK_PLAYGROUPS_CHANNEL_ID } = env;
+	const { SLACK_SIGNING_SECRET, SLACK_PLAYGROUPS_CHANNEL_ID, SLACK_FEEDING_CHANNEL_ID } = env;
 
 	// If not configured, reject clearly
 	if (!SLACK_SIGNING_SECRET) {
@@ -62,18 +99,23 @@ export async function POST({ request }) {
 	const event = body.event as Record<string, unknown> | undefined;
 	if (!event) return json({ ok: true });
 
-	// Only handle plain user messages from the playgroups channel
-	if (
-		event.type !== 'message' ||
-		event.subtype !== undefined || // skip edits, bot posts, etc.
-		event.bot_id !== undefined ||
-		(SLACK_PLAYGROUPS_CHANNEL_ID && event.channel !== SLACK_PLAYGROUPS_CHANNEL_ID)
-	) {
+	// Plain user messages only — no edits, bot posts or joins.
+	if (event.type !== 'message' || event.subtype !== undefined || event.bot_id !== undefined) {
 		return json({ ok: true });
 	}
 
+	const channel = String(event.channel ?? '');
+	const isPlaygroups = !SLACK_PLAYGROUPS_CHANNEL_ID || channel === SLACK_PLAYGROUPS_CHANNEL_ID;
+	const isFeeding = Boolean(SLACK_FEEDING_CHANNEL_ID) && channel === SLACK_FEEDING_CHANNEL_ID;
+	if (!isPlaygroups && !isFeeding) return json({ ok: true });
+
 	const rawText = String(event.text ?? '').trim();
 	if (!rawText) return json({ ok: true });
+
+	if (isFeeding) {
+		await queueFeeding(rawText, event);
+		return json({ ok: true });
+	}
 
 	// Cross-check parsed entries against the real roster so a sentence like
 	// "everyone is out" or a mentioned volunteer's name doesn't get treated as

@@ -1448,35 +1448,41 @@ export async function repairTripYear(
 	await recomputeLastDayTripDate(dogId);
 }
 
+/**
+ * `origin` is for logs that did not originate with the person clicking the button —
+ * an approved Slack message keeps its author's name and a derived id, so a repeat
+ * approval overwrites rather than duplicating and the batch stays findable.
+ */
+export interface FeedingLogOrigin {
+	id?: string;
+	loggedBy?: string;
+	loggedByName?: string;
+	extra?: Record<string, unknown>;
+}
+
 export async function addFeedingLog(
 	dogId: string,
 	log: Omit<FeedingLog, 'id' | 'createdAt' | 'loggedBy' | 'loggedByName'>,
-	profile?: UserProfile | null
+	profile?: UserProfile | null,
+	origin?: FeedingLogOrigin
 ) {
+	const identity = getUserIdentity(profile);
+	const entry: FeedingLog = {
+		...log,
+		id: origin?.id ?? createId('feed'),
+		createdAt: new Date(),
+		loggedBy: origin?.loggedBy ?? identity.uid,
+		loggedByName: origin?.loggedByName ?? identity.name
+	};
+
 	const ref = dogSubcollectionRef(dogId, 'feedingLogs');
 	if (ref) {
-		const identity = getUserIdentity(profile);
-		const entry: FeedingLog = {
-			...log,
-			id: createId('feed'),
-			createdAt: new Date(),
-			loggedBy: identity.uid,
-			loggedByName: identity.name
-		};
-		await setDoc(doc(ref, entry.id), serializeFeedingLog(entry));
+		await setDoc(doc(ref, entry.id), { ...serializeFeedingLog(entry), ...(origin?.extra ?? {}) });
 		return entry;
 	}
 
 	const stored = readJson<LogMap<StoredFeedingLog>>(FEEDING_KEY, {});
 	const list = stored[dogId] ?? [];
-	const identity = getUserIdentity(profile);
-	const entry: FeedingLog = {
-		...log,
-		id: createId('feed'),
-		createdAt: new Date(),
-		loggedBy: identity.uid,
-		loggedByName: identity.name
-	};
 	list.unshift(serializeFeedingLog(entry));
 	stored[dogId] = list;
 	writeJson(FEEDING_KEY, stored);
