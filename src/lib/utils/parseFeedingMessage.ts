@@ -92,6 +92,13 @@ const NOT_FOOD = /^\s*of\s+(?:a\s+|the\s+|his\s+|her\s+)?(?:rubber\s+|hard\s+|ch
 const SECOND_NEGATED = /\b(?:no|won'?t|wont|not)\s+(?:do\s+|doing\s+|give\s+|giving\s+)?(?:a\s+)?(?:second|2nd)\s+meal\b/i;
 const EVERYONE =
 	/\b(?:everyone|every\s?body|every\s?one|all(?:\s+(?:the|of\s+the))?\s+dogs?|all\s+(?:the\s+)?others?|the\s+rest)\b/i;
+/**
+ * How far after "everyone" an eating verb may sit and still be about them. Beyond this
+ * it belongs to a different clause: "all dogs out for yard time … Nala and clover had
+ * bland dinner" is not a statement that every dog ate.
+ */
+const EVERYONE_VERB_WINDOW = 30;
+
 /** "…every body else did", "everyone else finished" — the rest are accounted for outright. */
 const EVERYONE_ELSE = /\b(?:every\s?(?:one|body)|all)\s+else\b|\belse\s+(?:did|ate|finished)\b/i;
 /**
@@ -362,7 +369,11 @@ export function parseFeedingMessage(
 	const everyoneMatch = EVERYONE.exec(working);
 	if (everyoneMatch) {
 		const after = working.slice(everyoneMatch.index);
-		if (/^\W*\w*\s*(?:ate|eat|fed|were\s+fed)/i.test(after.slice(everyoneMatch[0].length)) || /\bate\b/i.test(after.split(/[.\n•]/)[0])) {
+		// The eating verb has to follow closely. Scanning the whole sentence let "I got all
+		// dogs out for yard time today" pick up an "ate" from much later in the line and
+		// declare that the entire shelter had eaten.
+		const following = after.slice(everyoneMatch[0].length);
+		if (/^\W*\w*\s*(?:ate|eat|fed|were\s+fed)/i.test(following) || /\b(?:ate|eat)\b/i.test(following.slice(0, EVERYONE_VERB_WINDOW))) {
 			allAte = true;
 			const except = /\bexcept\b|\bbut\s+(?:not\s+)?|\bother\s+than\b/i.exec(after);
 			if (except) {

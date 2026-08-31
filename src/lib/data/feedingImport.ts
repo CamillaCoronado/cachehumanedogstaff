@@ -340,9 +340,9 @@ export function planFeedings(
 	// "Everyone ate" names nobody, and that is the whole message: every dog ate.
 	if (planned.length === 0 && !parsed.allAte) return [];
 
-	// Only the shift's round-up accounts for the dogs it does not name. A passing remark
-	// about one dog says nothing about the rest, so it records that dog and stops.
-	if (!parsed.looksLikeReport) return planned;
+	// Any statement that a dog did not eat is a statement about that feed, wherever it
+	// appears — a round-up, or one line inside a shift note. The shelter reports by
+	// exception, so naming one dog accounts for all the others.
 
 	// A dog told not to be fed did not refuse a meal and did not eat one either.
 	const excluded = new Set(
