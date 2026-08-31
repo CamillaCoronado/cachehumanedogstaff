@@ -4,6 +4,7 @@ import { getAdminAuth, getAdminDb } from '$lib/firebase/admin';
 import { syncAnimalsFromASM } from '$lib/data/asm-sync';
 import { createAdminSyncEnvironment } from '$lib/server/asmSyncEnv';
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
+import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 
 /**
  * Twenty people opening the app at 8am should not each reconcile the whole roster
@@ -47,6 +48,15 @@ export async function POST({ request }: RequestEvent) {
 
 	const result = await syncAnimalsFromASM(createAdminSyncEnvironment());
 	if (result.changes.length > 0) await recordSyncEventsAdmin(result.changes);
+
+	// Same five-minute slot, so feeding reports reach the approval queue within minutes
+	// of someone opening the app rather than waiting for the daily cron. A Slack failure
+	// must not fail the ASM sync, which is the reason this request exists.
+	try {
+		await pollSlackFeedings();
+	} catch (e) {
+		console.error('[slack feedings]', e);
+	}
 
 	// Return the changes themselves, not just a count — the sync log panel lists them.
 	return json({ synced: true, changes: result.changes });
