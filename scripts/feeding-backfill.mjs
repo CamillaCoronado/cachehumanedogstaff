@@ -101,18 +101,49 @@ function messagesFrom(file) {
 	return out.filter((m) => (m.text ?? '').trim() && !m.bot_id);
 }
 
+/**
+ * Finds every imported log. The collectionGroup query is the fast path but needs a
+ * single-field index on `source` that a fresh project does not have — and undo must not
+ * depend on infrastructure being in place, or the promise that this is reversible is
+ * worth nothing. So it falls back to walking each dog, which needs no index at all.
+ */
+async function findImported(store) {
+	try {
+		const snap = await store.collectionGroup('feedingLogs').where('source', '==', SOURCE).get();
+		return snap.docs.map((d) => d.ref);
+	} catch (e) {
+		if (e.code !== 9) throw e; // 9 = FAILED_PRECONDITION, i.e. missing index
+		console.log('  (no collection-group index; scanning per dog instead)');
+		const dogs = await store.collection('dogs').select().get();
+		const refs = [];
+		for (let i = 0; i < dogs.docs.length; i += 20) {
+			const batch = await Promise.all(
+				dogs.docs.slice(i, i + 20).map((d) => d.ref.collection('feedingLogs').get())
+			);
+			for (const snap of batch) {
+				// Both checks: the id is derived from the source message, and the field is
+				// written by this script. Either alone identifies an imported log.
+				for (const doc of snap.docs) {
+					if (doc.id.startsWith('slack-') || doc.data().source === SOURCE) refs.push(doc.ref);
+				}
+			}
+		}
+		return refs;
+	}
+}
+
 async function undo(store) {
-	// collectionGroup finds them wherever they live, without walking every dog.
-	const snap = await store.collectionGroup('feedingLogs').where('source', '==', SOURCE).get();
-	console.log(`Found ${snap.size} imported feeding logs.`);
+	const refs = await findImported(store);
+	console.log(`Found ${refs.length} imported feeding logs.`);
+	if (refs.length === 0) return;
 	if (!WRITE) return console.log('Preview only — re-run with --undo --write to delete.');
 	let done = 0;
-	for (let i = 0; i < snap.docs.length; i += 400) {
+	for (let i = 0; i < refs.length; i += 400) {
 		const batch = store.batch();
-		for (const d of snap.docs.slice(i, i + 400)) batch.delete(d.ref);
+		for (const ref of refs.slice(i, i + 400)) batch.delete(ref);
 		await batch.commit();
-		done += Math.min(400, snap.docs.length - i);
-		console.log(`  deleted ${done}/${snap.size}`);
+		done += Math.min(400, refs.length - i);
+		console.log(`  deleted ${done}/${refs.length}`);
 	}
 }
 
