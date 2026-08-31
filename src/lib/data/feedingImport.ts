@@ -154,6 +154,50 @@ function inFosterOn(c: Candidate, at: number): boolean {
 	return c.backFrom === null || at < c.backFrom;
 }
 
+/**
+ * Two reports far enough apart are two feeds. Two a few minutes apart are one feed
+ * written up twice — often the same person adding a detail — and splitting those would
+ * invent a meal.
+ */
+const SEPARATE_FEEDS_MS = 4 * 60 * 60 * 1000;
+const SLOT_ORDER: MealTime[] = ['am', 'pm', 'second'];
+
+export interface DayReport {
+	postedAt: Date;
+	/** From the message itself: "morning", "second meal". Never overridden. */
+	statedMealTime: MealTime | null;
+}
+
+/**
+ * Assigns a meal slot to each of a day's reports.
+ *
+ * The clock decides on its own — before 3pm is the morning feed. But when two reports
+ * land in the same slot and neither says which meal it is, their order settles it: the
+ * shelter feeds twice, so the later write-up is the later feed. That only applies when
+ * they are hours apart, since a pair minutes apart is one feed reported twice.
+ *
+ * A message that states its meal keeps it, and never gets moved to make room.
+ */
+export function assignDaySlots(reports: DayReport[]): MealTime[] {
+	const order = reports.map((r, i) => i).sort((a, b) => reports[a].postedAt.getTime() - reports[b].postedAt.getTime());
+	const slots: MealTime[] = reports.map(
+		(r) => r.statedMealTime ?? (r.postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm')
+	);
+
+	for (let n = 1; n < order.length; n++) {
+		const here = order[n];
+		const before = order[n - 1];
+		if (reports[here].statedMealTime) continue; // stated wins
+		if (slots[here] !== slots[before]) continue; // already distinct
+		if (reports[here].postedAt.getTime() - reports[before].postedAt.getTime() < SEPARATE_FEEDS_MS) continue;
+
+		const next = SLOT_ORDER[SLOT_ORDER.indexOf(slots[before]) + 1];
+		// Nothing after the second meal; leave it where the clock put it.
+		if (next && !slots.some((s, i) => s === next && reports[i].statedMealTime)) slots[here] = next;
+	}
+	return slots;
+}
+
 /** Every dog the feeding shift would have fed that day. */
 function feedableOn(index: DogIndex, when: Date): Candidate[] {
 	const at = when.getTime();
@@ -182,14 +226,20 @@ function feedableOn(index: DogIndex, when: Date): Candidate[] {
  * instruction, or ordinary chatter. Without a named exception there is nothing to say
  * the message is a feeding report at all.
  */
-export function planFeedings(text: string, postedAt: Date, index: DogIndex): PlannedFeeding[] {
+export function planFeedings(
+	text: string,
+	postedAt: Date,
+	index: DogIndex,
+	/** Supplied when the day's other reports are known, so order can settle the slot. */
+	slotOverride?: MealTime
+): PlannedFeeding[] {
 	const parsed = parseFeedingMessage(text, rosterOn(index, postedAt));
 	// Either form is a feeding record: dogs named as exceptions, or a plain statement
 	// that the whole shelter ate. Anything else is not a report of a feed.
 	if (parsed.entries.length === 0 && !parsed.allAte) return [];
 
 	const mealTime: MealTime =
-		parsed.mealTime ?? (postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm');
+		parsed.mealTime ?? slotOverride ?? (postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm');
 	const mealTimeInferred = !parsed.mealTime;
 
 	const planned: PlannedFeeding[] = [];

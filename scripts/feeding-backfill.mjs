@@ -136,12 +136,15 @@ function assignMealTimes(planned) {
 
 function messagesFrom(file) {
 	const ch = JSON.parse(readFileSync(file, 'utf8'));
-	const out = [];
+	// Keyed by timestamp: a reply broadcast to the channel appears both as a reply and
+	// as a message, and a resumed pull can overlap. The same message read twice would
+	// become the same feeding logged twice.
+	const byTs = new Map();
 	for (const m of ch.messages ?? []) {
-		out.push(m);
-		for (const r of m.replies ?? []) out.push(r);
+		if (!byTs.has(m.ts)) byTs.set(m.ts, m);
+		for (const r of m.replies ?? []) if (!byTs.has(r.ts)) byTs.set(r.ts, r);
 	}
-	return out.filter((m) => (m.text ?? '').trim() && !m.bot_id);
+	return [...byTs.values()].filter((m) => (m.text ?? '').trim() && !m.bot_id);
 }
 
 /**

@@ -42,15 +42,15 @@ const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
 	{ re: /did(?:n'?t| not)\s+(?:really\s+|want\s+to\s+)?(?:eat|finish|touch)/i, amount: 'none' },
 	{ re: /would(?:n'?t| not)\s+eat/i, amount: 'none' },
 	{ re: /(?:has|have|had)(?:n'?t| not)\s+eaten/i, amount: 'none' },
-	{ re: /(?:ate|eat)\s+(?:about\s+|around\s+)?(?:half|1\/2)/i, amount: 'half' },
+	{ re: /\b(?:ate|eat)\s+(?:about\s+|around\s+)?(?:half|1\/2)/i, amount: 'half' },
 	// "ate about 1/4" is a real and common way to write it.
-	{ re: /ate\s+(?:about\s+|around\s+)?(?:1\/4|1\/3|a\s+quarter|a\s+third)/i, amount: 'little' },
+	{ re: /\bate\s+(?:about\s+|around\s+)?(?:1\/4|1\/3|a\s+quarter|a\s+third)/i, amount: 'little' },
 	// Food on the floor is food not eaten, whatever the quantity word attached to it.
 	{ re: /spill(?:ed|t)?\s+(?:most|all|it|some|his|her|their)/i, amount: 'little' },
-	{ re: /(?:ate|eat)\s+most/i, amount: 'most' },
-	{ re: /(?:ate|eat)\s+(?:a\s+)?(?:little|bit|few|some)\b(?:\s+bites?)?/i, amount: 'little' },
-	{ re: /(?:ate|eat)\s+(?:it\s+)?all\b/i, amount: 'all' },
-	{ re: /(?:ate|eat)\s+(?:everything|there\s+food|their\s+food|his\s+food|her\s+food)/i, amount: 'all' },
+	{ re: /\b(?:ate|eat)\s+most/i, amount: 'most' },
+	{ re: /\b(?:ate|eat)\s+(?:a\s+)?(?:little|bit|few|some)\b(?:\s+bites?)?/i, amount: 'little' },
+	{ re: /\b(?:ate|eat)\s+(?:it\s+)?all\b/i, amount: 'all' },
+	{ re: /\b(?:ate|eat)\s+(?:everything|there\s+food|their\s+food|his\s+food|her\s+food)/i, amount: 'all' },
 	{ re: /\bfinished\b/i, amount: 'all' },
 	// Bare verbs last: they are the fallback once every qualified form has missed.
 	// A trailing "didnt" carries the meaning on its own — "Tasha thor Linda doug didnt".

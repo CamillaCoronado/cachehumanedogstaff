@@ -365,6 +365,21 @@ describe('parseFeedingMessage', () => {
 			expect(parse("Buck didn't eat, everyone else did").looksLikeReport).toBe(true);
 		});
 
+		it('does not match an amount inside a longer word', () => {
+			// "demonstr-ate some" was read as "ate some" and logged Caira as having eaten.
+			expect(
+				parseFeedingMessage(
+					"Caira decided to demonstrate some resource guarding last night",
+					['Caira']
+				).entries
+			).toEqual([]);
+			expect(parseFeedingMessage("Seperate Malone and Steven's when eating", ['Malone']).entries).toEqual([]);
+			// The real verb still matches.
+			expect(parseFeedingMessage('Buck ate some', ['Buck']).entries).toEqual([
+				{ name: 'Buck', amountEaten: 'little' }
+			]);
+		});
+
 		it('recovers a name two edits out when it is long enough', () => {
 			expect(parseFeedingMessage("scrunchy didn't eat", ['Scrunchie']).entries)
 				.toEqual([{ name: 'Scrunchie', amountEaten: 'none' }]);

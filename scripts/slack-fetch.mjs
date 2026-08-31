@@ -117,9 +117,19 @@ function readSaved(name) {
 }
 
 function writeChannel(channel, messages) {
+	// Deduped by timestamp: a resumed pull can overlap what is already saved, and a
+	// reply broadcast to the channel arrives both as a reply and as a message. Either
+	// way the same message twice becomes the same feeding logged twice.
+	const seen = new Set();
+	const unique = [];
+	for (const m of messages) {
+		if (seen.has(m.ts)) continue;
+		seen.add(m.ts);
+		unique.push(m);
+	}
 	writeFileSync(
 		channelFile(channel.name),
-		JSON.stringify({ channel: channel.name, id: channel.id, messages }, null, 2)
+		JSON.stringify({ channel: channel.name, id: channel.id, messages: unique }, null, 2)
 	);
 }
 
