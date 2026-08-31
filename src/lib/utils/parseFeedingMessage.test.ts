@@ -212,6 +212,27 @@ describe('parseFeedingMessage', () => {
 		expect(parse('Buck ate half of his 2nd meal').mealTime).toBe('second');
 	});
 
+	it('recovers a misspelled name', () => {
+		// Real message: "Dexter stragler Zane ... didn't eat" silently lost Straggler.
+		const result = parseFeedingMessage(
+			"Dexter stragler Zane didn't eat",
+			['Dexter', 'Straggler', 'Zane']
+		);
+		expect(result.entries.map((e) => e.name)).toEqual(['Dexter', 'Straggler', 'Zane']);
+	});
+
+	it('will not guess between two equally close names', () => {
+		// "arley" is one insertion from both Marley and Harley; picking either is a coin flip.
+		expect(parseFeedingMessage("arley didn't eat", ['Marley', 'Harley']).entries).toEqual([]);
+	});
+
+	it('does not fuzzy-match ordinary words onto dog names', () => {
+		expect(parseFeedingMessage("hasn't eaten", ['Eaton']).entries).toEqual([]);
+		expect(parseFeedingMessage("didn't drink water.", ['Walter']).entries).toEqual([]);
+		// Too short to risk: one edit covers too much ground on a four-letter word.
+		expect(parseFeedingMessage("Bear didn't eat", ['Bean']).entries).toEqual([]);
+	});
+
 	it('returns nothing useful without a roster', () => {
 		// Names here are overwhelmingly lowercase, so there is no safe way to spot them
 		// without knowing the dogs. Better empty than invented.

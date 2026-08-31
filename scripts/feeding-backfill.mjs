@@ -254,14 +254,17 @@ async function main() {
 			(c) => (c.from === null || at >= c.from - 86_400_000) && (c.to === null || at <= c.to + 86_400_000)
 		);
 
-		// Most "duplicates" are one animal recorded twice — a legacy UUID-keyed document
-		// and the ASM-numbered one the sync maintains, same name, same intake date. The
-		// ASM-numbered record is the live one, so prefer it rather than discarding a real
-		// dog as ambiguous.
+		// A document keyed by shelter number is one ASM maintains; a UUID-keyed one is a
+		// legacy record the sync no longer touches, and several of those are stale twins
+		// still marked present long after the dog left. The shelter number wins.
+		const byShelterNumber = inWindow.filter((c) => /^\d+$/.test(c.id));
+		if (byShelterNumber.length > 0) inWindow = byShelterNumber;
+
+		// Between two shelter numbers, the dog still at the shelter is the one being
+		// written about — the other is a previous animal of the same name.
 		if (inWindow.length > 1) {
-			const sameDog = new Set(inWindow.map((c) => c.from)).size === 1;
-			const asmKeyed = inWindow.filter((c) => /^\d+$/.test(c.id));
-			if (sameDog && asmKeyed.length === 1) inWindow = asmKeyed;
+			const stillHere = inWindow.filter((c) => c.to === null);
+			if (stillHere.length === 1) inWindow = stillHere;
 		}
 
 		// Exactly one match is an answer; none or several is a guess, and a guess here

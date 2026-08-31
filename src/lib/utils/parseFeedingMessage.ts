@@ -80,6 +80,43 @@ function sentenceStart(text: string, index: number): number {
 	return start;
 }
 
+/**
+ * Words that turn up constantly in these messages and are one letter away from being
+ * plausible dog names. Without this guard "eaten" finds an Eaton and "water" a Walter.
+ */
+const NEVER_A_NAME = new Set([
+	// Feeding and care vocabulary
+	'eaten', 'eating', 'water', 'meal', 'meals', 'treat', 'treats', 'kennel', 'kennels',
+	'morning', 'second', 'little', 'bowls', 'bowl', 'crate', 'blood', 'bland', 'stool',
+	'stools', 'poops', 'pooped', 'vomit', 'vomited', 'diarrhea', 'kibble', 'breakfast',
+	'dinner', 'puppy', 'puppies', 'walked', 'walking', 'leash', 'leashed', 'cleaned',
+	'cleaning', 'cleared', 'sprayed', 'bathed', 'muzzle', 'solid', 'runny', 'picky',
+	'chunks', 'bites', 'teeth', 'lethargic', 'surgery', 'clinic', 'foster', 'adopted',
+	// Ordinary prose that happens to sit one edit from a name
+	'today', 'night', 'threw', 'other', 'their', 'there', 'those', 'these', 'still',
+	'about', 'after', 'before', 'again', 'didnt', 'doesnt', 'wasnt', 'hasnt', 'seems',
+	'would', 'could', 'should', 'think', 'thing', 'things', 'first', 'mixed', 'weird',
+	'happy', 'being', 'every', 'everyone', 'everybody', 'something', 'whenever',
+	'excellent', 'evening', 'tonight', 'outside', 'inside', 'weather', 'allow', 'photos',
+	'doctor', 'hectic', 'sorry', 'looked', 'looks', 'small', 'large'
+]);
+
+/** True when one edit turns a into b. Cheap: bails as soon as a second edit is needed. */
+function withinOneEdit(a: string, b: string): boolean {
+	if (Math.abs(a.length - b.length) > 1) return false;
+	let i = 0;
+	let j = 0;
+	let edits = 0;
+	while (i < a.length && j < b.length) {
+		if (a[i] === b[j]) { i++; j++; continue; }
+		if (++edits > 1) return false;
+		if (a.length > b.length) i++;
+		else if (a.length < b.length) j++;
+		else { i++; j++; }
+	}
+	return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
 function normalizeForCompare(s: string): string {
 	return s.toLowerCase().replace(/[^a-z]/g, '');
 }
@@ -106,7 +143,22 @@ function namesIn(fragment: string, roster: Map<string, string>): string[] {
 				break;
 			}
 		}
-		if (!matched) i++;
+		if (!matched) {
+			// Names get typed fast and wrong — "stragler" for Straggler drops a real dog.
+			// Only single words, only long ones, only one edit away, and only when exactly
+			// one roster name is that close: two candidates means guessing which dog.
+			const word = normalizeForCompare(words[i]);
+			if (word.length >= 5 && !NEVER_A_NAME.has(word) && !roster.has(word)) {
+				const near = new Set<string>();
+				for (const [key, name] of roster) {
+					if (withinOneEdit(word, key)) near.add(name);
+					if (near.size > 1) break;
+				}
+				if (near.size === 1) found.push([...near][0]);
+			}
+			// A fuzzy hit consumes exactly the one word it matched, same as a miss.
+			i++;
+		}
 	}
 	return found;
 }
