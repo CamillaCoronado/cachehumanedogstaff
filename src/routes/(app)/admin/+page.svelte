@@ -20,6 +20,7 @@
 	let pendingFeedings: PendingFeeding[] = [];
 	let pendingLoading = false;
 	let pendingBusyId: string | null = null;
+	let pendingError = '';
 
 	/** Posted time, so the meal can be judged against when it was written. */
 	function formatTime(value: string): string {
@@ -39,11 +40,14 @@
 
 	async function loadPendingFeedings() {
 		pendingLoading = true;
+		pendingError = '';
 		try {
 			pendingFeedings = await listPendingFeedings();
 		} catch (error) {
 			console.error(error);
-			toast.error('Could not load feeding messages.');
+			// Shown rather than toasted: a failure here is indistinguishable from an empty
+			// queue otherwise, and that is how three waiting messages went unnoticed.
+			pendingError = error instanceof Error ? error.message : 'Could not load feeding messages.';
 		} finally {
 			pendingLoading = false;
 		}
@@ -433,7 +437,9 @@
 					</button>
 				</div>
 
-				{#if pendingFeedings.length === 0}
+				{#if pendingError}
+					<p class="error-note">Could not load the queue: {pendingError}</p>
+				{:else if pendingFeedings.length === 0}
 					<p class="empty-note">
 						{pendingLoading ? 'Checking for new messages…' : 'Nothing waiting — every feeding message has been handled.'}
 					</p>

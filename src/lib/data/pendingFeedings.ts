@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, getDocs, orderBy, query, setDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import type { PendingFeeding, UserProfile } from '$lib/types';
 import { db } from '$lib/firebase/config';
 import { feedingLogId } from '$lib/data/feedingImport';
@@ -6,17 +6,23 @@ import { addFeedingLog } from '$lib/data/dogs';
 
 const COLLECTION = 'pendingFeedings';
 
+/**
+ * Sorted here rather than by Firestore: pairing a filter with an order needs a composite
+ * index, and without it the query throws. The queue is a handful of messages, so sorting
+ * in the browser costs nothing and removes the dependency.
+ *
+ * Errors are thrown, not swallowed. Returning an empty list on failure made a broken
+ * query look exactly like an empty queue, which is how three waiting messages showed up
+ * as "nothing waiting".
+ */
 export async function listPendingFeedings(): Promise<PendingFeeding[]> {
 	if (!db) return [];
-	try {
-		const snapshot = await getDocs(
-			query(collection(db, COLLECTION), where('processed', '==', false), orderBy('postedAt', 'desc'))
-		);
-		return snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingFeeding, 'id'>) }));
-	} catch {
-		// Missing index or rules — an empty queue is better than a broken Admin page.
-		return [];
-	}
+	const snapshot = await getDocs(
+		query(collection(db, COLLECTION), where('processed', '==', false))
+	);
+	return snapshot.docs
+		.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingFeeding, 'id'>) }))
+		.sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
 }
 
 /**
