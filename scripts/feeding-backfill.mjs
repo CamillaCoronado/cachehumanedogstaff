@@ -253,7 +253,7 @@ async function main() {
 	// Roster from Firestore, not ASM: the doc id is what the log has to be filed under,
 	// and a dog named in chat but absent from Firestore has nowhere to put a log.
 	const [dogsSnap, liveNames] = await Promise.all([
-		store.collection('dogs').select('name', 'intakeDate', 'leftShelterDate', 'status', 'asmShelterCode').get(),
+		store.collection('dogs').get(),
 		asmNames()
 	]);
 	let renamed = 0;

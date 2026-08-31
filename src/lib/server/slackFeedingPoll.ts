@@ -95,6 +95,8 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			'asmShelterCode',
 			'inFoster',
 			'permanentFoster',
+			'inFosterSince',
+			'shelterSince',
 			'isolationStatus',
 			'isIncoming'
 		)

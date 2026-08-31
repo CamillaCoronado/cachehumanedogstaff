@@ -15,6 +15,8 @@ export interface DogRecord {
 	// Feeding page, so "everyone else" here means the same set it means there.
 	inFoster?: boolean;
 	permanentFoster?: boolean;
+	inFosterSince?: string | null;
+	shelterSince?: string | null;
 	isolationStatus?: string | null;
 	isIncoming?: boolean;
 }
@@ -27,6 +29,8 @@ interface Candidate {
 	code: string | null;
 	feedable: boolean;
 	isIncoming: boolean;
+	fosterFrom: number | null;
+	backFrom: number | null;
 }
 
 export interface PlannedFeeding {
@@ -61,16 +65,25 @@ export function buildDogIndex(dogs: DogRecord[]): DogIndex {
 		// dog left and came back, and only the intake date moved. Treating it as current
 		// hides the dog from every report since.
 		if (to !== null && ((from !== null && to < from) || dog.status === 'active')) to = null;
-		// Isolation dogs are fed by the clinic and foster dogs are not at the shelter, so
-		// neither belongs in "everyone else" — mirroring the Feeding page's own filter.
+		// Isolation dogs are fed by the clinic, so they are not part of "everyone else".
+		// This one is current-state only — nothing records when an isolation began — but
+		// it covers a couple of dogs at a time.
 		//
 		// Status is deliberately not part of this. It records where a dog is *now*, so
 		// requiring 'active' would drop every dog since adopted and leave a message from
 		// February implying a meal for only the handful still here today. Whether a dog
 		// was at the shelter on a given date is what the dates are for.
-		const feedable =
-			!dog.inFoster && !dog.permanentFoster && (dog.isolationStatus ?? 'none') === 'none';
+		const feedable = !dog.permanentFoster && (dog.isolationStatus ?? 'none') === 'none';
 		if (!index.has(dog.name)) index.set(dog.name, []);
+		// Foster is dated, so it can be applied to the day in question rather than to now:
+		// a dog in foster today was still being fed here before it left, and one that went
+		// to foster in April was not being fed here in May.
+		const fosterFrom = dog.inFosterSince ? new Date(dog.inFosterSince).getTime() : null;
+		const backRaw = dog.shelterSince ? new Date(dog.shelterSince).getTime() : null;
+		// shelterSince is also stamped when a dog moves off Incoming, so it only marks a
+		// return from foster when it comes after the foster started.
+		const backFrom = backRaw !== null && fosterFrom !== null && backRaw > fosterFrom ? backRaw : null;
+
 		index.get(dog.name)!.push({
 			id: dog.id,
 			name: dog.name,
@@ -78,7 +91,9 @@ export function buildDogIndex(dogs: DogRecord[]): DogIndex {
 			to,
 			code: dog.asmShelterCode ?? null,
 			feedable,
-			isIncoming: Boolean(dog.isIncoming)
+			isIncoming: Boolean(dog.isIncoming),
+			fosterFrom,
+			backFrom
 		});
 	}
 	return index;
@@ -132,6 +147,13 @@ export function resolveDogId(index: DogIndex, name: string, when: Date): string 
 	return inWindow.length === 1 ? inWindow[0].id : null;
 }
 
+/** In a foster home on this date, so fed there rather than by the shelter. */
+function inFosterOn(c: Candidate, at: number): boolean {
+	if (c.fosterFrom === null || at < c.fosterFrom) return false;
+	// Came back: in foster only for the stretch between leaving and returning.
+	return c.backFrom === null || at < c.backFrom;
+}
+
 /** Every dog the feeding shift would have fed that day. */
 function feedableOn(index: DogIndex, when: Date): Candidate[] {
 	const at = when.getTime();
@@ -139,6 +161,7 @@ function feedableOn(index: DogIndex, when: Date): Candidate[] {
 	for (const candidates of index.values()) {
 		for (const c of candidates) {
 			if (!c.feedable || !presentOn(c, at)) continue;
+			if (inFosterOn(c, at)) continue;
 			// An incoming dog is only fed from the day it actually arrives.
 			if (c.isIncoming && (c.from === null || at < c.from - DAY_MS)) continue;
 			out.push(c);
