@@ -392,6 +392,14 @@ describe('parseFeedingMessage', () => {
 			expect(r.entries).toEqual([]); // still not a record of anyone eating
 		});
 
+		it('flags a surgery list even when no individual name resolves', () => {
+			// "all the hat puppies" names a group; expanding it is the caller's job, but
+			// the message still has to be recognised as a surgery list to get there.
+			const r = parseFeedingMessage('do not feed: all the hat puppies', ['Buck']);
+			expect(r.isSurgeryList).toBe(true);
+			expect(r.doNotFeed).toEqual([]);
+		});
+
 		it('does not read a seating note as a surgery list', () => {
 			// These dogs are very much being fed, just not beside each other.
 			const r = parseFeedingMessage('Anne and Leslie DO NOT FEED TOGETHER', ['Anne', 'Leslie']);

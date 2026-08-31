@@ -133,6 +133,17 @@ export interface Dog {
 	// When the current day trip started (if out)
 	currentDayTripStartedAt: DateValue | null;
 	surgeryDate: DateValue | null;
+	/**
+	 * Where a surgery date came from, when it was not set by hand — the Slack message
+	 * that named the dog. Kept so a stamped date can be traced and undone.
+	 */
+	surgerySource?: string | null;
+	surgeryNote?: string | null;
+	/**
+	 * Other names staff use for this dog. ASM knows one name; the shelter floor often
+	 * uses another, and a message using it would otherwise match nothing.
+	 */
+	nicknames?: string[];
 	surgeryRestDays: number | null;
 	lastSurgeryDate: DateValue | null;
 	fortifloraDate: DateValue | null;
@@ -335,6 +346,19 @@ export interface PendingFeeding {
  * The morning surgery list read from Slack, waiting for an admin to accept it. Accepting
  * stamps surgeryDate on each dog, which is what keeps them off the morning feed list.
  */
+/**
+ * A name that stands for several dogs — "the hat puppies", "rainbow puppies". Litters
+ * get referred to as a group long before anyone types out every name, and a surgery
+ * list saying "all the hat puppies" otherwise resolves to nobody.
+ */
+export interface DogGroup {
+	id: string;
+	name: string;
+	dogIds: string[];
+	createdAt: DateValue;
+	updatedAt: DateValue;
+}
+
 export interface PendingSurgery {
 	id: string;
 	rawText: string;

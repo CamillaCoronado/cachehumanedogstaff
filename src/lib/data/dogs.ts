@@ -74,6 +74,7 @@ interface StoredDog {
 	energyLevel?: 'low' | 'medium' | 'high' | 'very_high' | 'unknown';
 	playStyles?: string[];
 	goHomeItems?: string[];
+	nicknames?: string[];
 	outdoorKennelAssignment: string;
 	insideKennelAssignment?: string;
 	microchipDate?: string | null;
@@ -409,6 +410,7 @@ function serializeDog(dog: Dog): StoredDog {
 		energyLevel: dog.energyLevel,
 		playStyles: dog.playStyles ?? [],
 		goHomeItems: (dog.goHomeItems ?? []).map((item) => item.trim()).filter(Boolean),
+		nicknames: (dog.nicknames ?? []).map((n) => n.trim()).filter(Boolean),
 		// Foster dogs can be housed/placed on both kennel maps (e.g. brought back during an
 		// outbreak), so their outdoor and inside assignments are kept.
 		outdoorKennelAssignment: normalizeKennelAssignment(dog.outdoorKennelAssignment),
@@ -601,6 +603,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		idealHome: stored.idealHome ?? '',
 		energyLevel: stored.energyLevel ?? 'unknown',
 		goHomeItems: stored.goHomeItems ?? [],
+		nicknames: stored.nicknames ?? [],
 		playStyles: (stored.playStyles ?? []).filter(
 			(s): s is DogPlayStyle => s === 'rough_and_rowdy' || s === 'gentle_and_dainty' || s === 'solo'
 		),

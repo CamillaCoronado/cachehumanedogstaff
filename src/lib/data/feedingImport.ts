@@ -19,6 +19,14 @@ export interface DogRecord {
 	shelterSince?: string | null;
 	isolationStatus?: string | null;
 	isIncoming?: boolean;
+	/** Extra names staff use for this dog, matched exactly like its own name. */
+	nicknames?: string[];
+}
+
+/** A name standing for several dogs at once, such as a litter. */
+export interface DogGroupRecord {
+	name: string;
+	dogIds: string[];
 }
 
 interface Candidate {
@@ -47,24 +55,42 @@ export interface PlannedFeeding {
 	implied: boolean;
 }
 
-export type DogIndex = Map<string, Candidate[]>;
+export interface DogIndex {
+	byName: Map<string, Candidate[]>;
+	/** Names standing for several dogs at once, normalised for lookup. */
+	groups: Map<string, string[]>;
+	/** A dog's own name, so a nickname match is recorded under the name it is filed by. */
+	namesById: Map<string, string>;
+}
 
 const DAY_MS = 86_400_000;
+
+/** Same normalisation the parser uses, so a group name matches however it is typed. */
+function normalizeName(value: string): string {
+	return value.toLowerCase().replace(/[^a-z]/g, '');
+}
 
 /**
  * Groups dogs by name for lookup. Names repeat across years and the same animal is
  * sometimes recorded twice, so every candidate is kept and the date decides.
  */
-export function buildDogIndex(dogs: DogRecord[]): DogIndex {
-	const index: DogIndex = new Map();
+export function buildDogIndex(dogs: DogRecord[], groups: DogGroupRecord[] = []): DogIndex {
+	const index: DogIndex = {
+		byName: new Map(),
+		groups: new Map(groups.map((g) => [normalizeName(g.name), g.dogIds])),
+		namesById: new Map(dogs.filter((d) => d.name).map((d) => [d.id, d.name]))
+	};
+
 	for (const dog of dogs) {
 		if (!dog.name) continue;
+
 		const from = dog.intakeDate ? new Date(dog.intakeDate).getTime() : null;
 		let to = dog.leftShelterDate ? new Date(dog.leftShelterDate).getTime() : null;
 		// A departure earlier than the dog's own intake belongs to an earlier stay: the
 		// dog left and came back, and only the intake date moved. Treating it as current
 		// hides the dog from every report since.
 		if (to !== null && ((from !== null && to < from) || dog.status === 'active')) to = null;
+
 		// Isolation dogs are fed by the clinic, so they are not part of "everyone else".
 		// This one is current-state only — nothing records when an isolation began — but
 		// it covers a couple of dogs at a time.
@@ -74,7 +100,7 @@ export function buildDogIndex(dogs: DogRecord[]): DogIndex {
 		// February implying a meal for only the handful still here today. Whether a dog
 		// was at the shelter on a given date is what the dates are for.
 		const feedable = !dog.permanentFoster && (dog.isolationStatus ?? 'none') === 'none';
-		if (!index.has(dog.name)) index.set(dog.name, []);
+
 		// Foster is dated, so it can be applied to the day in question rather than to now:
 		// a dog in foster today was still being fed here before it left, and one that went
 		// to foster in April was not being fed here in May.
@@ -84,7 +110,7 @@ export function buildDogIndex(dogs: DogRecord[]): DogIndex {
 		// return from foster when it comes after the foster started.
 		const backFrom = backRaw !== null && fosterFrom !== null && backRaw > fosterFrom ? backRaw : null;
 
-		index.get(dog.name)!.push({
+		const candidate: Candidate = {
 			id: dog.id,
 			name: dog.name,
 			from,
@@ -94,8 +120,27 @@ export function buildDogIndex(dogs: DogRecord[]): DogIndex {
 			isIncoming: Boolean(dog.isIncoming),
 			fosterFrom,
 			backFrom
-		});
+		};
+
+		if (!index.byName.has(dog.name)) index.byName.set(dog.name, []);
+		index.byName.get(dog.name)!.push(candidate);
 	}
+
+	// Nicknames in a second pass, so one never displaces a dog actually called that.
+	const realNames = new Set(dogs.map((d) => d.name));
+	for (const dog of dogs) {
+		const candidates = index.byName.get(dog.name);
+		if (!candidates) continue;
+		const candidate = candidates.find((c) => c.id === dog.id);
+		if (!candidate) continue;
+		for (const nickname of dog.nicknames ?? []) {
+			const key = nickname.trim();
+			if (!key || realNames.has(key)) continue;
+			if (!index.byName.has(key)) index.byName.set(key, []);
+			index.byName.get(key)!.push(candidate);
+		}
+	}
+
 	return index;
 }
 
@@ -107,7 +152,7 @@ function presentOn(c: Candidate, at: number): boolean {
 export function rosterOn(index: DogIndex, when: Date): string[] {
 	const at = when.getTime();
 	const names: string[] = [];
-	for (const [name, candidates] of index) {
+	for (const [name, candidates] of index.byName) {
 		if (candidates.some((c) => presentOn(c, at))) names.push(name);
 	}
 	return names;
@@ -115,7 +160,7 @@ export function rosterOn(index: DogIndex, when: Date): string[] {
 
 /** The dog of this name at the shelter on `when`, or null when it cannot be told. */
 export function resolveDogId(index: DogIndex, name: string, when: Date): string | null {
-	const candidates = index.get(name);
+	const candidates = index.byName.get(name);
 	if (!candidates) return null;
 	if (candidates.length === 1) return candidates[0].id;
 
@@ -202,7 +247,7 @@ export function assignDaySlots(reports: DayReport[]): MealTime[] {
 function feedableOn(index: DogIndex, when: Date): Candidate[] {
 	const at = when.getTime();
 	const out: Candidate[] = [];
-	for (const candidates of index.values()) {
+	for (const candidates of index.byName.values()) {
 		for (const c of candidates) {
 			if (!c.feedable || !presentOn(c, at)) continue;
 			if (inFosterOn(c, at)) continue;
@@ -250,7 +295,7 @@ export function planFeedings(
 		named.add(dogId);
 		planned.push({
 			dogId,
-			dogName: entry.name,
+			dogName: index.namesById.get(dogId) ?? entry.name,
 			amountEaten: entry.amountEaten,
 			mealTime,
 			mealTimeInferred,
@@ -302,12 +347,29 @@ export function planSurgery(text: string, postedAt: Date, index: DogIndex): Plan
 
 	const out: PlannedSurgery[] = [];
 	const seen = new Set<string>();
+	const add = (dogId: string, dogName: string) => {
+		if (seen.has(dogId)) return;
+		seen.add(dogId);
+		out.push({ dogId, dogName });
+	};
+
 	for (const name of parsed.doNotFeed) {
 		const dogId = resolveDogId(index, name, postedAt);
-		if (!dogId || seen.has(dogId)) continue;
-		seen.add(dogId);
-		out.push({ dogId, dogName: name });
+		if (dogId) add(dogId, index.namesById.get(dogId) ?? name);
 	}
+
+	// A litter is named as a group long before anyone types out every puppy — "all the
+	// hat puppies". Matched against the raw text, since the group name is not a dog name
+	// and never reaches the parser's roster.
+	const haystack = normalizeName(text);
+	for (const [groupKey, dogIds] of index.groups) {
+		if (!groupKey || !haystack.includes(groupKey)) continue;
+		for (const dogId of dogIds) {
+			const name = index.namesById.get(dogId);
+			if (name) add(dogId, name);
+		}
+	}
+
 	return out;
 }
 

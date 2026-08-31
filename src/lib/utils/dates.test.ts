@@ -99,7 +99,9 @@ describe('isSurgeryToday', () => {
 		const thursday = new Date(2026, 5, 11);
 		const friday = new Date(2026, 5, 12);
 		expect(isSurgeryToday(thursday, thursday)).toBe(true);
-		expect(isSurgeryToday(friday, friday)).toBe(false);
+		// A bonus surgery day is still a surgery day: the date decides, not the weekday.
+		expect(isSurgeryToday(friday, friday)).toBe(true);
+		expect(isSurgeryToday(thursday, friday)).toBe(false);
 		expect(isSurgeryToday(null, thursday)).toBe(false);
 	});
 });

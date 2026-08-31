@@ -7,7 +7,9 @@
 	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
 	import { listPendingFeedings, acceptPendingFeeding, dismissPendingFeeding } from '$lib/data/pendingFeedings';
-	import { listPendingSurgeries, acceptPendingSurgery, dismissPendingSurgery } from '$lib/data/pendingSurgeries';
+	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
+	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
+	import type { DogGroup } from '$lib/types';
 	import type { PendingFeeding, PendingSurgery } from '$lib/types';
 
 	type EditableUser = UserProfile & {
@@ -18,6 +20,71 @@
 
 	const roleOptions: UserRole[] = ['admin', 'manager', 'coordinator', 'staff', 'volunteer'];
 
+	let dogGroups: DogGroup[] = [];
+	let groupName = '';
+	let groupDogNames = '';
+	let groupBusy = false;
+	let groupError = '';
+
+	async function loadDogGroups() {
+		groupError = '';
+		try {
+			dogGroups = await listDogGroups();
+			if (!allDogsLoaded) {
+				allDogs = await listDogs();
+				allDogsLoaded = true;
+			}
+		} catch (error) {
+			console.error(error);
+			groupError = error instanceof Error ? error.message : 'Could not load groups.';
+		}
+	}
+
+	/** Resolves the typed names to dogs, so a typo is caught here rather than silently. */
+	function matchGroupDogs(input: string) {
+		const wanted = input.split(/[,\n]/).map((n) => n.trim()).filter(Boolean);
+		const found: Dog[] = [];
+		const missing: string[] = [];
+		for (const name of wanted) {
+			const dog = allDogs.find((d) => d.name.toLowerCase() === name.toLowerCase());
+			if (dog) found.push(dog);
+			else missing.push(name);
+		}
+		return { found, missing };
+	}
+
+	$: groupMatch = matchGroupDogs(groupDogNames);
+
+	async function addGroup() {
+		if (!groupName.trim() || groupMatch.found.length === 0) return;
+		groupBusy = true;
+		try {
+			await saveDogGroup({ name: groupName, dogIds: groupMatch.found.map((d) => d.id) });
+			groupName = '';
+			groupDogNames = '';
+			await loadDogGroups();
+			toast.success('Group saved.');
+		} catch (error) {
+			console.error(error);
+			toast.error('Could not save that group.');
+		} finally {
+			groupBusy = false;
+		}
+	}
+
+	async function removeGroup(group: DogGroup) {
+		groupBusy = true;
+		try {
+			await deleteDogGroup(group.id);
+			dogGroups = dogGroups.filter((g) => g.id !== group.id);
+		} catch (error) {
+			console.error(error);
+			toast.error('Could not delete that group.');
+		} finally {
+			groupBusy = false;
+		}
+	}
+
 	let pendingSurgeries: PendingSurgery[] = [];
 	let surgeryBusyId: string | null = null;
 	let surgeryError = '';
@@ -25,35 +92,22 @@
 	async function loadPendingSurgeries() {
 		surgeryError = '';
 		try {
-			pendingSurgeries = await listPendingSurgeries();
+			pendingSurgeries = await listRecentSurgeryLists();
 		} catch (error) {
 			console.error(error);
-			surgeryError = error instanceof Error ? error.message : 'Could not load the surgery list.';
+			surgeryError = error instanceof Error ? error.message : 'Could not load the surgery lists.';
 		}
 	}
 
-	async function acceptSurgery(pending: PendingSurgery) {
+	async function undoSurgery(pending: PendingSurgery) {
 		surgeryBusyId = pending.id;
 		try {
-			const n = await acceptPendingSurgery(pending);
+			const n = await undoSurgeryList(pending);
 			pendingSurgeries = pendingSurgeries.filter((p) => p.id !== pending.id);
-			toast.success(`Marked ${n} dog${n === 1 ? '' : 's'} for surgery.`);
+			toast.success(`Cleared surgery on ${n} dog${n === 1 ? '' : 's'}.`);
 		} catch (error) {
 			console.error(error);
-			toast.error('Could not mark those dogs.');
-		} finally {
-			surgeryBusyId = null;
-		}
-	}
-
-	async function dismissSurgery(pending: PendingSurgery) {
-		surgeryBusyId = pending.id;
-		try {
-			await dismissPendingSurgery(pending.id);
-			pendingSurgeries = pendingSurgeries.filter((p) => p.id !== pending.id);
-		} catch (error) {
-			console.error(error);
-			toast.error('Could not dismiss that list.');
+			toast.error('Could not undo that list.');
 		} finally {
 			surgeryBusyId = null;
 		}
@@ -339,6 +393,7 @@
 		pendingLoaded = true;
 		void loadPendingFeedings();
 		void loadPendingSurgeries();
+		void loadDogGroups();
 	}
 	let pendingLoaded = false;
 
@@ -468,11 +523,12 @@
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">From Slack</p>
-						<h3 class="section-title">Surgery list waiting for approval</h3>
+						<h3 class="section-title">Surgery lists from Slack</h3>
 						<p class="section-copy">
-							The morning "do not feed" list, read as the day's surgery dogs. Accepting marks
-							each one for surgery that day, which is what keeps them off the feed list.
-							<strong>Check this before the morning feed.</strong>
+							The morning "do not feed" list, read as the day's surgery dogs and
+							<strong>applied as soon as it arrives</strong> — it lands shortly before the feed,
+							so waiting on a click could mean a fasting dog gets fed. Each dog is stamped with
+							the message it came from. Undo clears a list again.
 						</p>
 					</div>
 					<button class="action-btn" type="button" on:click={loadPendingSurgeries}>Refresh</button>
@@ -481,7 +537,7 @@
 				{#if surgeryError}
 					<p class="error-note">Could not load the surgery list: {surgeryError}</p>
 				{:else if pendingSurgeries.length === 0}
-					<p class="empty-note">No surgery list waiting.</p>
+					<p class="empty-note">No surgery lists yet.</p>
 				{:else}
 					<ul class="pending-list">
 						{#each pendingSurgeries as pending (pending.id)}
@@ -492,24 +548,71 @@
 								</p>
 								<blockquote class="pending-quote">{pending.rawText}</blockquote>
 								<p class="pending-implied">
-									Marking for surgery: <strong>{pending.dogs.map((d) => d.dogName).join(', ')}</strong>
+									Marked for surgery: <strong>{pending.dogs.map((d) => d.dogName).join(', ')}</strong>
 								</p>
 								<div class="pending-actions">
 									<button
-										class="action-btn"
-										type="button"
-										on:click={() => acceptSurgery(pending)}
-										disabled={surgeryBusyId === pending.id}
-									>
-										{surgeryBusyId === pending.id ? 'Saving…' : `Mark ${pending.dogs.length} for surgery`}
-									</button>
-									<button
 										class="ghost-btn"
 										type="button"
-										on:click={() => dismissSurgery(pending)}
+										on:click={() => undoSurgery(pending)}
 										disabled={surgeryBusyId === pending.id}
 									>
-										Dismiss
+										{surgeryBusyId === pending.id ? 'Clearing…' : 'Undo'}
+									</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Names</p>
+						<h3 class="section-title">Dog groups</h3>
+						<p class="section-copy">
+							A name that stands for several dogs. Litters get called "the hat puppies" long
+							before anyone types out every name, and a surgery list saying that would otherwise
+							match nobody. Individual nicknames live on each dog's own page.
+						</p>
+					</div>
+				</div>
+
+				{#if groupError}
+					<p class="error-note">{groupError}</p>
+				{/if}
+
+				<div class="group-form">
+					<input class="group-input" placeholder="Group name — e.g. hat puppies" bind:value={groupName} />
+					<input class="group-input" placeholder="Dogs, comma separated" bind:value={groupDogNames} />
+					<button class="action-btn" type="button" on:click={addGroup}
+						disabled={groupBusy || !groupName.trim() || groupMatch.found.length === 0}>
+						{groupBusy ? 'Saving…' : 'Add group'}
+					</button>
+				</div>
+				{#if groupDogNames.trim()}
+					<p class="group-match">
+						Matched {groupMatch.found.length}: {groupMatch.found.map((d) => d.name).join(', ') || 'none'}
+						{#if groupMatch.missing.length > 0}
+							<span class="group-missing">· not found: {groupMatch.missing.join(', ')}</span>
+						{/if}
+					</p>
+				{/if}
+
+				{#if dogGroups.length === 0}
+					<p class="empty-note">No groups yet.</p>
+				{:else}
+					<ul class="pending-list">
+						{#each dogGroups as group (group.id)}
+							<li class="pending-item">
+								<p class="pending-meta"><strong>{group.name}</strong><span>{group.dogIds.length} dogs</span></p>
+								<p class="pending-amount">
+									{group.dogIds.map((id) => allDogs.find((d) => d.id === id)?.name ?? id).join(', ')}
+								</p>
+								<div class="pending-actions">
+									<button class="ghost-btn" type="button" on:click={() => removeGroup(group)} disabled={groupBusy}>
+										Delete
 									</button>
 								</div>
 							</li>
@@ -1151,6 +1254,28 @@
 		padding: 7px 10px;
 		background: #f2efe8;
 		border-radius: 3px;
+	}
+	.group-form {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+		margin-bottom: 8px;
+	}
+	.group-input {
+		flex: 1 1 200px;
+		padding: 7px 10px;
+		border: 1px solid var(--line, #d8d2c4);
+		border-radius: 3px;
+		font: inherit;
+		font-size: 0.88rem;
+	}
+	.group-match {
+		margin: 0 0 10px;
+		font-size: 0.82rem;
+		color: #6b6459;
+	}
+	.group-missing {
+		color: #a8501b;
 	}
 	.pending-time {
 		font-size: 0.78rem;

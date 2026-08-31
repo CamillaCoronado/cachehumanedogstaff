@@ -208,6 +208,13 @@ service cloud.firestore {
       allow create: if false;
     }
 
+    // Names that stand for several dogs at once — litters, mostly — so a surgery list
+    // saying "all the hat puppies" resolves to the puppies.
+    match /dogGroups/{groupId} {
+      allow read: if isApproved();
+      allow write: if canEditDogs();
+    }
+
     match /pendingPlaygroups/{docId} {
       // Read and mark-processed by dog editors only
       allow read, update: if canEditDogs();

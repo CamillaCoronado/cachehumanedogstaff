@@ -85,8 +85,8 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 	);
 	if (messages.length === 0) return { scanned: 0, queued: 0 };
 
-	const dogsSnap = await db
-		.collection('dogs')
+	const [dogsSnap, groupsSnap] = await Promise.all([
+		db.collection('dogs')
 		.select(
 			'name',
 			'intakeDate',
@@ -98,11 +98,15 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			'inFosterSince',
 			'shelterSince',
 			'isolationStatus',
-			'isIncoming'
+			'isIncoming',
+			'nicknames'
 		)
-		.get();
+			.get(),
+		db.collection('dogGroups').get()
+	]);
 	const index = buildDogIndex(
-		dogsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DogRecord, 'id'>) }))
+		dogsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DogRecord, 'id'>) })),
+		groupsSnap.docs.map((d) => ({ name: d.data().name, dogIds: d.data().dogIds ?? [] }))
 	);
 
 	const authors = await resolveAuthors(SLACK_BOT_TOKEN, db, [
@@ -116,15 +120,40 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 
 		// The surgery list arrives as a "do not feed" instruction, so it is checked first
 		// and separately: it says who is fasting, not who ate.
+		//
+		// Applied straight away rather than queued for approval. It lands at 9am and the
+		// morning feed follows shortly after; a list waiting on a click could easily be
+		// approved after someone has already fed a dog that must not eat. The stamp
+		// records where it came from, so a wrong one can be found and undone.
 		const surgery = planSurgery(String(m.text), postedAt, index);
 		if (surgery.length > 0) {
+			const author = authors[String(m.user ?? '')] ?? 'Unknown';
+			const note = `Surgery list via Slack — ${author}: "${String(m.text).slice(0, 180)}"`;
+			const batch = db.batch();
+			for (const dog of surgery) {
+				batch.set(
+					db.collection('dogs').doc(dog.dogId),
+					{
+						surgeryDate: postedAt.toISOString(),
+						surgerySource: `slack:${slackTs}`,
+						surgeryNote: note,
+						updatedAt: new Date().toISOString()
+					},
+					{ merge: true }
+				);
+			}
+			await batch.commit();
+
+			// Recorded as already handled, so the Admin page can show what was applied
+			// without asking anyone to approve it again.
 			await db.collection('pendingSurgeries').doc(slackTs.replace('.', '-')).set({
 				rawText: String(m.text),
-				author: authors[String(m.user ?? '')] ?? 'Unknown',
+				author,
 				slackTs,
 				postedAt: postedAt.toISOString(),
 				receivedAt: new Date().toISOString(),
-				processed: false,
+				processed: true,
+				appliedAt: new Date().toISOString(),
 				dogs: surgery
 			});
 			queued++;

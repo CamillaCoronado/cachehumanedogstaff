@@ -98,9 +98,15 @@ export function isSameCalendarDay(a: DateValue | string | null | undefined, b: D
 	return isSameDay(dateA, dateB);
 }
 
+/**
+ * Surgery is normally Monday and Thursday, and this used to require it. But the shelter
+ * runs extra days — "bonus surgery day today!" — and on those the dogs were still shown
+ * as due a meal they must not have. The date says which day, so the day of the week does
+ * not need to agree.
+ */
 export function isSurgeryToday(surgeryDate: DateValue | string | null | undefined, today = new Date()) {
 	if (!surgeryDate) return false;
-	return isSameCalendarDay(surgeryDate, today) && isMondayOrThursday(today);
+	return isSameCalendarDay(surgeryDate, today);
 }
 
 export function bathEligible(surgeryDate: DateValue | string | null | undefined, today = new Date()) {

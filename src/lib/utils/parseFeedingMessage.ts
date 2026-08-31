@@ -339,9 +339,12 @@ export function parseFeedingMessage(
 		// The list runs to the end of its sentence or line.
 		const list = after.split(/[.\n•]/)[0];
 		doNotFeed.push(...namesIn(list, roster, derivedKeys));
-		// A instruction about how to feed is not a surgery list, even though it is worded
+		// An instruction about how to feed is not a surgery list, even though it is worded
 		// the same way — those dogs are being fed, just not next to each other.
-		isSurgeryList = doNotFeed.length > 0 && !FEEDING_ARRANGEMENT.test(list);
+		//
+		// Not conditional on a name resolving: "do not feed: all the hat puppies" names a
+		// group rather than a dog, and the caller is the one that can expand it.
+		isSurgeryList = !FEEDING_ARRANGEMENT.test(list);
 		working = working.slice(0, directive.index) + ' ' + after.slice(list.length);
 	}
 

@@ -263,6 +263,7 @@ async function main() {
 		store.collection('dogs').get(),
 		asmNames()
 	]);
+	const groupsSnap = await store.collection('dogGroups').get();
 	let renamed = 0;
 	const dogRecords = [];
 	for (const d of dogsSnap.docs) {
@@ -275,7 +276,10 @@ async function main() {
 		if (!name) continue;
 		dogRecords.push({ ...data, id: d.id, name });
 	}
-	const index = buildDogIndex(dogRecords);
+	const index = buildDogIndex(
+		dogRecords,
+		groupsSnap.docs.map((d) => ({ name: d.data().name, dogIds: d.data().dogIds ?? [] }))
+	);
 	console.log(
 		`Roster: ${dogRecords.length} dogs` +
 			`${renamed ? ` (${renamed} renamed since Firestore last synced)` : ''}\n`

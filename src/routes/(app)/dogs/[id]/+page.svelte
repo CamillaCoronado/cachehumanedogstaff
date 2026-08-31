@@ -459,6 +459,48 @@
 		}
 	}
 
+	let newNickname = '';
+	let savingNickname = false;
+
+	/**
+	 * Other names staff use for this dog. ASM knows one name; the floor often uses
+	 * another, and a Slack message using it would otherwise match no dog at all.
+	 */
+	async function addNickname() {
+		const name = newNickname.trim();
+		if (!dog || !name || savingNickname) return;
+		const existing = [...(dog.nicknames ?? []), dog.name];
+		if (existing.some((n) => n.toLowerCase() === name.toLowerCase())) {
+			toast.error(`"${name}" is already a name for this dog.`);
+			return;
+		}
+		savingNickname = true;
+		try {
+			await updateDog(dog.id, { nicknames: [...(dog.nicknames ?? []), name] });
+			newNickname = '';
+			await loadAll();
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to add that nickname.');
+		} finally {
+			savingNickname = false;
+		}
+	}
+
+	async function removeNickname(name: string) {
+		if (!dog || savingNickname) return;
+		savingNickname = true;
+		try {
+			await updateDog(dog.id, { nicknames: (dog.nicknames ?? []).filter((n) => n !== name) });
+			await loadAll();
+		} catch (error) {
+			console.error(error);
+			toast.error('Unable to remove that nickname.');
+		} finally {
+			savingNickname = false;
+		}
+	}
+
 	let newGoHomeItem = '';
 	let savingGoHome = false;
 
@@ -1025,6 +1067,45 @@
 		{/if}
 
 		{#if canViewInternal}
+		<div class="go-home-card">
+			<div class="go-home-head">
+				<h3 class="go-home-title">Also called</h3>
+				<span class="go-home-count">{(dog.nicknames ?? []).length}</span>
+			</div>
+			<p class="go-home-hint">
+				Other names staff use for {dog.name}. Slack messages using one of these will be matched
+				to this dog.
+			</p>
+			{#if (dog.nicknames ?? []).length === 0}
+				<p class="go-home-empty">No other names.</p>
+			{:else}
+				<ul class="go-home-list">
+					{#each dog.nicknames ?? [] as name}
+						<li class="go-home-item">
+							<span>{name}</span>
+							{#if canEdit}
+								<button
+									class="go-home-remove"
+									type="button"
+									on:click={() => removeNickname(name)}
+									disabled={savingNickname}
+									aria-label={`Remove ${name}`}
+								>×</button>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if canEdit}
+				<form class="go-home-add" on:submit|preventDefault={addNickname}>
+					<input class="go-home-input" placeholder="Add another name" bind:value={newNickname} />
+					<button class="go-home-btn" type="submit" disabled={savingNickname || !newNickname.trim()}>
+						{savingNickname ? '…' : 'Add'}
+					</button>
+				</form>
+			{/if}
+		</div>
+
 		<div class="go-home-card">
 			<div class="go-home-head">
 				<h3 class="go-home-title">Goes home with {dog.name}</h3>
