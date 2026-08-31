@@ -111,9 +111,23 @@ async function loadImport() {
 	return import(out);
 }
 
-/** Local calendar day, matching how the app stores and filters feeding dates. */
+/**
+ * The shelter's calendar day. Not the machine's: this script runs on a laptop in Mountain
+ * time and the live import runs on a server in UTC, and they have to agree on which day a
+ * report belongs to or the same message lands on two different dates.
+ */
 function dayKey(date) {
-	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	const p = Object.fromEntries(
+		new Intl.DateTimeFormat('en-CA', {
+			timeZone: 'America/Denver',
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		})
+			.formatToParts(date)
+			.map((x) => [x.type, x.value])
+	);
+	return `${p.year}-${p.month}-${p.day}`;
 }
 
 /**
@@ -377,7 +391,8 @@ async function main() {
 		for (const p of planned.slice(i, i + 400)) {
 			batch.set(store.collection('dogs').doc(p.dogId).collection('feedingLogs').doc(p.id), {
 				id: p.id,
-				date: new Date(`${p.date}T12:00:00`).toISOString(),
+				// Noon shelter time, so the stored date reads as that day everywhere.
+				date: new Date(`${p.date}T12:00:00-06:00`).toISOString(),
 				mealTime: p.mealTime,
 				amountEaten: p.amountEaten,
 				notes: `via Slack — ${p.author}: "${p.text.slice(0, 180)}"`,

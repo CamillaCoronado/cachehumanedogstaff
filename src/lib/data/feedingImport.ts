@@ -4,6 +4,41 @@ import { parseFeedingMessage } from '$lib/utils/parseFeedingMessage';
 /** The shelter feeds again at 3pm; before that a report is about the morning feed. */
 const PM_FEED_HOUR = 15;
 
+/**
+ * The shelter's own clock. Server time is not it: the poll runs on Vercel in UTC, so a
+ * report posted at 12:38pm read as 18:38 and landed on the afternoon feed. Every meal
+ * the live import classified was six hours out.
+ */
+const SHELTER_TZ = 'America/Denver';
+
+const shelterParts = new Intl.DateTimeFormat('en-CA', {
+	timeZone: SHELTER_TZ,
+	year: 'numeric',
+	month: '2-digit',
+	day: '2-digit',
+	hour: '2-digit',
+	hour12: false
+});
+
+function shelterFields(date: Date): { day: string; hour: number } {
+	const parts = Object.fromEntries(shelterParts.formatToParts(date).map((p) => [p.type, p.value]));
+	return {
+		day: `${parts.year}${parts.month}${parts.day}`,
+		// 24 is midnight in some locales' hourCycle; normalise it.
+		hour: Number(parts.hour) % 24
+	};
+}
+
+/** The hour of the day at the shelter, whatever timezone this code is running in. */
+export function shelterHour(date: Date): number {
+	return shelterFields(date).hour;
+}
+
+/** The shelter's calendar day as YYYYMMDD, for keying one feed per day. */
+export function shelterDay(date: Date): string {
+	return shelterFields(date).day;
+}
+
 export interface DogRecord {
 	id: string;
 	name: string;
@@ -226,7 +261,7 @@ export interface DayReport {
 export function assignDaySlots(reports: DayReport[]): MealTime[] {
 	const order = reports.map((r, i) => i).sort((a, b) => reports[a].postedAt.getTime() - reports[b].postedAt.getTime());
 	const slots: MealTime[] = reports.map(
-		(r) => r.statedMealTime ?? (r.postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm')
+		(r) => r.statedMealTime ?? (shelterHour(r.postedAt) < PM_FEED_HOUR ? 'am' : 'pm')
 	);
 
 	for (let n = 1; n < order.length; n++) {
@@ -284,7 +319,7 @@ export function planFeedings(
 	if (parsed.entries.length === 0 && !parsed.allAte) return [];
 
 	const mealTime: MealTime =
-		parsed.mealTime ?? slotOverride ?? (postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm');
+		parsed.mealTime ?? slotOverride ?? (shelterHour(postedAt) < PM_FEED_HOUR ? 'am' : 'pm');
 	const mealTimeInferred = !parsed.mealTime;
 
 	const planned: PlannedFeeding[] = [];
@@ -378,6 +413,5 @@ export function planSurgery(text: string, postedAt: Date, index: DogIndex): Plan
  * the same meal, and keying by message would give a dog two logs for one feed.
  */
 export function feedingLogId(postedAt: Date, dogId: string, mealTime: MealTime): string {
-	const day = `${postedAt.getFullYear()}${String(postedAt.getMonth() + 1).padStart(2, '0')}${String(postedAt.getDate()).padStart(2, '0')}`;
-	return `slack-${day}-${mealTime}-${dogId}`;
+	return `slack-${shelterDay(postedAt)}-${mealTime}-${dogId}`;
 }
