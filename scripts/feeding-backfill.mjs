@@ -30,8 +30,12 @@ const UNDO = has('undo');
 const CHANNEL = flag('channel', 'dog-staff');
 const SHOW = Number(flag('show', 20));
 const REPORT = has('report');
-// The app only wants this year; anything earlier is history nobody will look at.
-const SINCE = new Date(`${flag('since', '2026-01-01')}T00:00:00`).getTime();
+/**
+ * Firestore holds no dogs that left before roughly March, so an earlier date rebuilds a
+ * roster of six dogs for a shelter that held eighty — and the fill-in then records a day
+ * on which six dogs were fed. Better to have no record than a wrong one.
+ */
+const SINCE = new Date(`${flag('since', '2026-03-01')}T00:00:00`).getTime();
 
 const SOURCE = 'slack';
 const LOGGED_BY = 'slack-import';
@@ -379,6 +383,10 @@ async function main() {
 				// Provenance, so these are findable and removable as a set.
 				source: SOURCE,
 				sourceTs: p.slackTs,
+				// Whether a person named this dog or it was filled in from the exceptions.
+				// Without it there is no way to tell an observation from an inference after
+				// the fact, which is exactly what an audit needs to know.
+				impliedFromExceptions: Boolean(p.implied),
 				mealTimeInferred: p.mealTimeInferred
 			});
 		}
