@@ -178,7 +178,10 @@ async function main() {
 
 	// Roster from Firestore, not ASM: the doc id is what the log has to be filed under,
 	// and a dog named in chat but absent from Firestore has nowhere to put a log.
-	const dogsSnap = await store.collection('dogs').select('name', 'intakeDate', 'leftShelterDate', 'status').get();
+	const dogsSnap = await store
+		.collection('dogs')
+		.select('name', 'intakeDate', 'leftShelterDate', 'status', 'asmShelterCode')
+		.get();
 	const byName = new Map();
 	const roster = [];
 	for (const d of dogsSnap.docs) {
@@ -191,12 +194,12 @@ async function main() {
 		if (!byName.has(data.name)) byName.set(data.name, []);
 		const from = data.intakeDate ? new Date(data.intakeDate).getTime() : null;
 		let to = data.leftShelterDate ? new Date(data.leftShelterDate).getTime() : null;
-		// Some records carry a departure earlier than their own intake — Shorty left in
-		// May and arrived in August — and one still marked active. A departure that
-		// cannot have happened is worse than none: believing it hides the dog for every
-		// date after it, which silently dropped Shorty from months of reports.
+		// A departure earlier than the dog's own intake belongs to an earlier stay: the
+		// dog left, came back, and intakeDate moved to the return while leftShelterDate
+		// kept the old value. Shorty left in May and returned in August. Treating that
+		// stale departure as current hid him from every report since.
 		if (to !== null && ((from !== null && to < from) || data.status === 'active')) to = null;
-		byName.get(data.name).push({ id: d.id, from, to });
+		byName.get(data.name).push({ id: d.id, from, to, code: data.asmShelterCode ?? null });
 	}
 	const ambiguousNames = [...byName].filter(([, v]) => v.length > 1).length;
 	console.log(`Roster: ${roster.length} dogs from Firestore (${ambiguousNames} names shared by more than one dog)\n`);
@@ -226,11 +229,16 @@ async function main() {
 			if (stillHere.length === 1) inWindow = stillHere;
 		}
 
-		// Two shelter numbers sharing an intake date are the same animal entered twice
-		// — "Malone" has a pair, both taken in on 8/05. Either document is the same dog,
-		// so take the one that stayed longest rather than calling it ambiguous.
-		if (inWindow.length > 1 && new Set(inWindow.map((c) => c.from)).size === 1) {
-			inWindow = [inWindow.slice().sort((a, b) => (b.to ?? Infinity) - (a.to ?? Infinity))[0]];
+		// Two records are the same animal only if they carry the same shelter code. A
+		// shared intake date is not enough: the two "Malone" records are different dogs
+		// admitted the same day, one still showing a name that was later changed in ASM
+		// without the rename syncing. Picking either would file meals onto the wrong dog,
+		// so they stay ambiguous and are skipped.
+		if (inWindow.length > 1) {
+			const codes = new Set(inWindow.map((c) => c.code).filter(Boolean));
+			if (codes.size === 1) {
+				inWindow = [inWindow.slice().sort((a, b) => (b.to ?? Infinity) - (a.to ?? Infinity))[0]];
+			}
 		}
 
 		// Exactly one match is an answer; none or several is a guess, and a guess here
