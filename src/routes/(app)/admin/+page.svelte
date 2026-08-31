@@ -21,6 +21,14 @@
 	let pendingLoading = false;
 	let pendingBusyId: string | null = null;
 
+	/** Posted time, so the meal can be judged against when it was written. */
+	function formatTime(value: string): string {
+		const at = toDate(value);
+		return at
+			? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(at)
+			: '';
+	}
+
 	const AMOUNT_WORDS: Record<string, string> = {
 		all: 'ate all',
 		most: 'ate most',
@@ -443,9 +451,10 @@
 										<li>
 											<span class="pending-dog">{entry.dogName}</span>
 											<span class="pending-amount">{AMOUNT_WORDS[entry.amountEaten] ?? entry.amountEaten}</span>
-											<span class="pending-meal" class:pending-meal-guessed={entry.mealTimeInferred}>
-												{entry.mealTime === 'second' ? '2nd meal' : entry.mealTime}
+											<span class="pending-meal">
+												{entry.mealTime === 'second' ? '2nd meal' : entry.mealTime.toUpperCase()}
 											</span>
+											<span class="pending-time">{formatTime(pending.postedAt)}</span>
 										</li>
 									{/each}
 								</ul>
@@ -1004,7 +1013,7 @@
 	}
 	.pending-entries li {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 96px 74px;
+		grid-template-columns: minmax(0, 1fr) 96px 62px 74px;
 		gap: 10px;
 		align-items: baseline;
 		font-size: 0.86rem;
@@ -1025,10 +1034,10 @@
 		letter-spacing: 0.06em;
 		color: #6b6459;
 	}
-	/* A guessed meal time is the one part of a row that is not straight from the text. */
-	.pending-meal-guessed::after {
-		content: ' ?';
-		font-weight: 700;
+	.pending-time {
+		font-size: 0.78rem;
+		color: #6b6459;
+		font-variant-numeric: tabular-nums;
 	}
 	.pending-actions {
 		display: flex;

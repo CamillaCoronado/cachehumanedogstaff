@@ -399,7 +399,8 @@ async function main() {
 
 	console.log(`\nSample:`);
 	for (const p of planned.slice(0, SHOW)) {
-		console.log(`  ${p.date} ${p.mealTime}${p.mealTimeInferred ? '?' : ' '} ${p.dogName.padEnd(16)} ${p.amountEaten}`);
+		const time = `${String(p.postedAt.getHours()).padStart(2, '0')}:${String(p.postedAt.getMinutes()).padStart(2, '0')}`;
+		console.log(`  ${p.date} ${time} ${p.mealTime.padEnd(6)} ${p.dogName.padEnd(16)} ${p.amountEaten}`);
 	}
 
 	if (REPORT) reportProblems(planned);
