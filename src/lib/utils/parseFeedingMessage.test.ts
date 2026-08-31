@@ -346,6 +346,25 @@ describe('parseFeedingMessage', () => {
 			expect(parseFeedingMessage('Sammy is eating her poop so pick up as soon as she goes', ['Sammy']).entries).toEqual([]);
 		});
 
+		it('treats a bare "everyone ate" as a complete report', () => {
+			// It names nobody because it does not need to. Requiring a named dog dropped
+			// the one message that accounts for the whole shelter at once.
+			expect(parse('Everyone ate!').looksLikeReport).toBe(true);
+			expect(parse('All dogs ate').looksLikeReport).toBe(true);
+		});
+
+		it('does not treat a passing remark as the shift report', () => {
+			// One dog mentioned in prose says nothing about the other eighty.
+			expect(parse("Bodhi didn't eat much, but he did have a solid poop").looksLikeReport).toBe(false);
+			expect(parse('Kennels look great today').looksLikeReport).toBe(false);
+		});
+
+		it('recognises the round-up forms', () => {
+			expect(parse("Buck, Hulk, Cora didn't eat").looksLikeReport).toBe(true);
+			expect(parse("Didn't eat: Buck, Cora").looksLikeReport).toBe(true);
+			expect(parse("Buck didn't eat, everyone else did").looksLikeReport).toBe(true);
+		});
+
 		it('recovers a name two edits out when it is long enough', () => {
 			expect(parseFeedingMessage("scrunchy didn't eat", ['Scrunchie']).entries)
 				.toEqual([{ name: 'Scrunchie', amountEaten: 'none' }]);

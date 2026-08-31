@@ -438,11 +438,13 @@ export function parseFeedingMessage(
 	// it says outright that everyone else ate, or it is a bare list of dogs and amounts.
 	const wordCount = text.trim().split(/\s+/).length;
 	const looksLikeReport =
-		entries.length > 0 &&
-		(hits.some((h) => h.colonLed) ||
-			allAte ||
-			EVERYONE_ELSE.test(text) ||
-			(entries.length >= 2 && wordCount / entries.length <= MAX_WORDS_PER_DOG));
+		// "Everyone ate" is a complete report on its own — it names nobody because it does
+		// not need to, and requiring a named dog dropped it entirely.
+		allAte ||
+		(entries.length > 0 &&
+			(hits.some((h) => h.colonLed) ||
+				EVERYONE_ELSE.test(text) ||
+				(entries.length >= 2 && wordCount / entries.length <= MAX_WORDS_PER_DOG)));
 
 	return { entries, allAte, doNotFeed, mealTime, looksLikeReport };
 }

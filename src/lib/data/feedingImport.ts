@@ -184,7 +184,9 @@ function feedableOn(index: DogIndex, when: Date): Candidate[] {
  */
 export function planFeedings(text: string, postedAt: Date, index: DogIndex): PlannedFeeding[] {
 	const parsed = parseFeedingMessage(text, rosterOn(index, postedAt));
-	if (parsed.entries.length === 0) return [];
+	// Either form is a feeding record: dogs named as exceptions, or a plain statement
+	// that the whole shelter ate. Anything else is not a report of a feed.
+	if (parsed.entries.length === 0 && !parsed.allAte) return [];
 
 	const mealTime: MealTime =
 		parsed.mealTime ?? (postedAt.getHours() < PM_FEED_HOUR ? 'am' : 'pm');
@@ -205,7 +207,8 @@ export function planFeedings(text: string, postedAt: Date, index: DogIndex): Pla
 			implied: false
 		});
 	}
-	if (planned.length === 0) return [];
+	// "Everyone ate" names nobody, and that is the whole message: every dog ate.
+	if (planned.length === 0 && !parsed.allAte) return [];
 
 	// Only the shift's round-up accounts for the dogs it does not name. A passing remark
 	// about one dog says nothing about the rest, so it records that dog and stops.
