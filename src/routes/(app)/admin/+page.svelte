@@ -7,7 +7,8 @@
 	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
 	import { listPendingFeedings, acceptPendingFeeding, dismissPendingFeeding } from '$lib/data/pendingFeedings';
-	import type { PendingFeeding } from '$lib/types';
+	import { listPendingSurgeries, acceptPendingSurgery, dismissPendingSurgery } from '$lib/data/pendingSurgeries';
+	import type { PendingFeeding, PendingSurgery } from '$lib/types';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -16,6 +17,47 @@
 	};
 
 	const roleOptions: UserRole[] = ['admin', 'manager', 'coordinator', 'staff', 'volunteer'];
+
+	let pendingSurgeries: PendingSurgery[] = [];
+	let surgeryBusyId: string | null = null;
+	let surgeryError = '';
+
+	async function loadPendingSurgeries() {
+		surgeryError = '';
+		try {
+			pendingSurgeries = await listPendingSurgeries();
+		} catch (error) {
+			console.error(error);
+			surgeryError = error instanceof Error ? error.message : 'Could not load the surgery list.';
+		}
+	}
+
+	async function acceptSurgery(pending: PendingSurgery) {
+		surgeryBusyId = pending.id;
+		try {
+			const n = await acceptPendingSurgery(pending);
+			pendingSurgeries = pendingSurgeries.filter((p) => p.id !== pending.id);
+			toast.success(`Marked ${n} dog${n === 1 ? '' : 's'} for surgery.`);
+		} catch (error) {
+			console.error(error);
+			toast.error('Could not mark those dogs.');
+		} finally {
+			surgeryBusyId = null;
+		}
+	}
+
+	async function dismissSurgery(pending: PendingSurgery) {
+		surgeryBusyId = pending.id;
+		try {
+			await dismissPendingSurgery(pending.id);
+			pendingSurgeries = pendingSurgeries.filter((p) => p.id !== pending.id);
+		} catch (error) {
+			console.error(error);
+			toast.error('Could not dismiss that list.');
+		} finally {
+			surgeryBusyId = null;
+		}
+	}
 
 	let pendingFeedings: PendingFeeding[] = [];
 	let pendingLoading = false;
@@ -296,6 +338,7 @@
 	$: if ($authReady && $authProfile?.role === 'admin' && !pendingLoading && pendingFeedings.length === 0 && !pendingLoaded) {
 		pendingLoaded = true;
 		void loadPendingFeedings();
+		void loadPendingSurgeries();
 	}
 	let pendingLoaded = false;
 
@@ -421,6 +464,60 @@
 		</div>
 
 		<div class="admin-grid">
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">From Slack</p>
+						<h3 class="section-title">Surgery list waiting for approval</h3>
+						<p class="section-copy">
+							The morning "do not feed" list, read as the day's surgery dogs. Accepting marks
+							each one for surgery that day, which is what keeps them off the feed list.
+							<strong>Check this before the morning feed.</strong>
+						</p>
+					</div>
+					<button class="action-btn" type="button" on:click={loadPendingSurgeries}>Refresh</button>
+				</div>
+
+				{#if surgeryError}
+					<p class="error-note">Could not load the surgery list: {surgeryError}</p>
+				{:else if pendingSurgeries.length === 0}
+					<p class="empty-note">No surgery list waiting.</p>
+				{:else}
+					<ul class="pending-list">
+						{#each pendingSurgeries as pending (pending.id)}
+							<li class="pending-item">
+								<p class="pending-meta">
+									<strong>{pending.author}</strong>
+									<span>{formatDateTime(pending.postedAt)}</span>
+								</p>
+								<blockquote class="pending-quote">{pending.rawText}</blockquote>
+								<p class="pending-implied">
+									Marking for surgery: <strong>{pending.dogs.map((d) => d.dogName).join(', ')}</strong>
+								</p>
+								<div class="pending-actions">
+									<button
+										class="action-btn"
+										type="button"
+										on:click={() => acceptSurgery(pending)}
+										disabled={surgeryBusyId === pending.id}
+									>
+										{surgeryBusyId === pending.id ? 'Saving…' : `Mark ${pending.dogs.length} for surgery`}
+									</button>
+									<button
+										class="ghost-btn"
+										type="button"
+										on:click={() => dismissSurgery(pending)}
+										disabled={surgeryBusyId === pending.id}
+									>
+										Dismiss
+									</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+
 			<section class="admin-card">
 				<div class="card-header">
 					<div>

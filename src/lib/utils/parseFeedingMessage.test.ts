@@ -380,6 +380,25 @@ describe('parseFeedingMessage', () => {
 			]);
 		});
 
+		it('reads the morning surgery list', () => {
+			// Elizabeth posts it as a do-not-feed instruction: the dogs going under
+			// anaesthetic have to fast, so the same line names the day's surgeries.
+			const r = parseFeedingMessage(
+				'bonus surgery day today! do not feed: Frida Pickles Bento Box Ida Straggler',
+				['Frida', 'Pickles', 'Bento Box', 'Ida', 'Straggler']
+			);
+			expect(r.isSurgeryList).toBe(true);
+			expect(r.doNotFeed).toEqual(['Frida', 'Pickles', 'Bento Box', 'Ida', 'Straggler']);
+			expect(r.entries).toEqual([]); // still not a record of anyone eating
+		});
+
+		it('does not read a seating note as a surgery list', () => {
+			// These dogs are very much being fed, just not beside each other.
+			const r = parseFeedingMessage('Anne and Leslie DO NOT FEED TOGETHER', ['Anne', 'Leslie']);
+			expect(r.isSurgeryList).toBe(false);
+			expect(r.doNotFeed).toEqual([]);
+		});
+
 		it('recovers a name two edits out when it is long enough', () => {
 			expect(parseFeedingMessage("scrunchy didn't eat", ['Scrunchie']).entries)
 				.toEqual([{ name: 'Scrunchie', amountEaten: 'none' }]);

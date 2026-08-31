@@ -331,6 +331,21 @@ export interface PendingFeeding {
 	}[];
 }
 
+/**
+ * The morning surgery list read from Slack, waiting for an admin to accept it. Accepting
+ * stamps surgeryDate on each dog, which is what keeps them off the morning feed list.
+ */
+export interface PendingSurgery {
+	id: string;
+	rawText: string;
+	author: string;
+	slackTs: string;
+	postedAt: string;
+	receivedAt: string;
+	processed: boolean;
+	dogs: { dogId: string; dogName: string }[];
+}
+
 export interface FeedingLog {
 	id: string;
 	date: DateValue;

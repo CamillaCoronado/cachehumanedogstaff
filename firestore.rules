@@ -201,6 +201,13 @@ service cloud.firestore {
       allow create: if false;
     }
 
+    // The morning surgery list read from Slack. Written server-side by the poll;
+    // accepting it on the Admin page is what stamps surgeryDate on the dogs.
+    match /pendingSurgeries/{docId} {
+      allow read, update, delete: if canManageUsers();
+      allow create: if false;
+    }
+
     match /pendingPlaygroups/{docId} {
       // Read and mark-processed by dog editors only
       allow read, update: if canEditDogs();

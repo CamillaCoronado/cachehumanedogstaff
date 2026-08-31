@@ -19,6 +19,12 @@ export interface ParsedFeedingMessage {
 	 * so a caller can never mistake it for a log.
 	 */
 	doNotFeed: string[];
+	/**
+	 * Whether that instruction is the morning surgery list rather than a note about how
+	 * to feed. "Anne and Leslie DO NOT FEED TOGETHER" names two dogs that very much are
+	 * being fed, just not beside each other.
+	 */
+	isSurgeryList: boolean;
 	/** Only set when the message says so; inferring from post time is the caller's call. */
 	mealTime: MealTime | null;
 	/**
@@ -78,6 +84,8 @@ const MEAL_AM = /\b(?:this\s+)?(?:morning|breakfast)\b/i;
 const MEAL_SECOND = /\b(?:second|2nd)\s+meal\b/i;
 
 const DO_NOT_FEED = /\b(?:do\s+not|don'?t)\s+feed\b\s*:?\s*/i;
+/** "do not feed X together" is about seating, not surgery. */
+const FEEDING_ARRANGEMENT = /\b(?:together|separately|side\s+by\s+side|near\s+each\s+other|in\s+the\s+same)\b/i;
 /** Things a dog can eat that are not a meal. "she ate most of rubber bone" is not a feed. */
 const NOT_FOOD = /^\s*of\s+(?:a\s+|the\s+|his\s+|her\s+)?(?:rubber\s+|hard\s+|chew\s+)?(?:bone|bones|toy|toys|kong|stuffing|blanket|towel|leash|poop|grass|sock)/i;
 /** "won't do second meal" is a plan for a meal that will not happen, not a report of one. */
@@ -324,12 +332,16 @@ export function parseFeedingMessage(
 
 	// Strip "do not feed: A, B, C" before anything else — it names dogs next to feeding
 	// words and would otherwise be read as a record of them not eating.
+	let isSurgeryList = false;
 	const directive = DO_NOT_FEED.exec(working);
 	if (directive) {
 		const after = working.slice(directive.index + directive[0].length);
 		// The list runs to the end of its sentence or line.
 		const list = after.split(/[.\n•]/)[0];
 		doNotFeed.push(...namesIn(list, roster, derivedKeys));
+		// A instruction about how to feed is not a surgery list, even though it is worded
+		// the same way — those dogs are being fed, just not next to each other.
+		isSurgeryList = doNotFeed.length > 0 && !FEEDING_ARRANGEMENT.test(list);
 		working = working.slice(0, directive.index) + ' ' + after.slice(list.length);
 	}
 
@@ -446,5 +458,5 @@ export function parseFeedingMessage(
 				EVERYONE_ELSE.test(text) ||
 				(entries.length >= 2 && wordCount / entries.length <= MAX_WORDS_PER_DOG)));
 
-	return { entries, allAte, doNotFeed, mealTime, looksLikeReport };
+	return { entries, allAte, doNotFeed, isSurgeryList, mealTime, looksLikeReport };
 }

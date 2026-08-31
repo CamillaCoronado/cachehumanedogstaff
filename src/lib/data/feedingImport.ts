@@ -283,6 +283,34 @@ export function planFeedings(
 	return planned;
 }
 
+export interface PlannedSurgery {
+	dogId: string;
+	dogName: string;
+}
+
+/**
+ * Reads the morning surgery list. Elizabeth posts it as a "do not feed" instruction —
+ * the dogs going under anaesthetic have to fast — so the same line that keeps them off
+ * the feed list is the list of who is having surgery.
+ *
+ * Returns nothing for a message that only says how to feed ("do not feed X together")
+ * or that names dogs nobody can resolve ("all the hat puppies").
+ */
+export function planSurgery(text: string, postedAt: Date, index: DogIndex): PlannedSurgery[] {
+	const parsed = parseFeedingMessage(text, rosterOn(index, postedAt));
+	if (!parsed.isSurgeryList) return [];
+
+	const out: PlannedSurgery[] = [];
+	const seen = new Set<string>();
+	for (const name of parsed.doNotFeed) {
+		const dogId = resolveDogId(index, name, postedAt);
+		if (!dogId || seen.has(dogId)) continue;
+		seen.add(dogId);
+		out.push({ dogId, dogName: name });
+	}
+	return out;
+}
+
 /**
  * One id per dog per meal per day, deliberately not per message: two people often report
  * the same meal, and keying by message would give a dog two logs for one feed.

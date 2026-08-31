@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { getAdminDb } from '$lib/firebase/admin';
-import { buildDogIndex, planFeedings, type DogRecord } from '$lib/data/feedingImport';
+import { buildDogIndex, planFeedings, planSurgery, type DogRecord } from '$lib/data/feedingImport';
 
 /** Where the last-read message timestamp lives, so each run starts where the last stopped. */
 const CURSOR_DOC = 'syncState/slackFeedingCursor';
@@ -113,6 +113,24 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 	for (const m of messages) {
 		const slackTs = String(m.ts);
 		const postedAt = new Date(Number(slackTs) * 1000);
+
+		// The surgery list arrives as a "do not feed" instruction, so it is checked first
+		// and separately: it says who is fasting, not who ate.
+		const surgery = planSurgery(String(m.text), postedAt, index);
+		if (surgery.length > 0) {
+			await db.collection('pendingSurgeries').doc(slackTs.replace('.', '-')).set({
+				rawText: String(m.text),
+				author: authors[String(m.user ?? '')] ?? 'Unknown',
+				slackTs,
+				postedAt: postedAt.toISOString(),
+				receivedAt: new Date().toISOString(),
+				processed: false,
+				dogs: surgery
+			});
+			queued++;
+			continue;
+		}
+
 		const entries = planFeedings(String(m.text), postedAt, index);
 		if (entries.length === 0) continue; // nothing about a specific dog eating
 
