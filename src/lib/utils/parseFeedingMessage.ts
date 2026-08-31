@@ -33,7 +33,11 @@ const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
 	{ re: /did(?:n'?t| not)\s+(?:really\s+|want\s+to\s+)?(?:eat|finish|touch)/i, amount: 'none' },
 	{ re: /would(?:n'?t| not)\s+eat/i, amount: 'none' },
 	{ re: /(?:has|have|had)(?:n'?t| not)\s+eaten/i, amount: 'none' },
-	{ re: /ate\s+(?:about\s+|around\s+)?half/i, amount: 'half' },
+	{ re: /ate\s+(?:about\s+|around\s+)?(?:half|1\/2)/i, amount: 'half' },
+	// "ate about 1/4" is a real and common way to write it.
+	{ re: /ate\s+(?:about\s+|around\s+)?(?:1\/4|1\/3|a\s+quarter|a\s+third)/i, amount: 'little' },
+	// Food on the floor is food not eaten, whatever the quantity word attached to it.
+	{ re: /spill(?:ed|t)?\s+(?:most|all|it|some|his|her|their)/i, amount: 'little' },
 	{ re: /ate\s+most/i, amount: 'most' },
 	{ re: /ate\s+(?:a\s+)?(?:little|bit|few|some)\b(?:\s+bites?)?/i, amount: 'little' },
 	{ re: /ate\s+(?:it\s+)?all\b/i, amount: 'all' },
@@ -65,6 +69,10 @@ const MEAL_AM = /\b(?:this\s+)?(?:morning|breakfast)\b/i;
 const MEAL_SECOND = /\b(?:second|2nd)\s+meal\b/i;
 
 const DO_NOT_FEED = /\b(?:do\s+not|don'?t)\s+feed\b\s*:?\s*/i;
+/** Things a dog can eat that are not a meal. "she ate most of rubber bone" is not a feed. */
+const NOT_FOOD = /^\s*of\s+(?:a\s+|the\s+|his\s+|her\s+)?(?:rubber\s+|hard\s+|chew\s+)?(?:bone|bones|toy|toys|kong|stuffing|blanket|towel|leash|poop|grass|sock)/i;
+/** "won't do second meal" is a plan for a meal that will not happen, not a report of one. */
+const SECOND_NEGATED = /\b(?:no|won'?t|wont|not)\s+(?:do\s+|doing\s+|give\s+|giving\s+)?(?:a\s+)?(?:second|2nd)\s+meal\b/i;
 const EVERYONE = /\b(?:everyone|every\s?body|every\s?one|all(?:\s+(?:the|of\s+the))?\s+dogs?)\b/i;
 
 /** Sentence and bullet boundaries — staff separate thoughts with all of these. */
@@ -101,20 +109,29 @@ const NEVER_A_NAME = new Set([
 	'doctor', 'hectic', 'sorry', 'looked', 'looks', 'small', 'large'
 ]);
 
-/** True when one edit turns a into b. Cheap: bails as soon as a second edit is needed. */
-function withinOneEdit(a: string, b: string): boolean {
-	if (Math.abs(a.length - b.length) > 1) return false;
-	let i = 0;
-	let j = 0;
-	let edits = 0;
-	while (i < a.length && j < b.length) {
-		if (a[i] === b[j]) { i++; j++; continue; }
-		if (++edits > 1) return false;
-		if (a.length > b.length) i++;
-		else if (a.length < b.length) j++;
-		else { i++; j++; }
+/**
+ * Edit distance, capped. Two edits are only safe on a long word — "scrunchy" for
+ * Scrunchie — where the remaining letters still pin the name down; on a short one two
+ * edits reach half the roster.
+ */
+function withinEdits(a: string, b: string, max: number): boolean {
+	if (Math.abs(a.length - b.length) > max) return false;
+	const prev = new Array(b.length + 1);
+	for (let j = 0; j <= b.length; j++) prev[j] = j;
+	for (let i = 1; i <= a.length; i++) {
+		let diag = prev[0];
+		prev[0] = i;
+		let best = prev[0];
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			const val = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + cost);
+			diag = prev[j];
+			prev[j] = val;
+			if (val < best) best = val;
+		}
+		if (best > max) return false; // whole row already past the cap
 	}
-	return edits + (a.length - i) + (b.length - j) <= 1;
+	return prev[b.length] <= max;
 }
 
 function normalizeForCompare(s: string): string {
@@ -127,7 +144,18 @@ function normalizeForCompare(s: string): string {
  * fragments are full of prose ("threw it all up and has nasty poop") and guessing at
  * unknown capitalised words would manufacture dogs that do not exist.
  */
-function namesIn(fragment: string, roster: Map<string, string>): string[] {
+/** The last word before `index`, so a guard can see across a fragment boundary. */
+function wordBefore(text: string, index: number): string {
+	const before = text.slice(0, index).match(/([A-Za-z'-]+)[^A-Za-z'-]*$/);
+	return before ? before[1] : '';
+}
+
+function namesIn(
+	fragment: string,
+	roster: Map<string, string>,
+	derivedKeys: Set<string>,
+	precedingWord = ''
+): string[] {
 	const words = fragment.split(/[^A-Za-z'-]+/).filter(Boolean);
 	const found: string[] = [];
 	let i = 0;
@@ -137,6 +165,17 @@ function namesIn(fragment: string, roster: Map<string, string>): string[] {
 			const candidate = normalizeForCompare(words.slice(i, i + span).join(''));
 			const hit = roster.get(candidate);
 			if (hit) {
+				// "Roe spilled most of his Ace" is his food, not the dog Ace is the Place.
+				// Only a derived alias is vulnerable to this; a full name is not.
+				// Staff break lines mid-sentence — "spilled most of his\n\nAce" — so the
+				// possessive can sit outside this fragment entirely.
+				const prior = i > 0 ? words[i - 1] : precedingWord;
+				const preceded = POSSESSIVE.has(prior.toLowerCase());
+				if (preceded && derivedKeys.has(candidate)) {
+					i += span;
+					matched = true;
+					break;
+				}
 				found.push(hit);
 				i += span;
 				matched = true;
@@ -149,12 +188,28 @@ function namesIn(fragment: string, roster: Map<string, string>): string[] {
 			// one roster name is that close: two candidates means guessing which dog.
 			const word = normalizeForCompare(words[i]);
 			if (word.length >= 5 && !NEVER_A_NAME.has(word) && !roster.has(word)) {
-				const near = new Set<string>();
-				for (const [key, name] of roster) {
-					if (withinOneEdit(word, key)) near.add(name);
-					if (near.size > 1) break;
+				const max = word.length >= 7 ? 2 : 1;
+				// Nearest first: an exact-ish match should not be blocked by a looser one.
+				for (let d = 1; d <= max; d++) {
+					const near = new Map<string, number>(); // name -> its key length
+					for (const [key, name] of roster) {
+						// Canonical names only. A derived alias is already a guess about what
+						// someone might type, and fuzzy-matching one compounds the guess —
+						// "Freda" tied between Frida and Dot (Freya)'s alias.
+						if (derivedKeys.has(key)) continue;
+						if (withinEdits(word, key, d)) near.set(name, key.length);
+					}
+					if (near.size === 0) continue;
+					let candidates = [...near];
+					// A typo usually keeps the length — "Freda" for Frida rather than for
+					// Fred, both one edit away. Same-length candidates win the tie.
+					if (candidates.length > 1) {
+						const sameLength = candidates.filter(([, len]) => len === word.length);
+						if (sameLength.length === 1) candidates = sameLength;
+					}
+					if (candidates.length === 1) { found.push(candidates[0][0]); }
+					break; // resolved or genuinely ambiguous; a looser pass will not help
 				}
-				if (near.size === 1) found.push([...near][0]);
 			}
 			// A fuzzy hit consumes exactly the one word it matched, same as a miss.
 			i++;
@@ -189,18 +244,54 @@ function nextAmount(text: string, from: number) {
  * Every alias maps back to the canonical roster name, so callers still get one
  * consistent identity to write against.
  */
-function aliasesFor(name: string): string[] {
-	const aliases = [name];
+function aliasesFor(name: string): { canonical: string[]; derived: string[] } {
 	const parenthetical = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(name);
-	if (parenthetical) {
-		aliases.push(parenthetical[1], parenthetical[2]);
-	}
-	// "Duke of Earl" → "Duke". Two characters is too short to be distinctive.
 	const base = (parenthetical ? parenthetical[1] : name).trim();
-	const firstWord = base.split(/\s+/)[0];
-	if (base.includes(' ') && firstWord.length >= 3) aliases.push(firstWord);
-	return aliases;
+	// The name as written, and the part before any parenthetical, are what this dog is
+	// actually called. Everything else is a guess about what someone might type.
+	const canonical = [name, base];
+	const derived: string[] = [];
+	if (parenthetical) derived.push(parenthetical[2]);
+	if (base.includes(' ')) {
+		const words = base.split(/\s+/);
+		// "Duke of Earl" is only ever "Duke".
+		if (words[0].length >= 3) derived.push(words[0]);
+		// "Mary Jane" is written "MJ" as often as not.
+		const initials = words.filter((w) => /^[A-Za-z]/.test(w)).map((w) => w[0]).join('');
+		if (initials.length >= 2) derived.push(initials);
+	}
+	return { canonical, derived };
 }
+
+/**
+ * Two passes, because a derived alias must never outrank a real dog's own name. "Dot
+ * (Freya)" yields "Freya" as a guess, and the shelter also has a dog actually called
+ * Freya — registering in document order handed her meals to Dot.
+ */
+function buildRoster(knownDogNames: string[]): { roster: Map<string, string>; derivedKeys: Set<string> } {
+	const roster = new Map<string, string>();
+	const derivedKeys = new Set<string>();
+	const all = knownDogNames.map((name) => ({ name, ...aliasesFor(name) }));
+	for (const { name, canonical } of all) {
+		for (const alias of canonical) {
+			const key = normalizeForCompare(alias);
+			if (key && !roster.has(key)) roster.set(key, name);
+		}
+	}
+	for (const { name, derived } of all) {
+		for (const alias of derived) {
+			const key = normalizeForCompare(alias);
+			if (key && !roster.has(key)) {
+				roster.set(key, name);
+				derivedKeys.add(key);
+			}
+		}
+	}
+	return { roster, derivedKeys };
+}
+
+/** "his Ace", "her bone" — a possessive before a word means a thing, not a dog. */
+const POSSESSIVE = new Set(['his', 'her', 'their', 'its', 'my', 'our', 'the']);
 
 export function parseFeedingMessage(
 	rawText: string,
@@ -209,14 +300,7 @@ export function parseFeedingMessage(
 	// Phone keyboards autocorrect ' to ’, and "didn’t eat" then matches none of the
 	// patterns below — the single largest source of silently dropped messages.
 	const text = rawText.replace(/[\u2018\u2019\u02BC\u0060\u00B4]/g, "'");
-	const roster = new Map<string, string>();
-	for (const name of knownDogNames) {
-		for (const alias of aliasesFor(name)) {
-			const key = normalizeForCompare(alias);
-			// First registration wins, so a full name beats another dog's derived alias.
-			if (key && !roster.has(key)) roster.set(key, name);
-		}
-	}
+	const { roster, derivedKeys } = buildRoster(knownDogNames);
 
 	const doNotFeed: string[] = [];
 	let working = text;
@@ -228,7 +312,7 @@ export function parseFeedingMessage(
 		const after = working.slice(directive.index + directive[0].length);
 		// The list runs to the end of its sentence or line.
 		const list = after.split(/[.\n•]/)[0];
-		doNotFeed.push(...namesIn(list, roster));
+		doNotFeed.push(...namesIn(list, roster, derivedKeys));
 		working = working.slice(0, directive.index) + ' ' + after.slice(list.length);
 	}
 
@@ -251,7 +335,7 @@ export function parseFeedingMessage(
 			const except = /\bexcept\b|\bbut\s+(?:not\s+)?|\bother\s+than\b/i.exec(after);
 			if (except) {
 				const tail = after.slice(except.index + except[0].length).split(/[.\n•]/)[0];
-				for (const name of namesIn(tail, roster)) push(name, 'none');
+				for (const name of namesIn(tail, roster, derivedKeys)) push(name, 'none');
 				// Remove the handled clause so the scan below does not re-read it.
 				working = working.slice(0, everyoneMatch.index);
 			}
@@ -269,10 +353,16 @@ export function parseFeedingMessage(
 		// "Didn't eat: Nala, Buck   Ate half: Daffodil, Dot" — a colon turns the phrase
 		// into a heading and its dogs follow it. Read as subject-first this parses exactly
 		// backwards, handing each list to the wrong verb.
-		hits.push({ index: hit.index, end, amount: hit.amount, colonLed: /^\s*:/.test(working.slice(end)) });
+		// "she ate most of rubber bone" is a chewed toy, not a meal.
+		if (!NOT_FOOD.test(working.slice(end))) {
+			hits.push({ index: hit.index, end, amount: hit.amount, colonLed: /^\s*:/.test(working.slice(end)) });
+		}
 		from = end;
 	}
 
+	const cursorAfter = (h: { end: number }) => h.end;
+	// A name lifted off the end of a colon list, waiting for the verb it belongs to.
+	let carried: string | null = null;
 	let lastAmount: AmountEaten | null = null;
 	let lastPhraseHadNames = false;
 	let cursor = 0;
@@ -281,7 +371,14 @@ export function parseFeedingMessage(
 		if (hit.colonLed) {
 			// Its list runs to the next verb phrase, or to the end.
 			const stop = hits[i + 1]?.index ?? working.length;
-			names = namesIn(working.slice(hit.end, stop), roster);
+			names = namesIn(working.slice(hit.end, stop), roster, derivedKeys, wordBefore(working, hit.end));
+			// "Ate some: Rea, Shorty Straggler didn't eat" — the next verb has no colon and
+			// no subject of its own, so the last name in this list is really its subject.
+			const next = hits[i + 1];
+			if (next && !next.colonLed && names.length > 1) {
+				const between = working.slice(cursorAfter(hit), next.index);
+				if (!/[.,;•!?\n]\s*$/.test(between)) carried = names.pop() ?? null;
+			}
 			cursor = stop;
 		} else {
 			// A dog belongs to a verb only within the same sentence. Scanning back to the
@@ -289,8 +386,13 @@ export function parseFeedingMessage(
 			// out for day trips … stuffed toys were in the dryer …" tagged nine dogs as
 			// having refused food because a feeding word appeared later in the message.
 			const windowStart = Math.max(cursor, sentenceStart(working, hit.index));
-			names = namesIn(working.slice(windowStart, hit.index), roster);
+			names = namesIn(working.slice(windowStart, hit.index), roster, derivedKeys, wordBefore(working, windowStart));
 			cursor = hit.end;
+		}
+		if (carried && !hit.colonLed) {
+			push(carried, hit.amount);
+			names.unshift(carried);
+			carried = null;
 		}
 		for (const name of names) push(name, hit.amount);
 		lastAmount = hit.amount;
@@ -303,12 +405,17 @@ export function parseFeedingMessage(
 	// nasty poop." records Cora as refusing a meal the message never mentions.
 	if (lastAmount && !lastPhraseHadNames && cursor < working.length) {
 		const sameSentence = working.slice(cursor).split(SENTENCE_BREAK)[0];
-		for (const name of namesIn(sameSentence, roster)) push(name, lastAmount);
+		for (const name of namesIn(sameSentence, roster, derivedKeys)) push(name, lastAmount);
 	}
 
 	// Checked first: a message can mention both ("didn't eat this morning, ate half of
 	// second meal") and the more specific slot wins. Null means derive it.
-	const mealTime: MealTime | null = MEAL_SECOND.test(text) ? 'second' : MEAL_AM.test(text) ? 'am' : null;
+	const mealTime: MealTime | null =
+		MEAL_SECOND.test(text) && !SECOND_NEGATED.test(text)
+			? 'second'
+			: MEAL_AM.test(text)
+				? 'am'
+				: null;
 
 	return { entries, allAte, doNotFeed, mealTime };
 }

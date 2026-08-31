@@ -233,6 +233,101 @@ describe('parseFeedingMessage', () => {
 		expect(parseFeedingMessage("Bear didn't eat", ['Bean']).entries).toEqual([]);
 	});
 
+	// Every case below came back from a real review of the import.
+	describe('faults found in review', () => {
+		it('never lets an alias outrank a real dog of that name', () => {
+			// "Dot (Freya)" yields Freya as a guess; the shelter also has a dog called
+			// Freya, and her meals were being filed onto Dot.
+			const result = parseFeedingMessage(
+				"Myla and Freya didn't eat",
+				['Dot (Freya)', 'Freya', 'Myla']
+			);
+			expect(result.entries.map((e) => e.name)).toEqual(['Myla', 'Freya']);
+		});
+
+		it('still resolves a parenthetical alias when no real dog claims it', () => {
+			expect(parseFeedingMessage("Newsie didn't eat", ['Nova (Newsie)']).entries)
+				.toEqual([{ name: 'Nova (Newsie)', amountEaten: 'none' }]);
+		});
+
+		it('reads initials', () => {
+			// "MJ" for Mary Jane, written that way about as often as not.
+			expect(parseFeedingMessage("Dot, Zane, and MJ didn't eat", ['Dot', 'Zane', 'Mary Jane']).entries)
+				.toContainEqual({ name: 'Mary Jane', amountEaten: 'none' });
+		});
+
+		it('splits names joined by a slash', () => {
+			const result = parseFeedingMessage('Ate half: Dudley/Malone, Phantom', ['Dudley', 'Malone', 'Phantom']);
+			expect(result.entries.map((e) => e.name)).toEqual(['Dudley', 'Malone', 'Phantom']);
+		});
+
+		it('reads a quarter as little, not as everything', () => {
+			expect(parseFeedingMessage('Gwen and Frida ate about 1/4', ['Gwen', 'Frida']).entries[0].amountEaten).toBe('little');
+			expect(parseFeedingMessage('Frida ate a quarter', ['Frida']).entries[0].amountEaten).toBe('little');
+		});
+
+		it('counts spilled food as barely eaten', () => {
+			expect(parseFeedingMessage('Roe spilled most of his food', ['Roe']).entries)
+				.toEqual([{ name: 'Roe', amountEaten: 'little' }]);
+		});
+
+		it('does not log a chewed toy as a meal', () => {
+			expect(parseFeedingMessage('Hard toys for stowaway she ate most of rubber bone', ['Stowaway']).entries)
+				.toEqual([]);
+		});
+
+		it('does not treat a refused second meal as a second meal report', () => {
+			// "won't do second meal" is a plan, and the report itself is the afternoon feed.
+			const result = parseFeedingMessage(
+				"Ate some: Rea, Shorty Straggler didn't eat so I left his bowl with him and won't do second meal",
+				['Rea', 'Shorty', 'Straggler']
+			);
+			expect(result.mealTime).toBeNull();
+		});
+
+		it('gives the trailing name to the verb that follows the colon list', () => {
+			const result = parseFeedingMessage(
+				"Ate some: Rea, Shorty Straggler didn't eat",
+				['Rea', 'Shorty', 'Straggler']
+			);
+			expect(result.entries).toEqual([
+				{ name: 'Rea', amountEaten: 'little' },
+				{ name: 'Shorty', amountEaten: 'little' },
+				{ name: 'Straggler', amountEaten: 'none' }
+			]);
+		});
+
+		it('does not read a possessive noun as a dog', () => {
+			// "his Ace" is his food; Ace only reaches the roster as an alias of another dog.
+			expect(parseFeedingMessage('Roe spilled most of his Ace', ['Roe', 'Ace is the Place']).entries)
+				.toEqual([{ name: 'Roe', amountEaten: 'little' }]);
+			// Real message: the line break puts the possessive in a different fragment.
+			expect(
+				parseFeedingMessage(
+					'Roe spilled most of his\n\nAce and Zane ate half',
+					['Roe', 'Ace is the Place', 'Zane']
+				).entries
+			).toEqual([
+				{ name: 'Roe', amountEaten: 'little' },
+				{ name: 'Zane', amountEaten: 'half' }
+			]);
+			// A dog genuinely called Ace is still found.
+			expect(parseFeedingMessage("Ace didn't eat", ['Ace']).entries)
+				.toEqual([{ name: 'Ace', amountEaten: 'none' }]);
+		});
+
+		it('fuzzy-matches only real names, never derived aliases', () => {
+			// "Freda" ties between Frida and Dot (Freya)'s alias unless aliases are excluded.
+			expect(parseFeedingMessage("Freda didn't eat", ['Frida', 'Dot (Freya)', 'Fred']).entries)
+				.toEqual([{ name: 'Frida', amountEaten: 'none' }]);
+		});
+
+		it('recovers a name two edits out when it is long enough', () => {
+			expect(parseFeedingMessage("scrunchy didn't eat", ['Scrunchie']).entries)
+				.toEqual([{ name: 'Scrunchie', amountEaten: 'none' }]);
+		});
+	});
+
 	it('returns nothing useful without a roster', () => {
 		// Names here are overwhelmingly lowercase, so there is no safe way to spot them
 		// without knowing the dogs. Better empty than invented.

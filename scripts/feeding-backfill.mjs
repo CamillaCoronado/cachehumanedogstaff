@@ -178,7 +178,7 @@ async function main() {
 
 	// Roster from Firestore, not ASM: the doc id is what the log has to be filed under,
 	// and a dog named in chat but absent from Firestore has nowhere to put a log.
-	const dogsSnap = await store.collection('dogs').select('name', 'intakeDate', 'leftShelterDate').get();
+	const dogsSnap = await store.collection('dogs').select('name', 'intakeDate', 'leftShelterDate', 'status').get();
 	const byName = new Map();
 	const roster = [];
 	for (const d of dogsSnap.docs) {
@@ -189,11 +189,14 @@ async function main() {
 		// and pick by date below; keeping only the first would file a 2026 Rocky's meals
 		// onto a Rocky that left in 2024.
 		if (!byName.has(data.name)) byName.set(data.name, []);
-		byName.get(data.name).push({
-			id: d.id,
-			from: data.intakeDate ? new Date(data.intakeDate).getTime() : null,
-			to: data.leftShelterDate ? new Date(data.leftShelterDate).getTime() : null
-		});
+		const from = data.intakeDate ? new Date(data.intakeDate).getTime() : null;
+		let to = data.leftShelterDate ? new Date(data.leftShelterDate).getTime() : null;
+		// Some records carry a departure earlier than their own intake — Shorty left in
+		// May and arrived in August — and one still marked active. A departure that
+		// cannot have happened is worse than none: believing it hides the dog for every
+		// date after it, which silently dropped Shorty from months of reports.
+		if (to !== null && ((from !== null && to < from) || data.status === 'active')) to = null;
+		byName.get(data.name).push({ id: d.id, from, to });
 	}
 	const ambiguousNames = [...byName].filter(([, v]) => v.length > 1).length;
 	console.log(`Roster: ${roster.length} dogs from Firestore (${ambiguousNames} names shared by more than one dog)\n`);
@@ -223,16 +226,46 @@ async function main() {
 			if (stillHere.length === 1) inWindow = stillHere;
 		}
 
+		// Two shelter numbers sharing an intake date are the same animal entered twice
+		// — "Malone" has a pair, both taken in on 8/05. Either document is the same dog,
+		// so take the one that stayed longest rather than calling it ambiguous.
+		if (inWindow.length > 1 && new Set(inWindow.map((c) => c.from)).size === 1) {
+			inWindow = [inWindow.slice().sort((a, b) => (b.to ?? Infinity) - (a.to ?? Infinity))[0]];
+		}
+
 		// Exactly one match is an answer; none or several is a guess, and a guess here
 		// files a real meal onto the wrong animal's medical history.
 		return inWindow.length === 1 ? inWindow[0].id : null;
+	}
+
+	/**
+	 * Only the dogs actually at the shelter on a given day. Passing the whole roster made
+	 * "Freda" ambiguous between Frida and Freya even on dates when Freya had not yet
+	 * arrived — and every extra name is another chance for a fuzzy match to go wrong.
+	 */
+	const rosterCache = new Map();
+	function rosterOn(when) {
+		const key = dayKey(when);
+		if (rosterCache.has(key)) return rosterCache.get(key);
+		const at = when.getTime();
+		const names = [];
+		for (const [name, cands] of byName) {
+			const present = cands.some(
+				(c) => (c.from === null || at >= c.from - 86_400_000) && (c.to === null || at <= c.to + 86_400_000)
+			);
+			if (present) names.push(name);
+		}
+		rosterCache.set(key, names);
+		return names;
 	}
 
 	const planned = [];
 	const skipped = { noDog: 0, blanket: 0, ambiguous: 0 };
 
 	for (const m of messagesFrom(file)) {
-		const parsed = parseFeedingMessage(m.text, roster);
+		const postedAtForRoster = new Date(Number(m.ts) * 1000);
+		if (postedAtForRoster.getTime() < SINCE) continue;
+		const parsed = parseFeedingMessage(m.text, rosterOn(postedAtForRoster));
 		if (parsed.entries.length === 0) {
 			if (parsed.allAte) skipped.blanket++;
 			continue;
