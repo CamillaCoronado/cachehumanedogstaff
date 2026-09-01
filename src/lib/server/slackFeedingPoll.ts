@@ -1,6 +1,14 @@
 import { env } from '$env/dynamic/private';
 import { getAdminDb } from '$lib/firebase/admin';
-import { buildDogIndex, planFeedings, planSurgery, type DogRecord } from '$lib/data/feedingImport';
+import {
+	buildDogIndex,
+	feedingLogId,
+	planFeedingsDetailed,
+	shelterDay,
+	planSurgery,
+	type DogRecord,
+	type PlannedFeeding
+} from '$lib/data/feedingImport';
 
 /** Where the last-read message timestamp lives, so each run starts where the last stopped. */
 const CURSOR_DOC = 'syncState/slackFeedingCursor';
@@ -51,8 +59,71 @@ async function resolveAuthors(token: string, db: FirebaseFirestore.Firestore, id
 
 export interface PollResult {
 	scanned: number;
+	/** Held back because the reading was uncertain; waiting on the Admin page. */
 	queued: number;
+	/** Written straight to the dogs' records, because the reading was plain. */
+	applied: number;
 	skipped?: string;
+}
+
+/**
+ * Writes a report's logs, leaving alone any meal that already has one.
+ *
+ * A filled-in dog is an inference from the exceptions, so anything already standing —
+ * a staff entry, an earlier report of the same feed — knows more than it does. A dog the
+ * message actually named overwrites, since that is an observation.
+ */
+async function writeFeedings(
+	db: FirebaseFirestore.Firestore,
+	entries: PlannedFeeding[],
+	postedAt: Date,
+	author: string,
+	rawText: string,
+	slackTs: string
+): Promise<number> {
+	const notes = `via Slack — ${author}: "${rawText.slice(0, 180)}"`;
+	const now = new Date().toISOString();
+	let written = 0;
+
+	for (let i = 0; i < entries.length; i += 200) {
+		const chunk = entries.slice(i, i + 200);
+		const existing = await Promise.all(
+			chunk.map((e) =>
+				db.collection('dogs').doc(e.dogId).collection('feedingLogs').get()
+			)
+		);
+
+		const batch = db.batch();
+		chunk.forEach((entry, j) => {
+			// Compared on the shelter's calendar day, not the server's: an evening report
+			// is already the next day in UTC, and would miss the log it should defer to.
+			const day = shelterDay(postedAt);
+			const already = existing[j].docs.some((d) => {
+				const x = d.data();
+				return x.mealTime === entry.mealTime && shelterDay(new Date(x.date)) === day;
+			});
+			if (entry.implied && already) return;
+
+			const id = feedingLogId(postedAt, entry.dogId, entry.mealTime);
+			batch.set(db.collection('dogs').doc(entry.dogId).collection('feedingLogs').doc(id), {
+				id,
+				date: postedAt.toISOString(),
+				mealTime: entry.mealTime,
+				amountEaten: entry.amountEaten,
+				notes,
+				loggedBy: 'slack-import',
+				loggedByName: `${author} (via Slack)`,
+				createdAt: now,
+				source: 'slack',
+				sourceTs: slackTs,
+				mealTimeInferred: entry.mealTimeInferred,
+				impliedFromExceptions: entry.implied
+			});
+			written++;
+		});
+		await batch.commit();
+	}
+	return written;
 }
 
 /**
@@ -65,7 +136,9 @@ export interface PollResult {
  */
 export async function pollSlackFeedings(): Promise<PollResult> {
 	const { SLACK_BOT_TOKEN, SLACK_FEEDING_CHANNEL_ID } = env;
-	if (!SLACK_BOT_TOKEN || !SLACK_FEEDING_CHANNEL_ID) return { scanned: 0, queued: 0, skipped: 'not configured' };
+	if (!SLACK_BOT_TOKEN || !SLACK_FEEDING_CHANNEL_ID) {
+		return { scanned: 0, queued: 0, applied: 0, skipped: 'not configured' };
+	}
 
 	const db = getAdminDb();
 	const cursorSnap = await db.doc(CURSOR_DOC).get();
@@ -83,7 +156,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		(m: SlackMessage) =>
 			m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim() && m.ts !== lastTs
 	);
-	if (messages.length === 0) return { scanned: 0, queued: 0 };
+	if (messages.length === 0) return { scanned: 0, queued: 0, applied: 0 };
 
 	const [dogsSnap, groupsSnap] = await Promise.all([
 		db.collection('dogs')
@@ -114,6 +187,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 	]);
 
 	let queued = 0;
+	let applied = 0;
 	for (const m of messages) {
 		const slackTs = String(m.ts);
 		const postedAt = new Date(Number(slackTs) * 1000);
@@ -160,18 +234,29 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			continue;
 		}
 
-		const entries = planFeedings(String(m.text), postedAt, index);
-		if (entries.length === 0) continue; // nothing about a specific dog eating
+		const plan = planFeedingsDetailed(String(m.text), postedAt, index);
+		if (plan.entries.length === 0) continue; // nothing about a specific dog eating
+
+		const author = authors[String(m.user ?? '')] ?? 'Unknown';
+
+		// A plain report is written on arrival. Most are: exceptions named outright, every
+		// dog matched by name. Holding those for approval only delays the record and
+		// buries the few readings that genuinely need a decision.
+		if (plan.uncertain.length === 0) {
+			applied += await writeFeedings(db, plan.entries, postedAt, author, String(m.text), slackTs);
+			continue;
+		}
 
 		// Keyed by message, so a re-poll of the same message updates rather than duplicates.
 		await db.collection('pendingFeedings').doc(slackTs.replace('.', '-')).set({
 			rawText: String(m.text),
-			author: authors[String(m.user ?? '')] ?? 'Unknown',
+			author,
 			slackTs,
 			postedAt: postedAt.toISOString(),
 			receivedAt: new Date().toISOString(),
 			processed: false,
-			entries
+			uncertain: plan.uncertain,
+			entries: plan.entries
 		});
 		queued++;
 	}
@@ -181,5 +266,5 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 	const newest = messages.reduce((max, m) => (Number(m.ts) > Number(max) ? String(m.ts) : max), lastTs ?? '0');
 	await db.doc(CURSOR_DOC).set({ ts: newest, updatedAt: new Date().toISOString() });
 
-	return { scanned: messages.length, queued };
+	return { scanned: messages.length, queued, applied };
 }

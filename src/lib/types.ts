@@ -331,6 +331,8 @@ export interface PendingFeeding {
 	postedAt: string;
 	receivedAt: string;
 	processed: boolean;
+	/** Why this was held back rather than written on arrival. */
+	uncertain?: string[];
 	entries: {
 		dogId: string;
 		dogName: string;

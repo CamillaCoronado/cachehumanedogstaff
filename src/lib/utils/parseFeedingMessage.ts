@@ -28,6 +28,13 @@ export interface ParsedFeedingMessage {
 	/** Only set when the message says so; inferring from post time is the caller's call. */
 	mealTime: MealTime | null;
 	/**
+	 * Why this reading might be wrong, if it might be. Empty means every amount came from
+	 * an explicit phrase and every dog matched a name exactly — the readings that have
+	 * held up. Anything listed here is a reading worth a person's eye before it becomes
+	 * eighty records.
+	 */
+	uncertain: string[];
+	/**
 	 * Whether this reads as the shift's feeding round-up rather than a passing remark.
 	 *
 	 * It matters because a round-up reports only exceptions — everyone unnamed ate — so a
@@ -42,7 +49,7 @@ export interface ParsedFeedingMessage {
  * Longest phrase first — "ate a little" must beat "ate", and "didn't eat much" must
  * beat "didn't eat", or the coarser reading wins and the amount is wrong.
  */
-const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
+const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten; bare?: boolean }[] = [
 	{ re: /did(?:n'?t| not)\s+(?:\w+\s+)?eat\s+(?:much|a\s+lot|all|hardly)/i, amount: 'little' },
 	{ re: /(?:hardly|barely)\s+(?:ate|touched)/i, amount: 'little' },
 	{ re: /did(?:n'?t| not)\s+(?:really\s+|want\s+to\s+)?(?:eat|finish|touch)/i, amount: 'none' },
@@ -63,8 +70,8 @@ const AMOUNT_PATTERNS: { re: RegExp; amount: AmountEaten }[] = [
 	// Only at the end of a clause, though: mid-sentence it almost always belongs to a
 	// different verb, and matching it turned "didn't drink water", "didn't handle him"
 	// and "didn't get to it" into records of dogs refusing food.
-	{ re: /\bdid(?:n'?t|nt)\b(?=\s*$|\s*[.,;•!?])/i, amount: 'none' },
-	{ re: /\bate\b/i, amount: 'all' }
+	{ re: /\bdid(?:n'?t|nt)\b(?=\s*$|\s*[.,;•!?])/i, amount: 'none', bare: true },
+	{ re: /\bate\b/i, amount: 'all', bare: true }
 ];
 
 // Built once per call from the roster; a message is mostly ordinary prose and only
@@ -186,7 +193,9 @@ function namesIn(
 	fragment: string,
 	roster: Map<string, string>,
 	derivedKeys: Set<string>,
-	precedingWord = ''
+	precedingWord = '',
+	/** Names recovered by spelling distance rather than matched outright. */
+	fuzzyHits?: Set<string>
 ): string[] {
 	const words = fragment.split(/[^A-Za-z'-]+/).filter(Boolean);
 	const found: string[] = [];
@@ -239,7 +248,10 @@ function namesIn(
 						const sameLength = candidates.filter(([, len]) => len === word.length);
 						if (sameLength.length === 1) candidates = sameLength;
 					}
-					if (candidates.length === 1) { found.push(candidates[0][0]); }
+					if (candidates.length === 1) {
+						found.push(candidates[0][0]);
+						fuzzyHits?.add(candidates[0][0]);
+					}
 					break; // resolved or genuinely ambiguous; a looser pass will not help
 				}
 			}
@@ -252,8 +264,8 @@ function namesIn(
 
 /** First amount phrase at or after `from`, or null when the rest of the text has none. */
 function nextAmount(text: string, from: number) {
-	let best: { index: number; length: number; amount: AmountEaten } | null = null;
-	for (const { re, amount } of AMOUNT_PATTERNS) {
+	let best: { index: number; length: number; amount: AmountEaten; bare: boolean } | null = null;
+	for (const { re, amount, bare } of AMOUNT_PATTERNS) {
 		const scoped = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
 		scoped.lastIndex = from;
 		const match = scoped.exec(text);
@@ -261,7 +273,7 @@ function nextAmount(text: string, from: number) {
 		// Earliest wins; on a tie the longer phrase wins, which preserves the
 		// specific-before-generic ordering above.
 		if (!best || match.index < best.index || (match.index === best.index && match[0].length > best.length)) {
-			best = { index: match.index, length: match[0].length, amount };
+			best = { index: match.index, length: match[0].length, amount, bare: Boolean(bare) };
 		}
 	}
 	return best;
@@ -388,7 +400,9 @@ export function parseFeedingMessage(
 	// Scan verb-phrase by verb-phrase, attributing the names between the previous phrase
 	// and this one. Staff routinely write without punctuation — "River uno ate half Tasha
 	// thor Linda doug didnt" — so clause splitting on commas alone loses half the dogs.
-	const hits: { index: number; end: number; amount: AmountEaten; colonLed: boolean }[] = [];
+	const fuzzyHits = new Set<string>();
+	let usedBareVerb = false;
+	const hits: { index: number; end: number; amount: AmountEaten; colonLed: boolean; bare: boolean }[] = [];
 	for (let from = 0; ; ) {
 		const hit = nextAmount(working, from);
 		if (!hit) break;
@@ -398,7 +412,13 @@ export function parseFeedingMessage(
 		// backwards, handing each list to the wrong verb.
 		// "she ate most of rubber bone" is a chewed toy, not a meal.
 		if (!NOT_FOOD.test(working.slice(end))) {
-			hits.push({ index: hit.index, end, amount: hit.amount, colonLed: /^\s*:/.test(working.slice(end)) });
+			hits.push({
+				index: hit.index,
+				end,
+				amount: hit.amount,
+				colonLed: /^\s*:/.test(working.slice(end)),
+				bare: hit.bare
+			});
 		}
 		from = end;
 	}
@@ -414,7 +434,7 @@ export function parseFeedingMessage(
 		if (hit.colonLed) {
 			// Its list runs to the next verb phrase, or to the end.
 			const stop = hits[i + 1]?.index ?? working.length;
-			names = namesIn(working.slice(hit.end, stop), roster, derivedKeys, wordBefore(working, hit.end));
+			names = namesIn(working.slice(hit.end, stop), roster, derivedKeys, wordBefore(working, hit.end), fuzzyHits);
 			// "Ate some: Rea, Shorty Straggler didn't eat" — the next verb has no colon and
 			// no subject of its own, so the last name in this list is really its subject.
 			const next = hits[i + 1];
@@ -429,7 +449,7 @@ export function parseFeedingMessage(
 			// out for day trips … stuffed toys were in the dryer …" tagged nine dogs as
 			// having refused food because a feeding word appeared later in the message.
 			const windowStart = Math.max(cursor, sentenceStart(working, hit.index));
-			names = namesIn(working.slice(windowStart, hit.index), roster, derivedKeys, wordBefore(working, windowStart));
+			names = namesIn(working.slice(windowStart, hit.index), roster, derivedKeys, wordBefore(working, windowStart), fuzzyHits);
 			cursor = hit.end;
 		}
 		if (carried && !hit.colonLed) {
@@ -438,6 +458,7 @@ export function parseFeedingMessage(
 			carried = null;
 		}
 		for (const name of names) push(name, hit.amount);
+		if (names.length > 0 && hit.bare) usedBareVerb = true;
 		lastAmount = hit.amount;
 		lastPhraseHadNames = names.length > 0;
 	}
@@ -472,5 +493,13 @@ export function parseFeedingMessage(
 				EVERYONE_ELSE.test(text) ||
 				(entries.length >= 2 && wordCount / entries.length <= MAX_WORDS_PER_DOG)));
 
-	return { entries, allAte, doNotFeed, isSurgeryList, mealTime, looksLikeReport };
+	// A reading is worth checking when the amount came from a bare verb rather than a
+	// phrase that names it, or when a dog was reached by spelling distance. Both are
+	// where the wrong readings found in review came from.
+	const uncertain: string[] = [];
+	if (usedBareVerb) uncertain.push('amount read from a bare "ate" or "didn\'t"');
+	const guessedNames = [...fuzzyHits].filter((n) => entries.some((e) => e.name === n));
+	if (guessedNames.length > 0) uncertain.push(`name matched by spelling: ${guessedNames.join(', ')}`);
+
+	return { entries, allAte, doNotFeed, isSurgeryList, mealTime, looksLikeReport, uncertain };
 }

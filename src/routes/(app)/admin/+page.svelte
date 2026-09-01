@@ -625,11 +625,11 @@
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">From Slack</p>
-						<h3 class="section-title">Feeding messages waiting for approval</h3>
+						<h3 class="section-title">Feeding reports that need a look</h3>
 						<p class="section-copy">
-							Feeding reports posted in Slack, read into logs. The dog and the amount come from the
-							message; the meal is taken from when it was posted unless the message says otherwise.
-							<strong>Nothing reaches a dog's record until you accept it.</strong>
+							Feeding reports from Slack are written straight to the dogs' records. These are the
+							ones that were <strong>not</strong> — where the reading is uncertain enough to be
+							worth your eye first. Each says why below.
 						</p>
 					</div>
 					<button class="action-btn" type="button" on:click={loadPendingFeedings} disabled={pendingLoading}>
@@ -641,7 +641,9 @@
 					<p class="error-note">Could not load the queue: {pendingError}</p>
 				{:else if pendingFeedings.length === 0}
 					<p class="empty-note">
-						{pendingLoading ? 'Checking for new messages…' : 'Nothing waiting — every feeding message has been handled.'}
+						{pendingLoading
+							? 'Checking for new messages…'
+							: 'Nothing to review — every report so far read cleanly and was applied.'}
 					</p>
 				{:else}
 					<ul class="pending-list">
@@ -652,6 +654,11 @@
 									<span>{formatDateTime(pending.postedAt)}</span>
 								</p>
 								<blockquote class="pending-quote">{pending.rawText}</blockquote>
+								{#if pending.uncertain?.length}
+									<p class="pending-why">
+										Held because: {pending.uncertain.join(' · ')}
+									</p>
+								{/if}
 								<ul class="pending-entries">
 									{#each pending.entries.filter((e) => !e.implied) as entry}
 										<li>
@@ -1246,6 +1253,15 @@
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: #6b6459;
+	}
+	.pending-why {
+		margin: 0;
+		font-size: 0.82rem;
+		font-weight: 600;
+		color: #a8501b;
+		padding: 7px 10px;
+		background: #f6e6d9;
+		border-radius: 3px;
 	}
 	.pending-implied {
 		margin: 0;

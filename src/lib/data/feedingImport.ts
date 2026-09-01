@@ -76,6 +76,15 @@ interface Candidate {
 	backFrom: number | null;
 }
 
+export interface FeedingPlan {
+	entries: PlannedFeeding[];
+	/**
+	 * Why this needs a person's eye before it is written, if it does. Empty means it can
+	 * be applied on arrival — most reports are plain and there is nothing to decide.
+	 */
+	uncertain: string[];
+}
+
 export interface PlannedFeeding {
 	dogId: string;
 	dogName: string;
@@ -313,10 +322,19 @@ export function planFeedings(
 	/** Supplied when the day's other reports are known, so order can settle the slot. */
 	slotOverride?: MealTime
 ): PlannedFeeding[] {
+	return planFeedingsDetailed(text, postedAt, index, slotOverride).entries;
+}
+
+export function planFeedingsDetailed(
+	text: string,
+	postedAt: Date,
+	index: DogIndex,
+	slotOverride?: MealTime
+): FeedingPlan {
 	const parsed = parseFeedingMessage(text, rosterOn(index, postedAt));
 	// Either form is a feeding record: dogs named as exceptions, or a plain statement
 	// that the whole shelter ate. Anything else is not a report of a feed.
-	if (parsed.entries.length === 0 && !parsed.allAte) return [];
+	if (parsed.entries.length === 0 && !parsed.allAte) return { entries: [], uncertain: [] };
 
 	const mealTime: MealTime =
 		parsed.mealTime ?? slotOverride ?? (shelterHour(postedAt) < PM_FEED_HOUR ? 'am' : 'pm');
@@ -338,7 +356,7 @@ export function planFeedings(
 		});
 	}
 	// "Everyone ate" names nobody, and that is the whole message: every dog ate.
-	if (planned.length === 0 && !parsed.allAte) return [];
+	if (planned.length === 0 && !parsed.allAte) return { entries: [], uncertain: [] };
 
 	// Any statement that a dog did not eat is a statement about that feed, wherever it
 	// appears — a round-up, or one line inside a shift note. The shelter reports by
@@ -360,7 +378,16 @@ export function planFeedings(
 			implied: true
 		});
 	}
-	return planned;
+
+	const uncertain = [...parsed.uncertain];
+	// A dog named in the message that could not be pinned to one record is not written
+	// at all, and that is worth saying rather than silently dropping.
+	const unresolved = parsed.entries.length - planned.filter((p) => !p.implied).length;
+	if (unresolved > 0) {
+		uncertain.push(`${unresolved} named dog${unresolved === 1 ? '' : 's'} could not be matched`);
+	}
+
+	return { entries: planned, uncertain };
 }
 
 export interface PlannedSurgery {
