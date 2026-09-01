@@ -78,6 +78,7 @@ export async function acceptPendingFeeding(
 			shelterSince: toIso(d.shelterSince),
 			isolationStatus: d.isolationStatus,
 			isIncoming: d.isIncoming,
+			surgeryDate: toIso(d.surgeryDate),
 			nicknames: d.nicknames
 		})),
 		groups.map((g) => ({ name: g.name, dogIds: g.dogIds }))

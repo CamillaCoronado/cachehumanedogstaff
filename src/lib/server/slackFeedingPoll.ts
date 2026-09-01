@@ -172,6 +172,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			'shelterSince',
 			'isolationStatus',
 			'isIncoming',
+			'surgeryDate',
 			'nicknames'
 		)
 			.get(),

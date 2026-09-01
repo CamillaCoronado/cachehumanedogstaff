@@ -54,6 +54,8 @@ export interface DogRecord {
 	shelterSince?: string | null;
 	isolationStatus?: string | null;
 	isIncoming?: boolean;
+	/** Set by the morning surgery list; the dog fasts that day. */
+	surgeryDate?: string | null;
 	/** Extra names staff use for this dog, matched exactly like its own name. */
 	nicknames?: string[];
 }
@@ -74,6 +76,8 @@ interface Candidate {
 	isIncoming: boolean;
 	fosterFrom: number | null;
 	backFrom: number | null;
+	/** The shelter day this dog is fasting for surgery, if any. */
+	surgeryDay: string | null;
 }
 
 export interface FeedingPlan {
@@ -163,7 +167,8 @@ export function buildDogIndex(dogs: DogRecord[], groups: DogGroupRecord[] = []):
 			feedable,
 			isIncoming: Boolean(dog.isIncoming),
 			fosterFrom,
-			backFrom
+			backFrom,
+			surgeryDay: dog.surgeryDate ? shelterDay(new Date(dog.surgeryDate)) : null
 		};
 
 		if (!index.byName.has(dog.name)) index.byName.set(dog.name, []);
@@ -287,14 +292,22 @@ export function assignDaySlots(reports: DayReport[]): MealTime[] {
 	return slots;
 }
 
-/** Every dog the feeding shift would have fed that day. */
-function feedableOn(index: DogIndex, when: Date): Candidate[] {
+/**
+ * Every dog the feeding shift would have fed at that meal.
+ *
+ * Surgery matters here and cannot come from the message: the list is posted separately,
+ * so a later report naming one dog would otherwise account for the fasting dogs as
+ * having eaten. It is the morning meal they miss.
+ */
+function feedableOn(index: DogIndex, when: Date, mealTime: MealTime): Candidate[] {
 	const at = when.getTime();
+	const day = shelterDay(when);
 	const out: Candidate[] = [];
 	for (const candidates of index.byName.values()) {
 		for (const c of candidates) {
 			if (!c.feedable || !presentOn(c, at)) continue;
 			if (inFosterOn(c, at)) continue;
+			if (mealTime === 'am' && c.surgeryDay === day) continue;
 			// An incoming dog is only fed from the day it actually arrives.
 			if (c.isIncoming && (c.from === null || at < c.from - DAY_MS)) continue;
 			out.push(c);
@@ -367,7 +380,7 @@ export function planFeedingsDetailed(
 		parsed.doNotFeed.map((name) => resolveDogId(index, name, postedAt)).filter(Boolean) as string[]
 	);
 
-	for (const dog of feedableOn(index, postedAt)) {
+	for (const dog of feedableOn(index, postedAt, mealTime)) {
 		if (named.has(dog.id) || excluded.has(dog.id)) continue;
 		planned.push({
 			dogId: dog.id,
