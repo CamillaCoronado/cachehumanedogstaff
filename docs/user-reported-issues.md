@@ -1,7 +1,7 @@
 # User-Reported Issues — History
 
 Log of issues Camilla reported and how they were resolved. Everything is fixed except
-**#4**, a deferred feature. Dates are when the fix landed.
+**#4** and **#10**, both deferred. Dates are when the fix landed.
 
 ## 1. Feeding amount calculations feel wrong — RESOLVED 2026-06-12
 
@@ -74,3 +74,14 @@ Policy: a puppy (under 6 months) isn't day-trip eligible until 30+ days at the s
 (constants `PUPPY_MAX_AGE_MONTHS` / `PUPPY_MIN_DAYS_AT_SHELTER` in `src/lib/utils/dates.ts`).
 A manager can override per-dog via `dayTripPuppyOverride` (board caret menu → "Allow day
 trips (under 30d)").
+
+## 10. Duplicate dog records that never depart — OPEN, deferred 2026-09-01
+
+`createDog()` uses a generated id; the ASM sync keys its records by the animal number and
+cannot see them, so it creates a second record and never touches the first again. The
+first therefore never gets a departure date and looks present forever — it keeps
+collecting daily meals for a dog that left months ago.
+
+74 of 337 dog records are app-created, 49 of them showing as still at the shelter. Full
+write-up, scale and fix order in [phantom-dog-records.md](phantom-dog-records.md). Fix
+the sync before merging anything, or the backlog just refills.
