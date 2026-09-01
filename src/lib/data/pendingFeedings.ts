@@ -1,10 +1,11 @@
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import type { PendingFeeding, UserProfile } from '$lib/types';
 import { db } from '$lib/firebase/config';
-import { feedingLogId } from '$lib/data/feedingImport';
-import { addFeedingLog } from '$lib/data/dogs';
+import { buildDogIndex, feedingLogId, planFeedings } from '$lib/data/feedingImport';
+import { addFeedingLog, listDogs } from '$lib/data/dogs';
+import { listDogGroups } from '$lib/data/dogGroups';
 import { db as firestore } from '$lib/firebase/config';
-import { isSameCalendarDay } from '$lib/utils/dates';
+import { isSameCalendarDay, toDate } from '$lib/utils/dates';
 
 const COLLECTION = 'pendingFeedings';
 
@@ -46,6 +47,14 @@ async function alreadyLogged(dogId: string, date: Date, mealTime: string): Promi
 	});
 }
 
+/**
+ * Accepts a held report, re-reading the message rather than trusting what was stored.
+ *
+ * Entries are worked out when a message is queued, so anything that changes afterwards —
+ * a rule, a nickname, a dog arriving — never reaches an item already sitting in the
+ * queue. One approved after the fill-in was added wrote a single dog, because the
+ * reading frozen into it predated the rule.
+ */
 export async function acceptPendingFeeding(
 	pending: PendingFeeding,
 	profile?: UserProfile | null
@@ -54,8 +63,29 @@ export async function acceptPendingFeeding(
 	const date = new Date(pending.postedAt);
 	const notes = `via Slack — ${pending.author}: "${pending.rawText.slice(0, 180)}"`;
 
+	const [dogs, groups] = await Promise.all([listDogs(), listDogGroups()]);
+	const index = buildDogIndex(
+		dogs.map((d) => ({
+			id: d.id,
+			name: d.name,
+			intakeDate: toIso(d.intakeDate),
+			leftShelterDate: toIso(d.leftShelterDate),
+			status: d.status,
+			asmShelterCode: d.asmShelterCode ?? null,
+			inFoster: d.inFoster,
+			permanentFoster: d.permanentFoster,
+			inFosterSince: toIso(d.inFosterSince),
+			shelterSince: toIso(d.shelterSince),
+			isolationStatus: d.isolationStatus,
+			isIncoming: d.isIncoming,
+			nicknames: d.nicknames
+		})),
+		groups.map((g) => ({ name: g.name, dogIds: g.dogIds }))
+	);
+	const entries = planFeedings(pending.rawText, date, index);
+
 	let written = 0;
-	for (const entry of pending.entries) {
+	for (const entry of entries) {
 		// An implied dog is one the message did not mention. If anything already stands
 		// for that meal — a staff entry, or an earlier report of the same feed — it knows
 		// more than an inference does, so leave it alone.
@@ -82,6 +112,12 @@ export async function acceptPendingFeeding(
 
 	await setDoc(doc(db, COLLECTION, pending.id), { processed: true }, { merge: true });
 	return written;
+}
+
+/** feedingImport works in ISO strings; the app's dogs carry Date or Timestamp. */
+function toIso(value: unknown): string | null {
+	const date = toDate(value as never);
+	return date ? date.toISOString() : null;
 }
 
 /** Discard a message without writing anything. */
