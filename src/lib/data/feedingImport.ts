@@ -207,13 +207,15 @@ export function rosterOn(index: DogIndex, when: Date): string[] {
 	return names;
 }
 
-/** The dog of this name at the shelter on `when`, or null when it cannot be told. */
-export function resolveDogId(index: DogIndex, name: string, when: Date): string | null {
-	const candidates = index.byName.get(name);
-	if (!candidates) return null;
-	if (candidates.length === 1) return candidates[0].id;
-
-	const at = when.getTime();
+/**
+ * Narrows several records of one name down to the animal actually meant.
+ *
+ * Shared by name lookup and by the fill-in. When only the lookup applied it, a stale
+ * duplicate could be excluded from a surgery list — which resolves one record — and then
+ * quietly included in the fill-in, so a fasting dog was logged as having eaten under its
+ * other record.
+ */
+function preferCandidates(candidates: Candidate[], at: number): Candidate[] {
 	let inWindow = candidates.filter((c) => presentOn(c, at));
 
 	// A document keyed by shelter number is one ASM maintains; a UUID-keyed one is a
@@ -236,6 +238,16 @@ export function resolveDogId(index: DogIndex, name: string, when: Date): string 
 		}
 	}
 
+	return inWindow;
+}
+
+/** The dog of this name at the shelter on `when`, or null when it cannot be told. */
+export function resolveDogId(index: DogIndex, name: string, when: Date): string | null {
+	const candidates = index.byName.get(name);
+	if (!candidates) return null;
+	if (candidates.length === 1) return candidates[0].id;
+
+	const inWindow = preferCandidates(candidates, when.getTime());
 	// One match is an answer; anything else is a guess, and a guess files a real meal
 	// onto the wrong animal's history.
 	return inWindow.length === 1 ? inWindow[0].id : null;
@@ -303,13 +315,18 @@ function feedableOn(index: DogIndex, when: Date, mealTime: MealTime): Candidate[
 	const at = when.getTime();
 	const day = shelterDay(when);
 	const out: Candidate[] = [];
+	const seen = new Set<string>();
 	for (const candidates of index.byName.values()) {
-		for (const c of candidates) {
-			if (!c.feedable || !presentOn(c, at)) continue;
+		// The same narrowing the name lookup does, so a stale duplicate cannot slip in
+		// under a name whose real record was excluded.
+		for (const c of preferCandidates(candidates, at)) {
+			if (seen.has(c.id)) continue; // reachable under a nickname as well as a name
+			if (!c.feedable) continue;
 			if (inFosterOn(c, at)) continue;
 			if (mealTime === 'am' && c.surgeryDay === day) continue;
 			// An incoming dog is only fed from the day it actually arrives.
 			if (c.isIncoming && (c.from === null || at < c.from - DAY_MS)) continue;
+			seen.add(c.id);
 			out.push(c);
 		}
 	}
