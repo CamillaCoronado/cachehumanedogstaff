@@ -4,7 +4,9 @@ import {
 	bathLogId,
 	buildDogIndex,
 	feedingLogId,
+	yardLogId,
 	planBaths,
+	planYardTime,
 	planFeedingsDetailed,
 	shelterDay,
 	planSurgery,
@@ -63,6 +65,8 @@ export interface PollResult {
 	scanned: number;
 	/** Baths written from reports like "Roe got a bath". */
 	baths: number;
+	/** Yard time written from reports like "sally pickles Ann got yard time". */
+	yard: number;
 	/** Held back because the reading was uncertain; waiting on the Admin page. */
 	queued: number;
 	/** Written straight to the dogs' records, because the reading was plain. */
@@ -141,7 +145,7 @@ async function writeFeedings(
 export async function pollSlackFeedings(): Promise<PollResult> {
 	const { SLACK_BOT_TOKEN, SLACK_FEEDING_CHANNEL_ID } = env;
 	if (!SLACK_BOT_TOKEN || !SLACK_FEEDING_CHANNEL_ID) {
-	return { scanned: 0, queued: 0, applied: 0, baths: 0, skipped: 'not configured' };
+	return { scanned: 0, queued: 0, applied: 0, baths: 0, yard: 0, skipped: 'not configured' };
 	}
 
 	const db = getAdminDb();
@@ -160,7 +164,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		(m: SlackMessage) =>
 			m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim() && m.ts !== lastTs
 	);
-	if (messages.length === 0) return { scanned: 0, queued: 0, applied: 0, baths: 0 };
+	if (messages.length === 0) return { scanned: 0, queued: 0, applied: 0, baths: 0, yard: 0 };
 
 	const [dogsSnap, groupsSnap] = await Promise.all([
 		db.collection('dogs')
@@ -194,6 +198,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 	let queued = 0;
 	let applied = 0;
 	let baths = 0;
+	let yard = 0;
 	for (const m of messages) {
 		const slackTs = String(m.ts);
 		const postedAt = new Date(Number(slackTs) * 1000);
@@ -280,6 +285,41 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			await batch.commit();
 		}
 
+		// Yard time is enrichment, and the only kind with no path into the app but by hand.
+		// Written on arrival: the parser rejects instructions and, most importantly, the
+		// inverse — "No dogs got yard time" reads almost identically to a blanket.
+		const inYard = planYardTime(String(m.text), postedAt, index);
+		if (inYard.length > 0) {
+			const author = authors[String(m.user ?? '')] ?? 'Unknown';
+			const current = await Promise.all(
+				inYard.map((d) => db.collection('dogs').doc(d.dogId).get())
+			);
+			const batch = db.batch();
+			inYard.forEach((dog, i) => {
+				const id = yardLogId(postedAt, dog.dogId);
+				batch.set(db.collection('dogs').doc(dog.dogId).collection('yardLogs').doc(id), {
+					id,
+					timestamp: postedAt.toISOString(),
+					durationMinutes: dog.durationMinutes,
+					loggedBy: 'slack-import',
+					loggedByName: `${author} (via Slack)`,
+					source: 'slack',
+					sourceTs: slackTs
+				});
+				// lastYardDate feeds the overdue-enrichment list, so it only moves forward.
+				const existing = current[i].data()?.lastYardDate;
+				if (!existing || new Date(existing).getTime() < postedAt.getTime()) {
+					batch.set(
+						db.collection('dogs').doc(dog.dogId),
+						{ lastYardDate: postedAt.toISOString() },
+						{ merge: true }
+					);
+				}
+				yard++;
+			});
+			await batch.commit();
+		}
+
 		const plan = planFeedingsDetailed(String(m.text), postedAt, index);
 		if (plan.entries.length === 0) continue; // nothing about a specific dog eating
 
@@ -312,5 +352,5 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 	const newest = messages.reduce((max, m) => (Number(m.ts) > Number(max) ? String(m.ts) : max), lastTs ?? '0');
 	await db.doc(CURSOR_DOC).set({ ts: newest, updatedAt: new Date().toISOString() });
 
-	return { scanned: messages.length, queued, applied, baths };
+	return { scanned: messages.length, queued, applied, baths, yard };
 }

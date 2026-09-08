@@ -1,6 +1,7 @@
 import type { AmountEaten, MealTime } from '$lib/types';
 import { parseFeedingMessage } from '$lib/utils/parseFeedingMessage';
 import { parseBathMessage } from '$lib/utils/parseBathMessage';
+import { parseYardMessage } from '$lib/utils/parseYardMessage';
 
 /** The shelter feeds again at 3pm; before that a report is about the morning feed. */
 const PM_FEED_HOUR = 15;
@@ -305,6 +306,22 @@ export function assignDaySlots(reports: DayReport[]): MealTime[] {
 	return slots;
 }
 
+/** Dogs at the shelter and available that day: not in foster, not in isolation. */
+function presentDogsOn(index: DogIndex, when: Date): Candidate[] {
+	const at = when.getTime();
+	const out: Candidate[] = [];
+	const seen = new Set<string>();
+	for (const candidates of index.byName.values()) {
+		for (const c of preferCandidates(candidates, at)) {
+			if (seen.has(c.id) || !c.feedable || inFosterOn(c, at)) continue;
+			if (c.isIncoming && (c.from === null || at < c.from - DAY_MS)) continue;
+			seen.add(c.id);
+			out.push(c);
+		}
+	}
+	return out;
+}
+
 /**
  * Every dog the feeding shift would have fed at that meal.
  *
@@ -313,25 +330,9 @@ export function assignDaySlots(reports: DayReport[]): MealTime[] {
  * having eaten. It is the morning meal they miss.
  */
 function feedableOn(index: DogIndex, when: Date, mealTime: MealTime): Candidate[] {
-	const at = when.getTime();
 	const day = shelterDay(when);
-	const out: Candidate[] = [];
-	const seen = new Set<string>();
-	for (const candidates of index.byName.values()) {
-		// The same narrowing the name lookup does, so a stale duplicate cannot slip in
-		// under a name whose real record was excluded.
-		for (const c of preferCandidates(candidates, at)) {
-			if (seen.has(c.id)) continue; // reachable under a nickname as well as a name
-			if (!c.feedable) continue;
-			if (inFosterOn(c, at)) continue;
-			if (mealTime === 'am' && c.surgeryDay === day) continue;
-			// An incoming dog is only fed from the day it actually arrives.
-			if (c.isIncoming && (c.from === null || at < c.from - DAY_MS)) continue;
-			seen.add(c.id);
-			out.push(c);
-		}
-	}
-	return out;
+	// Fasting dogs are the one thing feeding excludes that presence alone does not.
+	return presentDogsOn(index, when).filter((c) => !(mealTime === 'am' && c.surgeryDay === day));
 }
 
 /**
@@ -517,6 +518,62 @@ export function planBaths(text: string, postedAt: Date, index: DogIndex): Planne
 	}
 
 	return out;
+}
+
+export interface PlannedYard {
+	dogId: string;
+	dogName: string;
+	durationMinutes: number | null;
+}
+
+/**
+ * Reads a yard-time report. Yard time is one of the three things that count as
+ * enrichment, alongside day trips and playgroups, and the only one with no path into the
+ * app but by hand.
+ *
+ * A blanket — "All dogs got yard time" — covers every dog at the shelter that day, the
+ * same reading the feeding fill-in uses.
+ */
+export function planYardTime(text: string, postedAt: Date, index: DogIndex): PlannedYard[] {
+	const parsed = parseYardMessage(text, rosterOn(index, postedAt));
+	if (parsed.negated) return [];
+
+	const out: PlannedYard[] = [];
+	const seen = new Set<string>();
+	const add = (dogId: string, dogName: string) => {
+		if (seen.has(dogId)) return;
+		seen.add(dogId);
+		out.push({ dogId, dogName, durationMinutes: parsed.durationMinutes });
+	};
+
+	if (parsed.allDogs) {
+		// Isolation and foster dogs are excluded the same way they are for feeding: they
+		// were not in the yard, and the enrichment clock is paused for them anyway.
+		for (const dog of presentDogsOn(index, postedAt)) add(dog.id, dog.name);
+		return out;
+	}
+
+	for (const name of parsed.dogNames) {
+		const dogId = resolveDogId(index, name, postedAt);
+		if (dogId) add(dogId, index.namesById.get(dogId) ?? name);
+	}
+
+	// A group name stands in for its dogs here too — "the hat puppies got yard time".
+	const haystack = normalizeName(text);
+	for (const [groupKey, dogIds] of index.groups) {
+		if (!groupKey || !haystack.includes(groupKey)) continue;
+		for (const dogId of dogIds) {
+			const name = index.namesById.get(dogId);
+			if (name) add(dogId, name);
+		}
+	}
+
+	return out;
+}
+
+/** One yard log per dog per day, so a re-poll does not add a second. */
+export function yardLogId(at: Date, dogId: string): string {
+	return `slack-${shelterDay(at)}-${dogId}`;
 }
 
 /** One bath per dog per day, so a re-poll of the same report does not add a second. */
