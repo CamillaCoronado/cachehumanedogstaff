@@ -56,6 +56,35 @@ describe('parseYardMessage', () => {
 		expect(parse('Jack is terrified of other dogs in the meet and greet yard').dogNames).toEqual([]);
 	});
 
+	it('reads dogs going out without the word yard', () => {
+		expect(parse('Bagel, Skittles, Phantom, Sally, Ann went out solo.').dogNames).toEqual([
+			'Sally', 'Ann'
+		]);
+		expect(parse('All adult dogs went out today.').allDogs).toBe(true);
+		expect(parse('Everyone got out today').allDogs).toBe(true);
+		expect(parse('all dogs were taken out.').allDogs).toBe(true);
+		expect(parse('All dogs fed watered clean kennel and had a chance to go out').allDogs).toBe(true);
+	});
+
+	it('carves dogs out of a blanket', () => {
+		const r = parse('all dogs went out except for Sally');
+		expect(r.allDogs).toBe(true);
+		expect(r.exceptNames).toEqual(['Sally']);
+	});
+
+	it('never reads an escape as enrichment', () => {
+		// A dog out of its kennel is the worst kind of day, not time in the yard.
+		expect(parse('Sally got out of her outside kennel twice this morning').dogNames).toEqual([]);
+		expect(parse('Jack got out of his inside kennel to now we have').dogNames).toEqual([]);
+		expect(parse('Ann got out earlier and her gate was still latched').dogNames).toEqual([]);
+		expect(parse('Sally was out of her outside kennel, please clip!').dogNames).toEqual([]);
+	});
+
+	it('ignores permission and instructions to take a dog out', () => {
+		expect(parse('I told the volunteers they could take out Ann and Sally').dogNames).toEqual([]);
+		expect(parse('Sally on bed rest take out for potty breaks').dogNames).toEqual([]);
+	});
+
 	it('returns nothing for a message that is not about the yard', () => {
 		expect(parse('Straggler was adopted!').dogNames).toEqual([]);
 		expect(parse('Mia didn’t eat').dogNames).toEqual([]);

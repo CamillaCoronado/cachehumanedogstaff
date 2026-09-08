@@ -547,9 +547,15 @@ export function planYardTime(text: string, postedAt: Date, index: DogIndex): Pla
 	};
 
 	if (parsed.allDogs) {
+		// "all dogs went out except for punch" — the carve-out is the whole point of it.
+		const excluded = new Set(
+			parsed.exceptNames.map((n) => resolveDogId(index, n, postedAt)).filter(Boolean) as string[]
+		);
 		// Isolation and foster dogs are excluded the same way they are for feeding: they
 		// were not in the yard, and the enrichment clock is paused for them anyway.
-		for (const dog of presentDogsOn(index, postedAt)) add(dog.id, dog.name);
+		for (const dog of presentDogsOn(index, postedAt)) {
+			if (!excluded.has(dog.id)) add(dog.id, dog.name);
+		}
 		return out;
 	}
 
