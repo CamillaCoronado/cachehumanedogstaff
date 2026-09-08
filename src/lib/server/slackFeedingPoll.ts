@@ -1,8 +1,10 @@
 import { env } from '$env/dynamic/private';
 import { getAdminDb } from '$lib/firebase/admin';
 import {
+	bathLogId,
 	buildDogIndex,
 	feedingLogId,
+	planBaths,
 	planFeedingsDetailed,
 	shelterDay,
 	planSurgery,
@@ -59,6 +61,8 @@ async function resolveAuthors(token: string, db: FirebaseFirestore.Firestore, id
 
 export interface PollResult {
 	scanned: number;
+	/** Baths written from reports like "Roe got a bath". */
+	baths: number;
 	/** Held back because the reading was uncertain; waiting on the Admin page. */
 	queued: number;
 	/** Written straight to the dogs' records, because the reading was plain. */
@@ -137,7 +141,7 @@ async function writeFeedings(
 export async function pollSlackFeedings(): Promise<PollResult> {
 	const { SLACK_BOT_TOKEN, SLACK_FEEDING_CHANNEL_ID } = env;
 	if (!SLACK_BOT_TOKEN || !SLACK_FEEDING_CHANNEL_ID) {
-		return { scanned: 0, queued: 0, applied: 0, skipped: 'not configured' };
+	return { scanned: 0, queued: 0, applied: 0, baths: 0, skipped: 'not configured' };
 	}
 
 	const db = getAdminDb();
@@ -156,7 +160,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		(m: SlackMessage) =>
 			m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim() && m.ts !== lastTs
 	);
-	if (messages.length === 0) return { scanned: 0, queued: 0, applied: 0 };
+	if (messages.length === 0) return { scanned: 0, queued: 0, applied: 0, baths: 0 };
 
 	const [dogsSnap, groupsSnap] = await Promise.all([
 		db.collection('dogs')
@@ -189,6 +193,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 
 	let queued = 0;
 	let applied = 0;
+	let baths = 0;
 	for (const m of messages) {
 		const slackTs = String(m.ts);
 		const postedAt = new Date(Number(slackTs) * 1000);
@@ -235,6 +240,46 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			continue;
 		}
 
+		// Baths are reported plainly and the parser rejects the many messages naming one
+		// that has not happened, so these are written on arrival like the surgery list.
+		// A message can report a bath and a feeding at once, so this does not short-circuit.
+		const bathed = planBaths(String(m.text), postedAt, index);
+		if (bathed.length > 0) {
+			const author = authors[String(m.user ?? '')] ?? 'Unknown';
+			const loggedByName = `${author} (via Slack)`;
+
+			// The dog's own lastBathDate drives the overdue list, so it may only move
+			// forward: a report arriving late must not undo a bath given since.
+			const current = await Promise.all(
+				bathed.map((d) => db.collection('dogs').doc(d.dogId).get())
+			);
+
+			const batch = db.batch();
+			bathed.forEach((dog, i) => {
+				const id = bathLogId(dog.at, dog.dogId);
+				batch.set(db.collection('dogs').doc(dog.dogId).collection('bathLogs').doc(id), {
+					id,
+					timestamp: dog.at.toISOString(),
+					loggedBy: 'slack-import',
+					loggedByName,
+					source: 'slack',
+					sourceTs: slackTs
+				});
+
+				const existing = current[i].data()?.lastBathDate;
+				const isNewer = !existing || new Date(existing).getTime() < dog.at.getTime();
+				if (isNewer) {
+					batch.set(
+						db.collection('dogs').doc(dog.dogId),
+						{ lastBathDate: dog.at.toISOString(), lastBathBy: loggedByName },
+						{ merge: true }
+					);
+				}
+				baths++;
+			});
+			await batch.commit();
+		}
+
 		const plan = planFeedingsDetailed(String(m.text), postedAt, index);
 		if (plan.entries.length === 0) continue; // nothing about a specific dog eating
 
@@ -267,5 +312,5 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 	const newest = messages.reduce((max, m) => (Number(m.ts) > Number(max) ? String(m.ts) : max), lastTs ?? '0');
 	await db.doc(CURSOR_DOC).set({ ts: newest, updatedAt: new Date().toISOString() });
 
-	return { scanned: messages.length, queued, applied };
+	return { scanned: messages.length, queued, applied, baths };
 }

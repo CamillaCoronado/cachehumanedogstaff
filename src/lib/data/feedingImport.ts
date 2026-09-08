@@ -1,5 +1,6 @@
 import type { AmountEaten, MealTime } from '$lib/types';
 import { parseFeedingMessage } from '$lib/utils/parseFeedingMessage';
+import { parseBathMessage } from '$lib/utils/parseBathMessage';
 
 /** The shelter feeds again at 3pm; before that a report is about the morning feed. */
 const PM_FEED_HOUR = 15;
@@ -463,6 +464,64 @@ export function planSurgery(text: string, postedAt: Date, index: DogIndex): Plan
 	}
 
 	return out;
+}
+
+export interface PlannedBath {
+	dogId: string;
+	dogName: string;
+	/** When the bath happened, which is not always when it was reported. */
+	at: Date;
+}
+
+/**
+ * Reads a bath report. Baths are written far more plainly than feedings — "Roe got a
+ * bath", "Hattie and dot got baths" — so most of the care is in the parser, which skips
+ * the many messages naming a bath that has not happened.
+ *
+ * Group names are expanded the same way the surgery list expands them: "all the transfer
+ * dogs got baths" names no dog the roster knows.
+ */
+export function planBaths(text: string, postedAt: Date, index: DogIndex): PlannedBath[] {
+	const parsed = parseBathMessage(text, rosterOn(index, postedAt));
+
+	// Reported late — "we gave whoogie a bath yesterday" — so the bath is dated when it
+	// happened rather than when someone got round to saying so.
+	const at = new Date(postedAt.getTime() - parsed.daysAgo * DAY_MS);
+
+	const out: PlannedBath[] = [];
+	const seen = new Set<string>();
+	const add = (dogId: string, dogName: string) => {
+		if (seen.has(dogId)) return;
+		seen.add(dogId);
+		out.push({ dogId, dogName, at });
+	};
+
+	for (const name of parsed.dogNames) {
+		const dogId = resolveDogId(index, name, at);
+		if (dogId) add(dogId, index.namesById.get(dogId) ?? name);
+	}
+
+	// Only when the message actually reported a bath: a group name in a message about
+	// something else is not a bath for the whole litter.
+	if (parsed.dogNames.length > 0 || /\bbath/i.test(text)) {
+		if (!parsed.notYet) {
+			const haystack = normalizeName(text);
+			for (const [groupKey, dogIds] of index.groups) {
+				if (!groupKey || !haystack.includes(groupKey)) continue;
+				for (const dogId of dogIds) {
+					const name = index.namesById.get(dogId);
+					if (name) add(dogId, name);
+				}
+			}
+		}
+	}
+
+	return out;
+}
+
+/** One bath per dog per day, so a re-poll of the same report does not add a second. */
+export function bathLogId(at: Date, dogId: string): string {
+	return `slack-${shelterDay(at)}-${dogId}`;
 }
 
 /**
