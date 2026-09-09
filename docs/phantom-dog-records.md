@@ -26,10 +26,23 @@ roster and anything else reading "who is here today" keeps counting it:
 
 The second record has been fed daily since the real dog left.
 
+## This is not about archiving
+
+Departed dogs are already handled properly: `markStaleAsmDogsArchived` marks them
+adopted, transferred or euthanized when they stop appearing in ASM, and 245 of the
+267 ASM-keyed records are archived that way. Those stay — they are the shelter's
+history.
+
+The duplicates are a different thing. Archiving one would leave two records for
+the same dog, one archived and one live. They need merging into the ASM-keyed
+record so its logs move across, and then removing, so a dog has one record and
+one history.
+
 ## Scale as of 2026-09-01
 
-- 337 dog records: 263 ASM-keyed, 74 app-created
-- 49 of the 74 show as still at the shelter
+- 341 dog records: 267 ASM-keyed, 74 app-created
+- of the ASM-keyed, 22 active and 245 correctly archived
+- 49 of the 74 app-created have no departure date, so they read as present
 - 43 have a matching ASM record; 31 do not, though some of those are renames
   (ASM holds "Nova (Newsie)" where the app record says "Nova")
 - ~8,900 of the 16,519 imported feeding logs sit on app-created records
@@ -40,7 +53,7 @@ The second record has been fed daily since the real dog left.
    app-created record with that name and no `asmId`, and adopt it — write the
    ASM fields onto it, or merge it into the numbered record. This closes the
    hole; everything else is cleanup.
-2. **Cleanup**: `mergeDogs(keepId, deleteId)` already moves every subcollection
+2. **Merge and remove**: `mergeDogs(keepId, deleteId)` already moves every subcollection
    and fills profile gaps, and the Admin page has a UI for it. Merge the 43
    matched pairs. Review the 31 unmatched by hand — some are renames, some may
    be dogs genuinely never in ASM.

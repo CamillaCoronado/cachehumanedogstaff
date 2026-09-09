@@ -82,6 +82,8 @@ cannot see them, so it creates a second record and never touches the first again
 first therefore never gets a departure date and looks present forever — it keeps
 collecting daily meals for a dog that left months ago.
 
-74 of 337 dog records are app-created, 49 of them showing as still at the shelter. Full
+Not an archiving problem — departed dogs are archived correctly, and 245 of the 267
+ASM-keyed records are. These are second copies that need merging into the real record
+and removing. 74 of 341 records are app-created, 49 showing as still at the shelter. Full
 write-up, scale and fix order in [phantom-dog-records.md](phantom-dog-records.md). Fix
 the sync before merging anything, or the backlog just refills.
