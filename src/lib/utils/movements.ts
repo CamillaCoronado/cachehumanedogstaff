@@ -28,8 +28,21 @@ export function getDailyMovements(dogs: Dog[], day: Date): DailyMovements {
 		const intakeToday = isSameCalendarDay(dog.intakeDate, day);
 		const reentryToday = (dog.reentryDates ?? []).some((d) => isSameCalendarDay(d, day));
 
-		if (intakeToday && !reentryToday) arrived.push(dog);
-		if (reentryToday || (!intakeToday && isSameCalendarDay(dog.shelterSince ?? null, day))) {
+		// ASM keeps two dates: the first arrival and the most recent entry. The sync stores
+		// them as originalIntakeDate and intakeDate, so an intake date later than the
+		// original *is* the record of a return — reentryDates is never populated, and
+		// relying on it filed every returning dog as a brand-new arrival.
+		const backAgain =
+			intakeToday &&
+			dog.originalIntakeDate != null &&
+			!isSameCalendarDay(dog.originalIntakeDate, dog.intakeDate);
+
+		if (intakeToday && !reentryToday && !backAgain) arrived.push(dog);
+		if (
+			reentryToday ||
+			backAgain ||
+			(!intakeToday && isSameCalendarDay(dog.shelterSince ?? null, day))
+		) {
 			returned.push(dog);
 		}
 		if (dog.inFoster && isSameCalendarDay(dog.inFosterSince ?? null, day)) toFoster.push(dog);

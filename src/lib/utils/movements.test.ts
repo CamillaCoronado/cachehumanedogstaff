@@ -28,6 +28,21 @@ describe('getDailyMovements', () => {
 		expect(m.returned).toEqual([]);
 	});
 
+	it('counts a dog whose intake date moved past its original as returned', () => {
+		// Sheba: first here in January, adopted, back on 8 September. ASM moves the intake
+		// date to the latest entry and keeps the original, so the pair records the return —
+		// reentryDates is never populated, and reading only that filed her as a new arrival.
+		const sheba = makeDog({
+			name: 'Sheba',
+			intakeDate: todayMorning,
+			originalIntakeDate: lastWeek,
+			reentryDates: []
+		});
+		const m = getDailyMovements([sheba], today);
+		expect(m.returned.map((d) => d.name)).toEqual(['Sheba']);
+		expect(m.arrived).toEqual([]);
+	});
+
 	it('counts an adoption return (reentry today) as returned, not arrived', () => {
 		const dog = makeDog({ name: 'Boomerang', intakeDate: todayMorning, reentryDates: [todayMorning] });
 		const m = getDailyMovements([dog], today);

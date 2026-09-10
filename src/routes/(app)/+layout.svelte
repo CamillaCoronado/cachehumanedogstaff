@@ -105,9 +105,16 @@
 		}
 	}
 
-	/** Back after leaving — a re-entry dated later than the original intake. */
+	/**
+	 * Back after leaving. ASM keeps the first arrival and the most recent entry, which the
+	 * sync stores as originalIntakeDate and intakeDate — a later intake date is itself the
+	 * record of a return. reentryDates is never populated, so reading it announced every
+	 * returning dog as a brand-new arrival.
+	 */
 	function isReturning(dog: Dog): boolean {
 		const intake = toDate(dog.intakeDate ?? null)?.getTime() ?? 0;
+		const original = toDate(dog.originalIntakeDate ?? null)?.getTime() ?? 0;
+		if (original > 0 && intake > original) return true;
 		return (dog.reentryDates ?? []).some((d) => (toDate(d)?.getTime() ?? 0) > intake);
 	}
 
