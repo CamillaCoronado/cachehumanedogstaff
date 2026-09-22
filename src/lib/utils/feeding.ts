@@ -191,7 +191,22 @@ export function feedingFlags(dog: Dog) {
 	return flags;
 }
 
-export function specialFeedingReasons(dog: Dog, meal?: MealTime) {
+/**
+ * FortiFlora runs from its start date for fortifloraDays days; no day count means
+ * it runs until someone clears it on the Medical page.
+ */
+export function isFortifloraActive(dog: Dog, day: Date = new Date()): boolean {
+	const start = toDate(dog.fortifloraDate ?? null);
+	if (!start) return false;
+	const dayKey = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+	const startKey = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+	const daysIn = Math.round((dayKey - startKey) / 86_400_000);
+	if (daysIn < 0) return false;
+	const total = dog.fortifloraDays;
+	return !total || total <= 0 || daysIn < total;
+}
+
+export function specialFeedingReasons(dog: Dog, meal?: MealTime, day: Date = new Date()) {
 	const reasons: string[] = [];
 	const allergies = dog.allergyTypes ?? [];
 	if (allergies.length > 0) reasons.push(`Allergy: ${allergies.join(', ')}`);
@@ -202,7 +217,7 @@ export function specialFeedingReasons(dog: Dog, meal?: MealTime) {
 	if (dog.foodType === 'No Chicken') reasons.push('No Chicken');
 	if (dog.satinBalls) reasons.push('Satin Balls');
 	if (dog.hasSupplements) reasons.push('Supplements');
-	if (dog.fortifloraDate && meal !== 'second') {
+	if (meal !== 'second' && isFortifloraActive(dog, day)) {
 		const ft = dog.fortifloraTime ?? 'both';
 		const forThisMeal = !meal || ft === 'both' || ft === meal;
 		if (forThisMeal) reasons.push(ft === 'both' ? 'FortiFlora' : `FortiFlora (${ft.toUpperCase()})`);
@@ -210,8 +225,8 @@ export function specialFeedingReasons(dog: Dog, meal?: MealTime) {
 	return reasons;
 }
 
-export function isSpecialFeeding(dog: Dog) {
-	return specialFeedingReasons(dog).length > 0;
+export function isSpecialFeeding(dog: Dog, meal?: MealTime, day?: Date) {
+	return specialFeedingReasons(dog, meal, day).length > 0;
 }
 
 const MEAL_ORDER: Record<MealTime, number> = { am: 0, pm: 1, second: 2 };

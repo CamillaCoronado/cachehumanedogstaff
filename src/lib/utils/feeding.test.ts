@@ -98,6 +98,22 @@ describe('specialFeedingReasons / feedingFlags', () => {
 		expect(specialFeedingReasons(dog, 'pm')).toHaveLength(0);
 		expect(specialFeedingReasons(dog, 'second')).toHaveLength(0);
 	});
+
+	it('leaves an AM-only FortiFlora dog off the PM special list', () => {
+		const dog = makeDog({ fortifloraDate: new Date(), fortifloraTime: 'am' });
+		expect(isSpecialFeeding(dog, 'am')).toBe(true);
+		expect(isSpecialFeeding(dog, 'pm')).toBe(false);
+	});
+
+	it('shows FortiFlora only while the course runs', () => {
+		const dog = makeDog({ fortifloraDate: new Date(2026, 5, 10, 12), fortifloraDays: 3, fortifloraTime: 'both' });
+		expect(specialFeedingReasons(dog, 'am', new Date(2026, 5, 9, 9))).not.toContain('FortiFlora');
+		expect(specialFeedingReasons(dog, 'am', new Date(2026, 5, 10, 9))).toContain('FortiFlora');
+		expect(specialFeedingReasons(dog, 'pm', new Date(2026, 5, 12, 17))).toContain('FortiFlora');
+		expect(specialFeedingReasons(dog, 'am', new Date(2026, 5, 13, 9))).not.toContain('FortiFlora');
+		const open = makeDog({ fortifloraDate: new Date(2026, 0, 1, 12), fortifloraDays: null });
+		expect(specialFeedingReasons(open, 'pm', new Date(2026, 5, 13, 17))).toContain('FortiFlora');
+	});
 });
 
 describe('log aggregation', () => {
