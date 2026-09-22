@@ -268,7 +268,7 @@ async function main() {
 		process.exit(1);
 	}
 
-	const { buildDogIndex, planFeedings, feedingLogId } = await loadImport();
+	const { buildDogIndex, planFeedings, feedingLogId, feedingDate } = await loadImport();
 	const users = JSON.parse(readFileSync(join('slack-export', 'users.json'), 'utf8'));
 
 	// Roster from Firestore, not ASM: the doc id is what the log has to be filed under,
@@ -313,10 +313,11 @@ async function main() {
 		reports++;
 
 		for (const entry of entries) {
+			const fedAt = feedingDate(postedAt, entry.mealTime);
 			planned.push({
 				...entry,
-				id: feedingLogId(postedAt, entry.dogId, entry.mealTime),
-				date: dayKey(postedAt),
+				id: feedingLogId(fedAt, entry.dogId, entry.mealTime),
+				date: dayKey(fedAt),
 				postedAt,
 				author: users[m.user] ?? 'Unknown',
 				slackTs: String(m.ts),

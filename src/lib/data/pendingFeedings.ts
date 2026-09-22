@@ -1,7 +1,7 @@
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import type { PendingFeeding, UserProfile } from '$lib/types';
 import { db } from '$lib/firebase/config';
-import { buildDogIndex, feedingLogId, planFeedings } from '$lib/data/feedingImport';
+import { buildDogIndex, feedingDate, feedingLogId, planFeedings } from '$lib/data/feedingImport';
 import { addFeedingLog, listDogs } from '$lib/data/dogs';
 import { listDogGroups } from '$lib/data/dogGroups';
 import { db as firestore } from '$lib/firebase/config';
@@ -60,7 +60,7 @@ export async function acceptPendingFeeding(
 	profile?: UserProfile | null
 ): Promise<number> {
 	if (!db) return 0;
-	const date = new Date(pending.postedAt);
+	const postedAt = new Date(pending.postedAt);
 	const notes = `via Slack — ${pending.author}: "${pending.rawText.slice(0, 180)}"`;
 
 	const [dogs, groups] = await Promise.all([listDogs(), listDogGroups()]);
@@ -83,10 +83,11 @@ export async function acceptPendingFeeding(
 		})),
 		groups.map((g) => ({ name: g.name, dogIds: g.dogIds }))
 	);
-	const entries = planFeedings(pending.rawText, date, index);
+	const entries = planFeedings(pending.rawText, postedAt, index);
 
 	let written = 0;
 	for (const entry of entries) {
+		const date = feedingDate(postedAt, entry.mealTime);
 		// An implied dog is one the message did not mention. If anything already stands
 		// for that meal — a staff entry, or an earlier report of the same feed — it knows
 		// more than an inference does, so leave it alone.
