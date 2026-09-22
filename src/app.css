@@ -316,6 +316,36 @@ input[type='checkbox'] {
 	accent-color: var(--marker-blue);
 }
 
+/* iOS Safari zooms the page when a field under 16px gets focus, and leaves it zoomed,
+ * so the right edge of the page ends up off screen. Component styles size inputs
+ * smaller, hence !important. */
+@media (max-width: 767px) {
+	input:not([type='checkbox']):not([type='radio']):not([type='range']),
+	select,
+	textarea {
+		font-size: 16px !important;
+	}
+}
+
+/* iOS Safari gives date/time inputs a native width that ignores width: 100%, which
+ * pushes forms past the edge of a phone screen. */
+@supports (-webkit-touch-callout: none) {
+	input[type='date'],
+	input[type='datetime-local'],
+	input[type='time'],
+	input[type='month'] {
+		-webkit-appearance: none;
+		appearance: none;
+		min-width: 0;
+		max-width: 100%;
+		min-height: 2.4rem;
+	}
+
+	input::-webkit-date-and-time-value {
+		text-align: left;
+	}
+}
+
 .pill {
 	display: inline-flex;
 	align-items: center;

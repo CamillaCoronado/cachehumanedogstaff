@@ -2284,6 +2284,14 @@
 
 	.kennel-edit-sheet {
 		border-style: dashed;
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	@media (max-width: 640px) {
+		.kennel-edit-sheet {
+			padding: 0.9rem;
+		}
 	}
 
 	.dog-detail-board :global(table) {
