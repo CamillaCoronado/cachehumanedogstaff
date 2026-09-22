@@ -371,6 +371,8 @@ export function planFeedingsDetailed(
 	const mealTime: MealTime =
 		parsed.mealTime ?? slotOverride ?? (shelterHour(postedAt) < PM_FEED_HOUR ? 'am' : 'pm');
 	const mealTimeInferred = !parsed.mealTime;
+	// Who was here to be fed is a question about when the meal happened, not the report.
+	const fedAt = feedingDate(postedAt, mealTime);
 
 	const planned: PlannedFeeding[] = [];
 	const named = new Set<string>();
@@ -399,7 +401,7 @@ export function planFeedingsDetailed(
 		parsed.doNotFeed.map((name) => resolveDogId(index, name, postedAt)).filter(Boolean) as string[]
 	);
 
-	for (const dog of feedableOn(index, postedAt, mealTime)) {
+	for (const dog of feedableOn(index, fedAt, mealTime)) {
 		if (named.has(dog.id) || excluded.has(dog.id)) continue;
 		planned.push({
 			dogId: dog.id,
@@ -591,6 +593,18 @@ export function bathLogId(at: Date, dogId: string): string {
  * One id per dog per meal per day, deliberately not per message: two people often report
  * the same meal, and keying by message would give a dog two logs for one feed.
  */
+/**
+ * When the meal a report describes was fed. The second meal is the closing feed, so a
+ * second-meal report posted before the afternoon feed is the morning write-up of last
+ * night's, and belongs to the day before.
+ */
+export function feedingDate(postedAt: Date, mealTime: MealTime): Date {
+	if (mealTime === 'second' && shelterHour(postedAt) < PM_FEED_HOUR) {
+		return new Date(postedAt.getTime() - DAY_MS);
+	}
+	return postedAt;
+}
+
 export function feedingLogId(postedAt: Date, dogId: string, mealTime: MealTime): string {
 	return `slack-${shelterDay(postedAt)}-${mealTime}-${dogId}`;
 }
