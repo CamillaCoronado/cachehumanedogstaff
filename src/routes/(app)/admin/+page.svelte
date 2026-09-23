@@ -171,7 +171,7 @@
 	let bathSince = '2026-03-01';
 	let bathBusy = false;
 	let bathWasDryRun = true;
-	let bathResult: { scanned: number; rows: BathRow[]; alreadyLogged: number; written: number; truncated: boolean; skipped?: string } | null = null;
+	let bathResult: { scanned: number; rows: BathRow[]; alreadyLogged: number; written: number; truncated: boolean; threadsSkipped: number; skipped?: string } | null = null;
 	let bathKeep: string[] = [];
 
 	async function runBathBackfill(dryRun: boolean) {
@@ -956,7 +956,7 @@
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Backfill baths from Slack</h3>
 						<p class="section-copy">
-							Reads bath reports in #dog-staff ("gave Roe a bath", "the hat puppies got baths") from the
+							Reads bath reports in #dog-staff, thread replies included ("gave Roe a bath", "the hat puppies got baths"), from the
 							date below and logs them the way the live Slack poll does. Baths already logged are left
 							alone, and a dog's last bath only ever moves forward. <strong>Dry run first — nothing is
 							logged until you apply, and only ticked rows.</strong>
@@ -973,7 +973,7 @@
 					<div class="status-row-plain">
 						<span class="status-meta">
 							{#if bathWasDryRun}
-								{bathResult.scanned} messages since {formatDate(bathSince)}: <strong>{bathResult.rows.length}</strong>
+								{bathResult.scanned} messages and thread replies since {formatDate(bathSince)}: <strong>{bathResult.rows.length}</strong>
 								bath{bathResult.rows.length === 1 ? '' : 's'} to log, {bathResult.alreadyLogged} already logged.
 							{:else}
 								Logged {bathResult.written} bath{bathResult.written === 1 ? '' : 's'}.
@@ -981,6 +981,10 @@
 							{#if bathResult.truncated}
 								Over 3,000 messages in that range: only the newest were read, so the earliest baths
 								were missed. Pick a later start date.
+							{/if}
+							{#if bathResult.threadsSkipped > 0}
+								{bathResult.threadsSkipped} older thread{bathResult.threadsSkipped === 1 ? '' : 's'} not read
+								(too many for one run) — pick a later start date to include them.
 							{/if}
 						</span>
 					</div>

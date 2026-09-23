@@ -27,6 +27,8 @@ export interface BathBackfillResult {
 	written: number;
 	/** The range held more than MAX_PAGES of history; its oldest messages went unread. */
 	truncated: boolean;
+	/** Threads not read because the run hit its cap — the oldest ones. */
+	threadsSkipped: number;
 	skipped?: string;
 }
 
@@ -37,13 +39,14 @@ export interface BathBackfillResult {
  * admin left ticked.
  */
 export async function backfillSlackBaths(since: Date, dryRun: boolean, keep?: string[]): Promise<BathBackfillResult> {
-	const empty = { scanned: 0, rows: [], alreadyLogged: 0, written: 0, truncated: false };
+	const empty = { scanned: 0, rows: [], alreadyLogged: 0, written: 0, truncated: false, threadsSkipped: 0 };
 	const { SLACK_BOT_TOKEN, SLACK_FEEDING_CHANNEL_ID } = env;
 	if (!SLACK_BOT_TOKEN || !SLACK_FEEDING_CHANNEL_ID) return { ...empty, skipped: 'not configured' };
 
 	const db = getAdminDb();
-	const { messages, truncated } = await channelHistory(SLACK_BOT_TOKEN, SLACK_FEEDING_CHANNEL_ID, since, MAX_PAGES);
-	if (messages.length === 0) return { ...empty, truncated };
+	// Replies too: baths are often reported inside a thread, which history alone skips.
+	const { messages, truncated, threadsSkipped } = await channelHistory(SLACK_BOT_TOKEN, SLACK_FEEDING_CHANNEL_ID, since, MAX_PAGES, true);
+	if (messages.length === 0) return { ...empty, truncated, threadsSkipped };
 
 	const [dogsSnap, groupsSnap] = await Promise.all([db.collection('dogs').get(), db.collection('dogGroups').get()]);
 	const index = buildDogIndex(
@@ -83,7 +86,7 @@ export async function backfillSlackBaths(since: Date, dryRun: boolean, keep?: st
 	}
 	const fresh = found.filter((f) => !existing.has(`${f.dogId}/${f.logId}`));
 	const rows = fresh.map(({ logId: _l, ts: _t, ...row }) => row);
-	const result = { scanned: messages.length, rows, alreadyLogged: found.length - fresh.length, written: 0, truncated };
+	const result = { scanned: messages.length, rows, alreadyLogged: found.length - fresh.length, written: 0, truncated, threadsSkipped };
 	if (dryRun) return result;
 
 	const kept = keep ? new Set(keep) : null;

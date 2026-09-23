@@ -44,6 +44,33 @@ export interface HistoryMessage {
 	user?: string;
 	subtype?: string;
 	bot_id?: string;
+	/** Set on a thread's parent message: how many replies it has. */
+	reply_count?: number;
+	thread_ts?: string;
+}
+
+/** Most threads read in one run, so a long range stays inside the time limit. */
+const MAX_THREADS = 150;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** One thread's replies (not its parent), retrying once if Slack asks us to slow down. */
+async function threadReplies(token: string, channel: string, ts: string): Promise<HistoryMessage[]> {
+	const out: HistoryMessage[] = [];
+	let cursor: string | undefined;
+	do {
+		let body;
+		try {
+			body = await slack(token, 'conversations.replies', { channel, ts, limit: '200', ...(cursor ? { cursor } : {}) });
+		} catch (e) {
+			if (!String(e).includes('ratelimited')) throw e;
+			await sleep(3000);
+			body = await slack(token, 'conversations.replies', { channel, ts, limit: '200', ...(cursor ? { cursor } : {}) });
+		}
+		out.push(...((body.messages ?? []) as HistoryMessage[]).filter((m) => m.ts !== ts));
+		cursor = body.response_metadata?.next_cursor || undefined;
+	} while (cursor);
+	return out;
 }
 
 /**
@@ -56,8 +83,10 @@ export async function channelHistory(
 	token: string,
 	channel: string,
 	since: Date,
-	maxPages = 15
-): Promise<{ messages: HistoryMessage[]; truncated: boolean }> {
+	maxPages = 15,
+	/** Also read replies inside threads — history only returns top-level messages. */
+	includeReplies = false
+): Promise<{ messages: HistoryMessage[]; truncated: boolean; threadsSkipped: number }> {
 	const all: HistoryMessage[] = [];
 	let cursor: string | undefined;
 	let pages = 0;
@@ -72,8 +101,21 @@ export async function channelHistory(
 		cursor = body.response_metadata?.next_cursor || undefined;
 		pages++;
 	} while (cursor && pages < maxPages);
-	const messages = all.filter(
-		(m) => m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim()
-	);
-	return { messages, truncated: Boolean(cursor) };
+	let threadsSkipped = 0;
+	if (includeReplies) {
+		// Newest threads first, so a cap drops the oldest ones.
+		const threads = all.filter((m) => (m.reply_count ?? 0) > 0);
+		threadsSkipped = Math.max(0, threads.length - MAX_THREADS);
+		for (const parent of threads.slice(0, MAX_THREADS)) {
+			all.push(...(await threadReplies(token, channel, parent.ts)));
+		}
+	}
+	const seen = new Set<string>();
+	const messages = all.filter((m) => {
+		// A reply also sent to the channel shows up in both places; keep it once.
+		if (seen.has(m.ts)) return false;
+		seen.add(m.ts);
+		return m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim();
+	});
+	return { messages, truncated: Boolean(cursor), threadsSkipped };
 }
