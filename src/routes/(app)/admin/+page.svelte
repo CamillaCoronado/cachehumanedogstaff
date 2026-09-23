@@ -224,6 +224,48 @@
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
 
+	// Slack playgroup backfill: the live poll only reaches two days back, so older
+	// playgroups are pulled in from here. Dry run first; queueing needs a second click.
+	type PlaygroupBackfill = {
+		scanned: number;
+		toQueue: number;
+		alreadyQueued: number;
+		queued: number;
+		truncated: boolean;
+		samples: { slackTs: string; dogNames: string[]; outcome: string; text: string }[];
+		skipped?: string;
+	};
+	let pgSince = '2026-03-01';
+	let pgBusy = false;
+	let pgResult: PlaygroupBackfill | null = null;
+	let pgWasDryRun = true;
+
+	async function runPlaygroupBackfill(dryRun: boolean) {
+		if (pgBusy) return;
+		pgBusy = true;
+		try {
+			const token = await $authUser?.getIdToken();
+			const res = await fetch('/api/slack/playgroup-backfill', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+				body: JSON.stringify({ since: pgSince, dryRun })
+			});
+			if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+			pgResult = await res.json();
+			pgWasDryRun = dryRun;
+			if (pgResult?.skipped) toast.error('Slack is not configured for playgroups.');
+			else if (!dryRun) toast.success(`Queued ${pgResult?.queued ?? 0} for review on the Playgroups page.`);
+		} catch (e) {
+			toast.error('Playgroup backfill failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			pgBusy = false;
+		}
+	}
+
+	function slackDay(ts: string) {
+		return formatDate(new Date(Number(ts) * 1000));
+	}
+
 	// Dry run: find archived dogs with no leftShelterDate and propose real dates
 	// from ASM (adoption movement dates + deceased dates). Reads only.
 	async function runBackfillDryRun() {
@@ -769,6 +811,60 @@
 						<button class="action-btn backfill-apply" type="button" on:click={applyAllFilledDates} disabled={backfillApplying}>
 							{backfillApplying ? 'Applying…' : `Apply all ${backfillUnknown.filter((u) => u.manualDate).length} filled date${backfillUnknown.filter((u) => u.manualDate).length === 1 ? '' : 's'}`}
 						</button>
+					{/if}
+				{/if}
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Backfill playgroups from Slack</h3>
+						<p class="section-copy">
+							The Slack poll only reaches two days back. This reads the playgroups channel from the date
+							below and adds reports naming dogs to the review list on the Playgroups page. Anything
+							already in that list, reviewed or not, is left alone. <strong>Dry run first — nothing is
+							added until you queue them.</strong>
+						</p>
+					</div>
+				</div>
+				<div class="repair-actions">
+					<input type="date" class="field-input backfill-date-input" bind:value={pgSince} max={new Date().toISOString().slice(0, 10)} />
+					<button class="action-btn" type="button" on:click={() => runPlaygroupBackfill(true)} disabled={pgBusy || !pgSince}>
+						{pgBusy && pgWasDryRun ? 'Checking…' : 'Dry run'}
+					</button>
+				</div>
+				{#if pgResult && !pgResult.skipped}
+					<div class="status-row-plain">
+						<span class="status-meta">
+							{#if pgWasDryRun}
+								{pgResult.scanned} messages since {formatDate(pgSince)}: <strong>{pgResult.toQueue}</strong> to add,
+								{pgResult.alreadyQueued} already in the review list.
+							{:else}
+								Added {pgResult.queued} to the review list on the Playgroups page.
+							{/if}
+							{#if pgResult.truncated}
+								Over 3,000 messages in that range: only the newest were read, so the earliest
+								playgroups were missed. Pick a later start date.
+							{/if}
+						</span>
+					</div>
+					{#if pgWasDryRun && pgResult.toQueue > 0}
+						<ul class="user-list">
+							{#each pgResult.samples as s (s.slackTs)}
+								<li class="user-row">
+									<div class="user-main">
+										<p class="suspect-name">{slackDay(s.slackTs)} · {s.dogNames.join(', ')}</p>
+										<p class="suspect-detail">{s.outcome} · “{s.text}”</p>
+									</div>
+								</li>
+							{/each}
+						</ul>
+						<button class="action-btn backfill-apply" type="button" on:click={() => runPlaygroupBackfill(false)} disabled={pgBusy}>
+							{pgBusy ? 'Adding…' : `Add ${pgResult.toQueue} to the review list`}
+						</button>
+					{:else if pgWasDryRun}
+						<p class="empty-note">Nothing to add — every playgroup report in that range is already in the review list.</p>
 					{/if}
 				{/if}
 			</section>
