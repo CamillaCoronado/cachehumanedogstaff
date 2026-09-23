@@ -49,7 +49,13 @@ export interface PlaygroupBackfillResult {
  */
 export async function backfillSlackPlaygroups(
 	since: Date,
-	dryRun: boolean
+	dryRun: boolean,
+	/**
+	 * What the admin kept after the dry run: which messages to add, and the dog names to
+	 * keep on each. Messages left out are skipped. Names can only be removed here, never
+	 * added — anything not in the parser's own reading is ignored.
+	 */
+	picks?: { slackTs: string; dogNames: string[] }[]
 ): Promise<PlaygroupBackfillResult> {
 	const empty = { scanned: 0, toQueue: 0, alreadyQueued: 0, queued: 0, truncated: false, samples: [] };
 	const { SLACK_BOT_TOKEN, SLACK_PLAYGROUPS_CHANNEL_ID } = env;
@@ -109,11 +115,25 @@ export async function backfillSlackPlaygroups(
 	const result = { scanned: reports.length, toQueue: planned.length, alreadyQueued, queued: 0, truncated, samples };
 	if (dryRun || planned.length === 0) return result;
 
-	const authors = await resolveAuthors(SLACK_BOT_TOKEN, db, [...new Set(planned.map((p) => p.user))]);
+	let toWrite = planned;
+	if (picks) {
+		const kept = new Map(picks.map((p) => [p.slackTs, new Set(p.dogNames.map((n) => n.toLowerCase()))]));
+		toWrite = planned
+			.filter((p) => kept.has(p.slackTs))
+			.map((p) => {
+				const keep = kept.get(p.slackTs)!;
+				const dogNames = p.parsed.dogNames.filter((n: string) => keep.has(n.toLowerCase()));
+				return { ...p, parsed: { ...p.parsed, dogNames } };
+			})
+			.filter((p) => p.parsed.dogNames.length > 0);
+	}
+	if (toWrite.length === 0) return result;
+
+	const authors = await resolveAuthors(SLACK_BOT_TOKEN, db, [...new Set(toWrite.map((p) => p.user))]);
 	const now = new Date().toISOString();
-	for (let i = 0; i < planned.length; i += 400) {
+	for (let i = 0; i < toWrite.length; i += 400) {
 		const batch = db.batch();
-		for (const p of planned.slice(i, i + 400)) {
+		for (const p of toWrite.slice(i, i + 400)) {
 			// create, not set: never overwrite an entry that appeared since the check above.
 			batch.create(db.collection('pendingPlaygroups').doc(p.id), {
 				rawText: p.rawText,
@@ -129,5 +149,5 @@ export async function backfillSlackPlaygroups(
 		}
 		await batch.commit();
 	}
-	return { ...result, queued: planned.length };
+	return { ...result, queued: toWrite.length };
 }

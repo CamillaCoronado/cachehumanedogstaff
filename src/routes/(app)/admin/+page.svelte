@@ -6,6 +6,7 @@
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
+	import { matchDogByName } from '$lib/utils/dogs';
 	import { listPendingFeedings, acceptPendingFeeding, dismissPendingFeeding } from '$lib/data/pendingFeedings';
 	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
@@ -239,6 +240,80 @@
 	let pgBusy = false;
 	let pgResult: PlaygroupBackfill | null = null;
 	let pgWasDryRun = true;
+	// Review edits on the dry run, like the Playgroups page's own review: names removed
+	// from one message, names removed from every message, and messages skipped outright.
+	let pgRemoved: Record<string, string[]> = {};
+	let pgRemovedEverywhere: string[] = [];
+	let pgSkipped: string[] = [];
+
+	const nameKey = (name: string) => name.toLowerCase();
+
+	function pgNameState(name: string): 'matched' | 'archived' | 'unmatched' {
+		const active = allDogs.filter((d) => d.status === 'active');
+		const dog = matchDogByName(name, active) ?? matchDogByName(name, allDogs);
+		return dog ? (dog.status === 'active' ? 'matched' : 'archived') : 'unmatched';
+	}
+
+	// Read by the template, so it has to be reactive state rather than a function call:
+	// Svelte would not re-render a call whose arguments did not change.
+	$: pgRemovedSet = new Set([
+		...pgRemovedEverywhere.map((n) => `*|${n}`),
+		...Object.entries(pgRemoved).flatMap(([ts, names]) => names.map((n) => `${ts}|${n}`))
+	]);
+	const pgIsRemoved = (removed: Set<string>, ts: string, name: string) =>
+		removed.has(`*|${nameKey(name)}`) || removed.has(`${ts}|${nameKey(name)}`);
+
+	// Same for the colour of each name, which depends on the dog list.
+	$: pgStates = new Map(
+		(pgResult?.samples ?? []).flatMap((s) => s.dogNames).map((n) => [nameKey(n), allDogs.length ? pgNameState(n) : 'unmatched'])
+	);
+
+	function pgToggleName(ts: string, name: string) {
+		const key = nameKey(name);
+		if (pgRemovedEverywhere.includes(key)) {
+			pgRemovedEverywhere = pgRemovedEverywhere.filter((n) => n !== key);
+			return;
+		}
+		const list = pgRemoved[ts] ?? [];
+		pgRemoved = { ...pgRemoved, [ts]: list.includes(key) ? list.filter((n) => n !== key) : [...list, key] };
+	}
+
+	function pgToggleEverywhere(name: string) {
+		const key = nameKey(name);
+		pgRemovedEverywhere = pgRemovedEverywhere.includes(key)
+			? pgRemovedEverywhere.filter((n) => n !== key)
+			: [...pgRemovedEverywhere, key];
+	}
+
+	function pgToggleSkip(ts: string) {
+		pgSkipped = pgSkipped.includes(ts) ? pgSkipped.filter((t) => t !== ts) : [...pgSkipped, ts];
+	}
+
+	// Recomputed whenever an edit changes, so the counts and the button stay honest.
+	$: pgKept = (pgResult?.samples ?? [])
+		.filter((s) => !pgSkipped.includes(s.slackTs))
+		.map((s) => ({
+			slackTs: s.slackTs,
+			dogNames: s.dogNames.filter(
+				(n) => !pgRemovedEverywhere.includes(nameKey(n)) && !(pgRemoved[s.slackTs] ?? []).includes(nameKey(n))
+			)
+		}))
+		.filter((s) => s.dogNames.length > 0);
+
+	// Names that are not a dog in the app, with how often each appears: usually staff
+	// names or ordinary words the parser took for a name. One click removes one everywhere.
+	$: pgUnmatched = (() => {
+		const counts = new Map<string, { name: string; count: number }>();
+		for (const s of pgResult?.samples ?? []) {
+			for (const n of s.dogNames) {
+				if (allDogs.length === 0 || pgNameState(n) !== 'unmatched') continue;
+				const entry = counts.get(nameKey(n)) ?? { name: n, count: 0 };
+				entry.count++;
+				counts.set(nameKey(n), entry);
+			}
+		}
+		return [...counts.values()].sort((a, b) => b.count - a.count);
+	})();
 
 	async function runPlaygroupBackfill(dryRun: boolean) {
 		if (pgBusy) return;
@@ -248,11 +323,16 @@
 			const res = await fetch('/api/slack/playgroup-backfill', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-				body: JSON.stringify({ since: pgSince, dryRun })
+				body: JSON.stringify({ since: pgSince, dryRun, ...(dryRun ? {} : { entries: pgKept }) })
 			});
 			if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
 			pgResult = await res.json();
 			pgWasDryRun = dryRun;
+			if (dryRun) {
+				pgRemoved = {};
+				pgRemovedEverywhere = [];
+				pgSkipped = [];
+			}
 			if (pgResult?.skipped) toast.error('Slack is not configured for playgroups.');
 			else if (!dryRun) toast.success(`Queued ${pgResult?.queued ?? 0} for review on the Playgroups page.`);
 		} catch (e) {
@@ -850,18 +930,58 @@
 						</span>
 					</div>
 					{#if pgWasDryRun && pgResult.toQueue > 0}
+						<p class="pg-legend">
+							Click a name to remove it. <span class="pg-pill pill-matched">Green</span> at the shelter ·
+							<span class="pg-pill pill-archived">Amber</span> no longer at the shelter ·
+							<span class="pg-pill pill-unmatched">Gray</span> not a dog in the app.
+						</p>
+						{#if pgUnmatched.length > 0}
+							<div class="pg-everywhere">
+								<span class="status-meta">Not dogs in the app — remove from every message:</span>
+								<div class="pg-pills">
+									{#each pgUnmatched as u (u.name)}
+										<button
+											type="button"
+											class={`pg-pill ${pgRemovedEverywhere.includes(nameKey(u.name)) ? 'pill-excluded' : 'pill-unmatched'}`}
+											on:click={() => pgToggleEverywhere(u.name)}
+											title={pgRemovedEverywhere.includes(nameKey(u.name)) ? 'Click to put back' : 'Click to remove everywhere'}
+										>{u.name} ×{u.count}</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
 						<ul class="user-list">
 							{#each pgResult.samples as s (s.slackTs)}
-								<li class="user-row">
+								{@const skipped = pgSkipped.includes(s.slackTs)}
+								<li class="user-row" class:pg-skipped={skipped}>
 									<div class="user-main">
-										<p class="suspect-name">{slackDay(s.slackTs)} · {s.dogNames.join(', ')}</p>
-										<p class="suspect-detail">{s.outcome} · “{s.text}”</p>
+										<p class="suspect-name">{slackDay(s.slackTs)} · {s.outcome}</p>
+										<div class="pg-pills">
+											{#each s.dogNames as n (n)}
+												<button
+													type="button"
+													class={`pg-pill ${pgIsRemoved(pgRemovedSet, s.slackTs, n) ? 'pill-excluded' : `pill-${pgStates.get(nameKey(n)) ?? 'unmatched'}`}`}
+													on:click={() => pgToggleName(s.slackTs, n)}
+													disabled={skipped}
+													title={pgIsRemoved(pgRemovedSet, s.slackTs, n) ? 'Click to put back' : 'Click to remove'}
+												>{n}</button>
+											{/each}
+										</div>
+										<p class="suspect-detail">“{s.text}”</p>
 									</div>
+									<button class="action-btn action-btn-small" type="button" on:click={() => pgToggleSkip(s.slackTs)}>
+										{skipped ? 'Include' : 'Skip'}
+									</button>
 								</li>
 							{/each}
 						</ul>
-						<button class="action-btn backfill-apply" type="button" on:click={() => runPlaygroupBackfill(false)} disabled={pgBusy}>
-							{pgBusy ? 'Adding…' : `Add ${pgResult.toQueue} to the review list`}
+						<button
+							class="action-btn backfill-apply"
+							type="button"
+							on:click={() => runPlaygroupBackfill(false)}
+							disabled={pgBusy || pgKept.length === 0}
+						>
+							{pgBusy ? 'Adding…' : `Add ${pgKept.length} to the review list`}
 						</button>
 					{:else if pgWasDryRun}
 						<p class="empty-note">Nothing to add — every playgroup report in that range is already in the review list.</p>
@@ -1180,6 +1300,69 @@
 		padding: 0.3rem 0.6rem;
 		font-size: 0.72rem;
 		border-radius: 0.5rem;
+	}
+
+	.pg-legend {
+		margin: 0.4rem 0;
+		font-size: 0.72rem;
+		color: #526b81;
+	}
+
+	.pg-everywhere {
+		display: grid;
+		gap: 0.3rem;
+		margin: 0.4rem 0 0.6rem;
+	}
+
+	.pg-pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin: 0.25rem 0;
+	}
+
+	.pg-pill {
+		border-radius: 999px;
+		padding: 0.14rem 0.5rem;
+		font-size: 0.66rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		font-family: inherit;
+		cursor: pointer;
+	}
+
+	.pg-pill:disabled {
+		cursor: default;
+	}
+
+	.pill-matched {
+		background: #e9f6ec;
+		color: #256640;
+		border: 1px solid #abd5b4;
+	}
+
+	.pill-archived {
+		background: #fef3e2;
+		color: #7a4f10;
+		border: 1px solid #f0c87a;
+	}
+
+	.pill-unmatched {
+		background: #f0f2f5;
+		color: #7a8fa6;
+		border: 1px solid #c8d3df;
+	}
+
+	.pill-excluded {
+		background: #f5f5f5;
+		color: #b0b0b0;
+		border: 1px solid #d4d4d4;
+		text-decoration: line-through;
+		opacity: 0.6;
+	}
+
+	.pg-skipped {
+		opacity: 0.45;
 	}
 
 	.repair-actions {
