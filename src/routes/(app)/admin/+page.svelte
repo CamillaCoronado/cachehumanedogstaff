@@ -844,7 +844,8 @@
 								Added {pgResult.queued} to the review list on the Playgroups page.
 							{/if}
 							{#if pgResult.truncated}
-								More messages than one run reads — run it again afterwards to continue.
+								Over 3,000 messages in that range: only the newest were read, so the earliest
+								playgroups were missed. Pick a later start date.
 							{/if}
 						</span>
 					</div>

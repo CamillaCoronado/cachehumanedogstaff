@@ -4,7 +4,7 @@ import { slack, resolveAuthors } from '$lib/server/slackClient';
 import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 
 const PAGE_SIZE = 200;
-/** Stops a very long range from running past the function's time limit. */
+/** Stops a very long range from running past the function's time limit (3,000 messages). */
 const MAX_PAGES = 15;
 
 interface SlackMessage {
@@ -30,7 +30,10 @@ export interface PlaygroupBackfillResult {
 	alreadyQueued: number;
 	/** Written this run; always 0 on a dry run. */
 	queued: number;
-	/** True when the range had more messages than one run reads; run it again to continue. */
+	/**
+	 * True when the range held more than MAX_PAGES of history. Slack returns newest first,
+	 * so it is the oldest messages in the range that went unread.
+	 */
 	truncated: boolean;
 	samples: PlaygroupBackfillSample[];
 	skipped?: string;
