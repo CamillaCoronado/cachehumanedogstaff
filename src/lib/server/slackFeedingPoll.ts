@@ -22,7 +22,7 @@ const USERS_DOC = 'syncState/slackUserNames';
 const FIRST_RUN_DAYS = 2;
 const MAX_MESSAGES = 200;
 
-interface SlackMessage {
+export interface SlackMessage {
 	ts: string;
 	text?: string;
 	user?: string;
@@ -30,7 +30,7 @@ interface SlackMessage {
 	bot_id?: string;
 }
 
-async function slack(token: string, method: string, params: Record<string, string>) {
+export async function slack(token: string, method: string, params: Record<string, string>) {
 	const url = new URL(`https://slack.com/api/${method}`);
 	for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
