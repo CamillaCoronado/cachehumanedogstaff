@@ -165,6 +165,42 @@
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
 
+	// Slack bath backfill: past "gave X a bath" reports in #dog-staff, logged the way the
+	// live poll logs them. Dry run first; every row starts ticked and can be unticked.
+	type BathRow = { key: string; dogId: string; dogName: string; at: string; author: string; text: string };
+	let bathSince = '2026-03-01';
+	let bathBusy = false;
+	let bathWasDryRun = true;
+	let bathResult: { scanned: number; rows: BathRow[]; alreadyLogged: number; written: number; truncated: boolean; skipped?: string } | null = null;
+	let bathKeep: string[] = [];
+
+	async function runBathBackfill(dryRun: boolean) {
+		if (bathBusy) return;
+		bathBusy = true;
+		try {
+			const token = await $authUser?.getIdToken();
+			const res = await fetch('/api/slack/bath-backfill', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+				body: JSON.stringify({ since: bathSince, dryRun, ...(dryRun ? {} : { keep: bathKeep }) })
+			});
+			if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+			bathResult = await res.json();
+			bathWasDryRun = dryRun;
+			if (bathResult?.skipped) toast.error('Slack is not configured for #dog-staff.');
+			else if (dryRun) bathKeep = (bathResult?.rows ?? []).map((r) => r.key);
+			else toast.success(`Logged ${bathResult?.written ?? 0} bath${bathResult?.written === 1 ? '' : 's'}.`);
+		} catch (e) {
+			toast.error('Bath backfill failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			bathBusy = false;
+		}
+	}
+
+	function toggleBathRow(key: string) {
+		bathKeep = bathKeep.includes(key) ? bathKeep.filter((k) => k !== key) : [...bathKeep, key];
+	}
+
 	// Foster-return repair: before foster returns had their own stamp, coming back from
 	// foster reset shelterSince (the length of stay). Dry run lists them; nothing is
 	// written until applied, and only the ticked ones.
@@ -910,6 +946,67 @@
 						<button class="action-btn backfill-apply" type="button" on:click={applyAllFilledDates} disabled={backfillApplying}>
 							{backfillApplying ? 'Applying…' : `Apply all ${backfillUnknown.filter((u) => u.manualDate).length} filled date${backfillUnknown.filter((u) => u.manualDate).length === 1 ? '' : 's'}`}
 						</button>
+					{/if}
+				{/if}
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Backfill baths from Slack</h3>
+						<p class="section-copy">
+							Reads bath reports in #dog-staff ("gave Roe a bath", "the hat puppies got baths") from the
+							date below and logs them the way the live Slack poll does. Baths already logged are left
+							alone, and a dog's last bath only ever moves forward. <strong>Dry run first — nothing is
+							logged until you apply, and only ticked rows.</strong>
+						</p>
+					</div>
+				</div>
+				<div class="repair-actions">
+					<input type="date" class="field-input backfill-date-input" bind:value={bathSince} max={new Date().toISOString().slice(0, 10)} />
+					<button class="action-btn" type="button" on:click={() => runBathBackfill(true)} disabled={bathBusy || !bathSince}>
+						{bathBusy && bathWasDryRun ? 'Checking…' : 'Dry run'}
+					</button>
+				</div>
+				{#if bathResult && !bathResult.skipped}
+					<div class="status-row-plain">
+						<span class="status-meta">
+							{#if bathWasDryRun}
+								{bathResult.scanned} messages since {formatDate(bathSince)}: <strong>{bathResult.rows.length}</strong>
+								bath{bathResult.rows.length === 1 ? '' : 's'} to log, {bathResult.alreadyLogged} already logged.
+							{:else}
+								Logged {bathResult.written} bath{bathResult.written === 1 ? '' : 's'}.
+							{/if}
+							{#if bathResult.truncated}
+								Over 3,000 messages in that range: only the newest were read, so the earliest baths
+								were missed. Pick a later start date.
+							{/if}
+						</span>
+					</div>
+					{#if bathWasDryRun && bathResult.rows.length > 0}
+						<div class="repair-actions">
+							<button class="ghost-btn action-btn-small" type="button" on:click={() => (bathKeep = (bathResult?.rows ?? []).map((r) => r.key))}>Tick all</button>
+							<button class="ghost-btn action-btn-small" type="button" on:click={() => (bathKeep = [])}>Untick all</button>
+						</div>
+						<ul class="user-list">
+							{#each bathResult.rows as r (r.key)}
+								<li class="user-row">
+									<label class="user-main fr-row">
+										<input type="checkbox" checked={bathKeep.includes(r.key)} on:change={() => toggleBathRow(r.key)} />
+										<span>
+											<span class="suspect-name">{formatDate(r.at)} · {r.dogName}</span>
+											<span class="suspect-detail">{r.author}: “{r.text}”</span>
+										</span>
+									</label>
+								</li>
+							{/each}
+						</ul>
+						<button class="action-btn backfill-apply" type="button" on:click={() => runBathBackfill(false)} disabled={bathBusy || bathKeep.length === 0}>
+							{bathBusy ? 'Logging…' : `Log ${bathKeep.length} bath${bathKeep.length === 1 ? '' : 's'}`}
+						</button>
+					{:else if bathWasDryRun}
+						<p class="empty-note">No new baths to log in that range.</p>
 					{/if}
 				{/if}
 			</section>

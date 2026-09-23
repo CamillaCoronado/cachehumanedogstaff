@@ -37,3 +37,43 @@ export async function resolveAuthors(
 	}
 	return cached;
 }
+
+export interface HistoryMessage {
+	ts: string;
+	text?: string;
+	user?: string;
+	subtype?: string;
+	bot_id?: string;
+}
+
+/**
+ * A channel's messages since `since`, paging through Slack's history up to `maxPages`
+ * pages of 200. Slack returns newest first, so when the cap is hit (`truncated`) it is
+ * the oldest messages in the range that were not read. Bot and system messages are
+ * left out; only what people wrote comes back.
+ */
+export async function channelHistory(
+	token: string,
+	channel: string,
+	since: Date,
+	maxPages = 15
+): Promise<{ messages: HistoryMessage[]; truncated: boolean }> {
+	const all: HistoryMessage[] = [];
+	let cursor: string | undefined;
+	let pages = 0;
+	do {
+		const body = await slack(token, 'conversations.history', {
+			channel,
+			oldest: String(Math.floor(since.getTime() / 1000)),
+			limit: '200',
+			...(cursor ? { cursor } : {})
+		});
+		all.push(...(body.messages ?? []));
+		cursor = body.response_metadata?.next_cursor || undefined;
+		pages++;
+	} while (cursor && pages < maxPages);
+	const messages = all.filter(
+		(m) => m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim()
+	);
+	return { messages, truncated: Boolean(cursor) };
+}
