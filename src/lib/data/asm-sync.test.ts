@@ -97,3 +97,16 @@ describe('stamps on arrival and foster return', () => {
 		expect(store.get('3')?.fosterReturnedAt).toBeUndefined();
 	});
 });
+
+describe('permanent foster', () => {
+	it('keeps a permanent foster active, not adopted, and undoes an old archive', async () => {
+		const { env, store } = fakeEnv(
+			{ '4': { name: 'Arcanine', status: 'adopted', asmId: 4, asmShelterCode: 'A4', leftShelterDate: '2026-05-01T12:00:00.000Z', permanentFoster: true } },
+			{ animals: [stayer, { ID: 4, ANIMALNAME: 'Arcanine', SPECIESNAME: 'Dog', SHELTERCODE: 'A4', ACTIVEMOVEMENTTYPE: 2, HASPERMANENTFOSTER: 1 }] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('4')?.status).toBe('active');
+		expect(store.get('4')?.permanentFoster).toBe(true);
+		expect(store.get('4')?.leftShelterDate).toBeNull();
+	});
+});

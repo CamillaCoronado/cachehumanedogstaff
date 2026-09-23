@@ -269,8 +269,10 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		isIncoming,
 		isolationStatus,
 		permanentFoster: isPermanentFoster,
-		// Permanent fosters won't return to shelter — archive them
-		status: isPermanentFoster ? 'adopted' : 'active',
+		// A permanent foster is still ours: not adopted, not departed. The permanentFoster
+		// flag keeps them off the shelter's lists (feeding, Needs attention, the floor).
+		status: 'active',
+		...(isPermanentFoster ? { leftShelterDate: null } : {}),
 		asmId: animal.ID,
 		asmShelterCode: animal.SHELTERCODE ?? '',
 		_lastSyncedAt: now
