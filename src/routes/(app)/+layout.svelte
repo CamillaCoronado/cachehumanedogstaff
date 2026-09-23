@@ -18,6 +18,7 @@
 	import { updateUserProfile } from '$lib/data/users';
 	import { syncVersion } from '$lib/stores/sync';
 	import { readJson, writeJson } from '$lib/utils/storage';
+	import { mergeChanges } from '$lib/utils/syncChanges';
 	import PhotoDebugPanel from '$lib/components/debug/PhotoDebugPanel.svelte';
 	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 
@@ -134,6 +135,12 @@
 
 	const STORAGE_KEY = 'asm_last_changes';
 	type StoredSyncState = { changes: SyncChange[]; changedAt: string };
+	/** The newest sync change this browser has shown, ms since epoch. */
+	const SEEN_KEY = 'asm_changes_seen_at';
+
+	const clockTime = (at: number | Date) =>
+		new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(at));
+
 
 	beforeNavigate(({ from, to }) => {
 		const fromIdx = tabs.findIndex(t => t.href === from?.url.pathname);
@@ -247,36 +254,38 @@
 		const token = await $authUser?.getIdToken();
 		if (!token) return;
 
+		// Everything changed since this browser last showed changes, from any sync —
+		// not only one it ran itself. First visit: the last day.
+		const seenAt = Number(readJson<number | null>(SEEN_KEY, null)) || Date.now() - 86_400_000;
 		const res = await fetch('/api/asm/sync', {
 			method: 'POST',
-			headers: { authorization: `Bearer ${token}` }
+			headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+			body: JSON.stringify({ since: seenAt })
 		});
 		if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
-		const result: { synced: boolean; changes: SyncChange[]; lastSyncAt?: number } = await res.json();
+		const result: {
+			synced: boolean;
+			changes: SyncChange[];
+			lastSyncAt?: number;
+			unseen?: { at: number; changes: SyncChange[] }[];
+		} = await res.json();
 
-		// Skipped because someone synced in the last few minutes: show that sync's time,
-		// so the badge says it is current instead of showing nothing.
-		if (!result.synced && result.lastSyncAt) {
-			asmSyncedAt = new Intl.DateTimeFormat('en-US', {
-				hour: 'numeric',
-				minute: '2-digit',
-				hour12: true
-			}).format(new Date(result.lastSyncAt));
+		// The latest sync, whoever ran it — this one, or someone else's minutes ago.
+		if (result.lastSyncAt) asmSyncedAt = clockTime(result.lastSyncAt);
+		if (result.synced && result.changes.length > 0) syncVersion.update((v) => v + 1);
+
+		const unseen = result.unseen ?? [];
+		// If the shared history could not be written or read, still show this sync's own changes.
+		if (unseen.length === 0 && result.synced && result.changes.length > 0) {
+			unseen.push({ at: result.lastSyncAt ?? Date.now(), changes: result.changes });
 		}
-
-		if (result.synced) {
-			asmSyncedAt = new Intl.DateTimeFormat('en-US', {
-				hour: 'numeric',
-				minute: '2-digit',
-				hour12: true
-			}).format(new Date());
-			if (result.changes.length > 0) {
-				syncVersion.update((v) => v + 1);
-				asmChanges = result.changes;
-				asmLastChangedAt = asmSyncedAt;
-				writeJson(STORAGE_KEY, { changes: asmChanges, changedAt: asmLastChangedAt });
-				asmLogVisible = true;
-			}
+		if (unseen.length > 0) {
+			const newest = unseen[unseen.length - 1].at;
+			asmChanges = mergeChanges(unseen);
+			asmLastChangedAt = clockTime(newest);
+			writeJson(STORAGE_KEY, { changes: asmChanges, changedAt: asmLastChangedAt });
+			writeJson(SEEN_KEY, newest);
+			asmLogVisible = true;
 		}
 
 		// Read the shared record either way: someone else's sync minutes ago may hold
