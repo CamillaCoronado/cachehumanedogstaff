@@ -1,7 +1,7 @@
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import type { PendingFeeding, UserProfile } from '$lib/types';
 import { db } from '$lib/firebase/config';
-import { buildDogIndex, feedingDate, feedingLogId, planFeedings } from '$lib/data/feedingImport';
+import { buildDogIndex, feedingDate, feedingLogId, planEditedFeedings, planFeedings, type FeedingEdit } from '$lib/data/feedingImport';
 import { addFeedingLog, listDogs } from '$lib/data/dogs';
 import { listDogGroups } from '$lib/data/dogGroups';
 import { db as firestore } from '$lib/firebase/config';
@@ -26,6 +26,49 @@ export async function listPendingFeedings(): Promise<PendingFeeding[]> {
 	return snapshot.docs
 		.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingFeeding, 'id'>) }))
 		.sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
+}
+
+/** The app's dogs and groups, indexed the way the Slack import reads them. */
+async function currentDogIndex() {
+	const [dogs, groups] = await Promise.all([listDogs(), listDogGroups()]);
+	return buildDogIndex(
+		dogs.map((d) => ({
+			id: d.id,
+			name: d.name,
+			intakeDate: toIso(d.intakeDate),
+			leftShelterDate: toIso(d.leftShelterDate),
+			status: d.status,
+			asmShelterCode: d.asmShelterCode ?? null,
+			inFoster: d.inFoster,
+			permanentFoster: d.permanentFoster,
+			inFosterSince: toIso(d.inFosterSince),
+			shelterSince: toIso(d.shelterSince),
+			isolationStatus: d.isolationStatus,
+			isIncoming: d.isIncoming,
+			surgeryDate: toIso(d.surgeryDate),
+			nicknames: d.nicknames,
+			hasSecondMeal: d.hasSecondMeal
+		})),
+		groups.map((g) => ({ name: g.name, dogIds: g.dogIds }))
+	);
+}
+
+/**
+ * The queue with each message re-read under today's rules, so what the Admin page
+ * shows is what accepting would write. Entries are worked out when a message is queued,
+ * and a rule change since — who counts as at the shelter — would otherwise leave the
+ * list promising a different set of dogs than accepting actually logs.
+ */
+export async function withCurrentReading(pending: PendingFeeding[]): Promise<PendingFeeding[]> {
+	if (pending.length === 0) return pending;
+	try {
+		const index = await currentDogIndex();
+		return pending.map((p) => ({ ...p, entries: planFeedings(p.rawText, new Date(p.postedAt), index) }));
+	} catch (error) {
+		// Show the stored reading rather than nothing; accepting re-reads regardless.
+		console.error('Could not re-read queued feeding messages', error);
+		return pending;
+	}
 }
 
 /**
@@ -57,33 +100,18 @@ async function alreadyLogged(dogId: string, date: Date, mealTime: string): Promi
  */
 export async function acceptPendingFeeding(
 	pending: PendingFeeding,
-	profile?: UserProfile | null
+	profile?: UserProfile | null,
+	/** A person's correction of the reading; without one the message is read afresh. */
+	edit?: FeedingEdit
 ): Promise<number> {
 	if (!db) return 0;
 	const postedAt = new Date(pending.postedAt);
 	const notes = `via Slack — ${pending.author}: "${pending.rawText.slice(0, 180)}"`;
 
-	const [dogs, groups] = await Promise.all([listDogs(), listDogGroups()]);
-	const index = buildDogIndex(
-		dogs.map((d) => ({
-			id: d.id,
-			name: d.name,
-			intakeDate: toIso(d.intakeDate),
-			leftShelterDate: toIso(d.leftShelterDate),
-			status: d.status,
-			asmShelterCode: d.asmShelterCode ?? null,
-			inFoster: d.inFoster,
-			permanentFoster: d.permanentFoster,
-			inFosterSince: toIso(d.inFosterSince),
-			shelterSince: toIso(d.shelterSince),
-			isolationStatus: d.isolationStatus,
-			isIncoming: d.isIncoming,
-			surgeryDate: toIso(d.surgeryDate),
-			nicknames: d.nicknames
-		})),
-		groups.map((g) => ({ name: g.name, dogIds: g.dogIds }))
-	);
-	const entries = planFeedings(pending.rawText, postedAt, index);
+	const index = await currentDogIndex();
+	const entries = edit
+		? planEditedFeedings(pending.rawText, postedAt, index, edit)
+		: planFeedings(pending.rawText, postedAt, index);
 
 	let written = 0;
 	for (const entry of entries) {

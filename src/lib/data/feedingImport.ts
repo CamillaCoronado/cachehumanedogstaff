@@ -60,6 +60,8 @@ export interface DogRecord {
 	surgeryDate?: string | null;
 	/** Extra names staff use for this dog, matched exactly like its own name. */
 	nicknames?: string[];
+	/** Gets the closing (second) meal; only these dogs are fed at it. */
+	hasSecondMeal?: boolean;
 }
 
 /** A name standing for several dogs at once, such as a litter. */
@@ -80,6 +82,15 @@ interface Candidate {
 	backFrom: number | null;
 	/** The shelter day this dog is fasting for surgery, if any. */
 	surgeryDay: string | null;
+	/**
+	 * Adopted, transferred or passed with no departure date on record. When it left is
+	 * unknown, so it cannot be counted as here on any given day — without this it read
+	 * as present forever and was filled in as fed at every meal.
+	 */
+	departedUndated: boolean;
+	/** In foster now with no start date, so there is no telling when it left the shelter. */
+	fosterUndated: boolean;
+	hasSecondMeal: boolean;
 }
 
 export interface FeedingPlan {
@@ -170,7 +181,10 @@ export function buildDogIndex(dogs: DogRecord[], groups: DogGroupRecord[] = []):
 			isIncoming: Boolean(dog.isIncoming),
 			fosterFrom,
 			backFrom,
-			surgeryDay: dog.surgeryDate ? shelterDay(new Date(dog.surgeryDate)) : null
+			surgeryDay: dog.surgeryDate ? shelterDay(new Date(dog.surgeryDate)) : null,
+			departedUndated: Boolean(dog.status) && dog.status !== 'active' && to === null,
+			fosterUndated: Boolean(dog.inFoster) && fosterFrom === null,
+			hasSecondMeal: Boolean(dog.hasSecondMeal)
 		};
 
 		if (!index.byName.has(dog.name)) index.byName.set(dog.name, []);
@@ -306,15 +320,26 @@ export function assignDaySlots(reports: DayReport[]): MealTime[] {
 	return slots;
 }
 
-/** Dogs at the shelter and available that day: not in foster, not in isolation. */
+/**
+ * Dogs at the shelter and available that day: not in foster, not in isolation. The same
+ * set the Feeding page lists, worked out for the day in question.
+ *
+ * Where a date is missing — a departure or a foster with none recorded — the dog is left
+ * out rather than assumed present. A filled-in meal is only an inference, and one for a
+ * dog that was not there is worse than one missing.
+ */
 function presentDogsOn(index: DogIndex, when: Date): Candidate[] {
 	const at = when.getTime();
+	const day = shelterDay(when);
 	const out: Candidate[] = [];
 	const seen = new Set<string>();
 	for (const candidates of index.byName.values()) {
 		for (const c of preferCandidates(candidates, at)) {
 			if (seen.has(c.id) || !c.feedable || inFosterOn(c, at)) continue;
-			if (c.isIncoming && (c.from === null || at < c.from - DAY_MS)) continue;
+			if (c.departedUndated || c.fosterUndated) continue;
+			// Incoming dogs are only here on the day they arrive, as on the Feeding page;
+			// after that they are either in (no longer incoming) or not coming.
+			if (c.isIncoming && (c.from === null || shelterDay(new Date(c.from)) !== day)) continue;
 			seen.add(c.id);
 			out.push(c);
 		}
@@ -331,8 +356,11 @@ function presentDogsOn(index: DogIndex, when: Date): Candidate[] {
  */
 function feedableOn(index: DogIndex, when: Date, mealTime: MealTime): Candidate[] {
 	const day = shelterDay(when);
-	// Fasting dogs are the one thing feeding excludes that presence alone does not.
-	return presentDogsOn(index, when).filter((c) => !(mealTime === 'am' && c.surgeryDay === day));
+	// Fasting dogs are the one thing feeding excludes that presence alone does not, along
+	// with the second meal, which only the dogs marked for it get.
+	return presentDogsOn(index, when).filter(
+		(c) => !(mealTime === 'am' && c.surgeryDay === day) && (mealTime !== 'second' || c.hasSecondMeal)
+	);
 }
 
 /**
@@ -422,6 +450,50 @@ export function planFeedingsDetailed(
 	}
 
 	return { entries: planned, uncertain };
+}
+
+/** What a person settled on when editing a report before logging it. */
+export interface FeedingEdit {
+	mealTime: MealTime;
+	/** The dogs the report is about, with what each ate. */
+	named: { dogId: string; dogName: string; amountEaten: AmountEaten }[];
+	/** "Everyone else ate": fill in the rest of that meal's dogs as having eaten. */
+	fillIn: boolean;
+}
+
+/**
+ * The logs a report implies once someone has corrected it. The named dogs are taken as
+ * given; the fill-in follows the same rules as an unedited report — the dogs at the
+ * shelter for that meal, less the named ones and any the message said not to feed.
+ */
+export function planEditedFeedings(text: string, postedAt: Date, index: DogIndex, edit: FeedingEdit): PlannedFeeding[] {
+	const planned: PlannedFeeding[] = edit.named.map((n) => ({
+		dogId: n.dogId,
+		dogName: n.dogName,
+		amountEaten: n.amountEaten,
+		mealTime: edit.mealTime,
+		mealTimeInferred: false,
+		implied: false
+	}));
+	if (!edit.fillIn) return planned;
+
+	const parsed = parseFeedingMessage(text, rosterOn(index, postedAt));
+	const skip = new Set([
+		...edit.named.map((n) => n.dogId),
+		...(parsed.doNotFeed.map((name) => resolveDogId(index, name, postedAt)).filter(Boolean) as string[])
+	]);
+	for (const dog of feedableOn(index, feedingDate(postedAt, edit.mealTime), edit.mealTime)) {
+		if (skip.has(dog.id)) continue;
+		planned.push({
+			dogId: dog.id,
+			dogName: dog.name,
+			amountEaten: 'all',
+			mealTime: edit.mealTime,
+			mealTimeInferred: false,
+			implied: true
+		});
+	}
+	return planned;
 }
 
 export interface PlannedSurgery {

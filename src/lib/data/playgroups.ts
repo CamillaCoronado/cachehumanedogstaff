@@ -13,7 +13,18 @@ export interface PendingPlaygroup {
 	suggestedNotes: string | null;
 	suggestedOutcome: PlaygroupOutcome;
 	receivedAt: string; // ISO string
+	/** Slack's message timestamp (seconds, as a string): when the playgroup was posted. */
+	slackTs?: string;
+	/** Who posted it in Slack, when the poll could tell. */
+	author?: string;
 	processed: boolean;
+}
+
+/** When the message was posted in Slack, falling back to when the app received it. */
+export function pendingPostedAt(p: PendingPlaygroup): Date {
+	const ts = Number(p.slackTs);
+	if (Number.isFinite(ts) && ts > 0) return new Date(ts * 1000);
+	return toDate(p.receivedAt) ?? new Date();
 }
 
 interface StoredPlaygroupSession {

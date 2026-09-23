@@ -22,10 +22,20 @@ export async function POST({ request }: RequestEvent) {
 	const profile = await getAdminDb().collection('users').doc(uid).get();
 	if (profile.data()?.role !== 'admin') throw error(403, 'Admins only');
 
-	const body = (await request.json().catch(() => ({}))) as { since?: string; dryRun?: boolean };
+	const body = (await request.json().catch(() => ({}))) as {
+		since?: string;
+		dryRun?: boolean;
+		entries?: { slackTs: string; dogNames: string[] }[];
+	};
 	if (!body.since || !DATE_RE.test(body.since)) throw error(400, 'since is required (YYYY-MM-DD)');
 	// Midnight at the shelter (Mountain time), whatever timezone the server runs in.
 	const since = new Date(`${body.since}T00:00:00-07:00`);
 
-	return json(await backfillSlackPlaygroups(since, body.dryRun !== false));
+	const entries = Array.isArray(body.entries)
+		? body.entries
+				.filter((e) => e && typeof e.slackTs === 'string' && Array.isArray(e.dogNames))
+				.map((e) => ({ slackTs: e.slackTs, dogNames: e.dogNames.filter((n) => typeof n === 'string') }))
+		: undefined;
+
+	return json(await backfillSlackPlaygroups(since, body.dryRun !== false, entries));
 }

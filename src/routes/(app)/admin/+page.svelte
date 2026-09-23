@@ -6,11 +6,12 @@
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
-	import { listPendingFeedings, acceptPendingFeeding, dismissPendingFeeding } from '$lib/data/pendingFeedings';
+	import { matchDogByName } from '$lib/utils/dogs';
+	import CheckList from '$lib/components/admin/CheckList.svelte';
 	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
-	import type { PendingFeeding, PendingSurgery } from '$lib/types';
+	import type { PendingSurgery } from '$lib/types';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -113,68 +114,6 @@
 		}
 	}
 
-	let pendingFeedings: PendingFeeding[] = [];
-	let pendingLoading = false;
-	let pendingBusyId: string | null = null;
-	let pendingError = '';
-
-	/** Posted time, so the meal can be judged against when it was written. */
-	function formatTime(value: string): string {
-		const at = toDate(value);
-		return at
-			? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(at)
-			: '';
-	}
-
-	const AMOUNT_WORDS: Record<string, string> = {
-		all: 'ate all',
-		most: 'ate most',
-		half: 'ate half',
-		little: 'ate little',
-		none: "didn't eat"
-	};
-
-	async function loadPendingFeedings() {
-		pendingLoading = true;
-		pendingError = '';
-		try {
-			pendingFeedings = await listPendingFeedings();
-		} catch (error) {
-			console.error(error);
-			// Shown rather than toasted: a failure here is indistinguishable from an empty
-			// queue otherwise, and that is how three waiting messages went unnoticed.
-			pendingError = error instanceof Error ? error.message : 'Could not load feeding messages.';
-		} finally {
-			pendingLoading = false;
-		}
-	}
-
-	async function acceptFeeding(pending: PendingFeeding) {
-		pendingBusyId = pending.id;
-		try {
-			const written = await acceptPendingFeeding(pending, $authProfile);
-			pendingFeedings = pendingFeedings.filter((p) => p.id !== pending.id);
-			toast.success(`Logged ${written} feeding${written === 1 ? '' : 's'}.`);
-		} catch (error) {
-			console.error(error);
-			toast.error('Could not save those feedings.');
-		} finally {
-			pendingBusyId = null;
-		}
-	}
-
-	async function dismissFeeding(pending: PendingFeeding) {
-		pendingBusyId = pending.id;
-		try {
-			await dismissPendingFeeding(pending.id);
-			pendingFeedings = pendingFeedings.filter((p) => p.id !== pending.id);
-		} catch (error) {
-			console.error(error);
-			toast.error('Could not dismiss that message.');
-		} finally {
-			pendingBusyId = null;
-		}
-	}
 
 	let users: EditableUser[] = [];
 	let usersLoaded = false;
@@ -239,6 +178,80 @@
 	let pgBusy = false;
 	let pgResult: PlaygroupBackfill | null = null;
 	let pgWasDryRun = true;
+	// Review edits on the dry run, like the Playgroups page's own review: names removed
+	// from one message, names removed from every message, and messages skipped outright.
+	let pgRemoved: Record<string, string[]> = {};
+	let pgRemovedEverywhere: string[] = [];
+	let pgSkipped: string[] = [];
+
+	const nameKey = (name: string) => name.toLowerCase();
+
+	function pgNameState(name: string): 'matched' | 'archived' | 'unmatched' {
+		const active = allDogs.filter((d) => d.status === 'active');
+		const dog = matchDogByName(name, active) ?? matchDogByName(name, allDogs);
+		return dog ? (dog.status === 'active' ? 'matched' : 'archived') : 'unmatched';
+	}
+
+	// Read by the template, so it has to be reactive state rather than a function call:
+	// Svelte would not re-render a call whose arguments did not change.
+	$: pgRemovedSet = new Set([
+		...pgRemovedEverywhere.map((n) => `*|${n}`),
+		...Object.entries(pgRemoved).flatMap(([ts, names]) => names.map((n) => `${ts}|${n}`))
+	]);
+	const pgIsRemoved = (removed: Set<string>, ts: string, name: string) =>
+		removed.has(`*|${nameKey(name)}`) || removed.has(`${ts}|${nameKey(name)}`);
+
+	// Same for the colour of each name, which depends on the dog list.
+	$: pgStates = new Map(
+		(pgResult?.samples ?? []).flatMap((s) => s.dogNames).map((n) => [nameKey(n), allDogs.length ? pgNameState(n) : 'unmatched'])
+	);
+
+	function pgToggleName(ts: string, name: string) {
+		const key = nameKey(name);
+		if (pgRemovedEverywhere.includes(key)) {
+			pgRemovedEverywhere = pgRemovedEverywhere.filter((n) => n !== key);
+			return;
+		}
+		const list = pgRemoved[ts] ?? [];
+		pgRemoved = { ...pgRemoved, [ts]: list.includes(key) ? list.filter((n) => n !== key) : [...list, key] };
+	}
+
+	function pgToggleEverywhere(name: string) {
+		const key = nameKey(name);
+		pgRemovedEverywhere = pgRemovedEverywhere.includes(key)
+			? pgRemovedEverywhere.filter((n) => n !== key)
+			: [...pgRemovedEverywhere, key];
+	}
+
+	function pgToggleSkip(ts: string) {
+		pgSkipped = pgSkipped.includes(ts) ? pgSkipped.filter((t) => t !== ts) : [...pgSkipped, ts];
+	}
+
+	// Recomputed whenever an edit changes, so the counts and the button stay honest.
+	$: pgKept = (pgResult?.samples ?? [])
+		.filter((s) => !pgSkipped.includes(s.slackTs))
+		.map((s) => ({
+			slackTs: s.slackTs,
+			dogNames: s.dogNames.filter(
+				(n) => !pgRemovedEverywhere.includes(nameKey(n)) && !(pgRemoved[s.slackTs] ?? []).includes(nameKey(n))
+			)
+		}))
+		.filter((s) => s.dogNames.length > 0);
+
+	// Names that are not a dog in the app, with how often each appears: usually staff
+	// names or ordinary words the parser took for a name. One click removes one everywhere.
+	$: pgUnmatched = (() => {
+		const counts = new Map<string, { name: string; count: number }>();
+		for (const s of pgResult?.samples ?? []) {
+			for (const n of s.dogNames) {
+				if (allDogs.length === 0 || pgNameState(n) !== 'unmatched') continue;
+				const entry = counts.get(nameKey(n)) ?? { name: n, count: 0 };
+				entry.count++;
+				counts.set(nameKey(n), entry);
+			}
+		}
+		return [...counts.values()].sort((a, b) => b.count - a.count);
+	})();
 
 	async function runPlaygroupBackfill(dryRun: boolean) {
 		if (pgBusy) return;
@@ -248,11 +261,16 @@
 			const res = await fetch('/api/slack/playgroup-backfill', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-				body: JSON.stringify({ since: pgSince, dryRun })
+				body: JSON.stringify({ since: pgSince, dryRun, ...(dryRun ? {} : { entries: pgKept }) })
 			});
 			if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
 			pgResult = await res.json();
 			pgWasDryRun = dryRun;
+			if (dryRun) {
+				pgRemoved = {};
+				pgRemovedEverywhere = [];
+				pgSkipped = [];
+			}
 			if (pgResult?.skipped) toast.error('Slack is not configured for playgroups.');
 			else if (!dryRun) toast.success(`Queued ${pgResult?.queued ?? 0} for review on the Playgroups page.`);
 		} catch (e) {
@@ -431,9 +449,8 @@
 		return 'role-chip-volunteer';
 	}
 
-	$: if ($authReady && $authProfile?.role === 'admin' && !pendingLoading && pendingFeedings.length === 0 && !pendingLoaded) {
+	$: if ($authReady && $authProfile?.role === 'admin' && !pendingLoaded) {
 		pendingLoaded = true;
-		void loadPendingFeedings();
 		void loadPendingSurgeries();
 		void loadDogGroups();
 	}
@@ -561,52 +578,9 @@
 		</div>
 
 		<div class="admin-grid">
-			<section class="admin-card">
-				<div class="card-header">
-					<div>
-						<p class="section-kicker">From Slack</p>
-						<h3 class="section-title">Surgery lists from Slack</h3>
-						<p class="section-copy">
-							The morning "do not feed" list, read as the day's surgery dogs and
-							<strong>applied as soon as it arrives</strong> — it lands shortly before the feed,
-							so waiting on a click could mean a fasting dog gets fed. Each dog is stamped with
-							the message it came from. Undo clears a list again.
-						</p>
-					</div>
-					<button class="action-btn" type="button" on:click={loadPendingSurgeries}>Refresh</button>
-				</div>
-
-				{#if surgeryError}
-					<p class="error-note">Could not load the surgery list: {surgeryError}</p>
-				{:else if pendingSurgeries.length === 0}
-					<p class="empty-note">No surgery lists yet.</p>
-				{:else}
-					<ul class="pending-list">
-						{#each pendingSurgeries as pending (pending.id)}
-							<li class="pending-item">
-								<p class="pending-meta">
-									<strong>{pending.author}</strong>
-									<span>{formatDateTime(pending.postedAt)}</span>
-								</p>
-								<blockquote class="pending-quote">{pending.rawText}</blockquote>
-								<p class="pending-implied">
-									Marked for surgery: <strong>{pending.dogs.map((d) => d.dogName).join(', ')}</strong>
-								</p>
-								<div class="pending-actions">
-									<button
-										class="ghost-btn"
-										type="button"
-										on:click={() => undoSurgery(pending)}
-										disabled={surgeryBusyId === pending.id}
-									>
-										{surgeryBusyId === pending.id ? 'Clearing…' : 'Undo'}
-									</button>
-								</div>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</section>
+			<div class="admin-wide">
+				<CheckList dogs={allDogs} profile={$authProfile} />
+			</div>
 
 			<section class="admin-card">
 				<div class="card-header">
@@ -666,76 +640,151 @@
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
-						<p class="section-kicker">From Slack</p>
-						<h3 class="section-title">Feeding reports that need a look</h3>
-						<p class="section-copy">
-							Feeding reports from Slack are written straight to the dogs' records. These are the
-							ones that were <strong>not</strong> — where the reading is uncertain enough to be
-							worth your eye first. Each says why below.
-						</p>
+						<p class="section-kicker">Users</p>
+						<h3 class="section-title">Manage users</h3>
+						<p class="section-copy">Profiles appear here after a person signs in for the first time.</p>
 					</div>
-					<button class="action-btn" type="button" on:click={loadPendingFeedings} disabled={pendingLoading}>
-						{pendingLoading ? 'Loading…' : 'Refresh'}
+					<button class="ghost-btn" type="button" on:click={loadUsers} disabled={usersLoading || savingUserId !== null}>
+						{usersLoading ? 'Refreshing…' : 'Refresh users'}
 					</button>
 				</div>
 
-				{#if pendingError}
-					<p class="error-note">Could not load the queue: {pendingError}</p>
-				{:else if pendingFeedings.length === 0}
-					<p class="empty-note">
-						{pendingLoading
-							? 'Checking for new messages…'
-							: 'Nothing to review — every report so far read cleanly and was applied.'}
-					</p>
+				<div class="role-summary">
+					{#each roleCounts as entry}
+						<span class={`role-chip ${roleTone(entry.role)}`}>{entry.role}: {entry.count}</span>
+					{/each}
+				</div>
+
+				{#if usersError}
+					<p class="error-note">{usersError}</p>
+				{:else if usersLoading}
+					<p class="empty-note">Loading users…</p>
+				{:else if users.length === 0}
+					<p class="empty-note">No user profiles exist yet.</p>
+				{:else}
+					<div class="user-list">
+						{#each users as user}
+							<article class="user-row">
+								<div class="user-main">
+									<div class="user-fields">
+										<label class="field">
+											<span class="field-label">Display name</span>
+											<input
+												class="field-input"
+												type="text"
+												value={user.draftDisplayName}
+												on:input={(event) => updateDraft(user.uid, 'draftDisplayName', event.currentTarget.value)}
+												disabled={savingUserId === user.uid}
+											/>
+										</label>
+
+										<label class="field field-role">
+											<span class="field-label">Role</span>
+											<select
+												class="field-select"
+												value={user.draftRole}
+												on:change={(event) => updateDraft(user.uid, 'draftRole', event.currentTarget.value)}
+												disabled={savingUserId === user.uid}
+											>
+												{#each roleOptions as role}
+													<option value={role}>{role}</option>
+												{/each}
+											</select>
+										</label>
+
+										<label class="field">
+											<span class="field-label">Phone (update line)</span>
+											<input
+												class="field-input"
+												type="tel"
+												placeholder="(435) 555-0134"
+												value={user.draftPhone}
+												on:input={(event) => updateDraft(user.uid, 'draftPhone', event.currentTarget.value)}
+												disabled={savingUserId === user.uid}
+											/>
+										</label>
+									</div>
+
+									<div class="user-meta">
+										<span>{user.email || 'No email on profile'}</span>
+										<span>{user.uid}</span>
+										{#if user.uid === currentUserId}
+											<span class="current-user-badge">Current account</span>
+										{/if}
+										{#if !isProfileApproved(user)}
+											<span class="pending-badge">Awaiting approval</span>
+										{/if}
+									</div>
+								</div>
+
+								<div class="user-actions">
+									<span class="status-meta">Updated {formatDateTime(user.updatedAt)}</span>
+									<button
+										class={`action-btn ${isProfileApproved(user) ? '' : 'action-btn-approve'}`}
+										type="button"
+										on:click={() => toggleApproval(user)}
+										disabled={savingUserId === user.uid}
+									>
+										{isProfileApproved(user) ? 'Set to pending' : 'Approve'}
+									</button>
+									<button
+										class="action-btn"
+										type="button"
+										on:click={() => saveUser(user)}
+										disabled={savingUserId !== null || !hasPendingChanges(user)}
+									>
+										{savingUserId === user.uid ? 'Saving…' : hasPendingChanges(user) ? 'Save' : 'Saved'}
+									</button>
+								</div>
+							</article>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		</div>
+
+		<details class="admin-more">
+			<summary>Surgery lists and cleanup tools</summary>
+			<div class="admin-grid">
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">From Slack</p>
+						<h3 class="section-title">Surgery lists from Slack</h3>
+						<p class="section-copy">
+							The morning "do not feed" list, read as the day's surgery dogs and
+							<strong>applied as soon as it arrives</strong> — it lands shortly before the feed,
+							so waiting on a click could mean a fasting dog gets fed. Each dog is stamped with
+							the message it came from. Undo clears a list again.
+						</p>
+					</div>
+					<button class="action-btn" type="button" on:click={loadPendingSurgeries}>Refresh</button>
+				</div>
+
+				{#if surgeryError}
+					<p class="error-note">Could not load the surgery list: {surgeryError}</p>
+				{:else if pendingSurgeries.length === 0}
+					<p class="empty-note">No surgery lists yet.</p>
 				{:else}
 					<ul class="pending-list">
-						{#each pendingFeedings as pending (pending.id)}
+						{#each pendingSurgeries as pending (pending.id)}
 							<li class="pending-item">
 								<p class="pending-meta">
 									<strong>{pending.author}</strong>
 									<span>{formatDateTime(pending.postedAt)}</span>
 								</p>
 								<blockquote class="pending-quote">{pending.rawText}</blockquote>
-								{#if pending.uncertain?.length}
-									<p class="pending-why">
-										Held because: {pending.uncertain.join(' · ')}
-									</p>
-								{/if}
-								<ul class="pending-entries">
-									{#each pending.entries.filter((e) => !e.implied) as entry}
-										<li>
-											<span class="pending-dog">{entry.dogName}</span>
-											<span class="pending-amount">{AMOUNT_WORDS[entry.amountEaten] ?? entry.amountEaten}</span>
-											<span class="pending-meal">
-												{entry.mealTime === 'second' ? '2nd meal' : entry.mealTime.toUpperCase()}
-											</span>
-											<span class="pending-time">{formatTime(pending.postedAt)}</span>
-										</li>
-									{/each}
-								</ul>
-								{#if pending.entries.some((e) => e.implied)}
-									<p class="pending-implied">
-										Everyone else &mdash; {pending.entries.filter((e) => e.implied).length} other
-										{pending.entries.filter((e) => e.implied).length === 1 ? 'dog' : 'dogs'} &mdash; will be
-										logged as <strong>ate all</strong>. Any dog already logged for this meal is left alone.
-									</p>
-								{/if}
+								<p class="pending-implied">
+									Marked for surgery: <strong>{pending.dogs.map((d) => d.dogName).join(', ')}</strong>
+								</p>
 								<div class="pending-actions">
-									<button
-										class="action-btn"
-										type="button"
-										on:click={() => acceptFeeding(pending)}
-										disabled={pendingBusyId === pending.id}
-									>
-										{pendingBusyId === pending.id ? 'Saving…' : `Log ${pending.entries.length} feeding${pending.entries.length === 1 ? '' : 's'}`}
-									</button>
 									<button
 										class="ghost-btn"
 										type="button"
-										on:click={() => dismissFeeding(pending)}
-										disabled={pendingBusyId === pending.id}
+										on:click={() => undoSurgery(pending)}
+										disabled={surgeryBusyId === pending.id}
 									>
-										Dismiss
+										{surgeryBusyId === pending.id ? 'Clearing…' : 'Undo'}
 									</button>
 								</div>
 							</li>
@@ -850,18 +899,58 @@
 						</span>
 					</div>
 					{#if pgWasDryRun && pgResult.toQueue > 0}
+						<p class="pg-legend">
+							Click a name to remove it. <span class="pg-pill pill-matched">Green</span> at the shelter ·
+							<span class="pg-pill pill-archived">Amber</span> no longer at the shelter ·
+							<span class="pg-pill pill-unmatched">Gray</span> not a dog in the app.
+						</p>
+						{#if pgUnmatched.length > 0}
+							<div class="pg-everywhere">
+								<span class="status-meta">Not dogs in the app — remove from every message:</span>
+								<div class="pg-pills">
+									{#each pgUnmatched as u (u.name)}
+										<button
+											type="button"
+											class={`pg-pill ${pgRemovedEverywhere.includes(nameKey(u.name)) ? 'pill-excluded' : 'pill-unmatched'}`}
+											on:click={() => pgToggleEverywhere(u.name)}
+											title={pgRemovedEverywhere.includes(nameKey(u.name)) ? 'Click to put back' : 'Click to remove everywhere'}
+										>{u.name} ×{u.count}</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
 						<ul class="user-list">
 							{#each pgResult.samples as s (s.slackTs)}
-								<li class="user-row">
+								{@const skipped = pgSkipped.includes(s.slackTs)}
+								<li class="user-row" class:pg-skipped={skipped}>
 									<div class="user-main">
-										<p class="suspect-name">{slackDay(s.slackTs)} · {s.dogNames.join(', ')}</p>
-										<p class="suspect-detail">{s.outcome} · “{s.text}”</p>
+										<p class="suspect-name">{slackDay(s.slackTs)} · {s.outcome}</p>
+										<div class="pg-pills">
+											{#each s.dogNames as n (n)}
+												<button
+													type="button"
+													class={`pg-pill ${pgIsRemoved(pgRemovedSet, s.slackTs, n) ? 'pill-excluded' : `pill-${pgStates.get(nameKey(n)) ?? 'unmatched'}`}`}
+													on:click={() => pgToggleName(s.slackTs, n)}
+													disabled={skipped}
+													title={pgIsRemoved(pgRemovedSet, s.slackTs, n) ? 'Click to put back' : 'Click to remove'}
+												>{n}</button>
+											{/each}
+										</div>
+										<p class="suspect-detail">“{s.text}”</p>
 									</div>
+									<button class="action-btn action-btn-small" type="button" on:click={() => pgToggleSkip(s.slackTs)}>
+										{skipped ? 'Include' : 'Skip'}
+									</button>
 								</li>
 							{/each}
 						</ul>
-						<button class="action-btn backfill-apply" type="button" on:click={() => runPlaygroupBackfill(false)} disabled={pgBusy}>
-							{pgBusy ? 'Adding…' : `Add ${pgResult.toQueue} to the review list`}
+						<button
+							class="action-btn backfill-apply"
+							type="button"
+							on:click={() => runPlaygroupBackfill(false)}
+							disabled={pgBusy || pgKept.length === 0}
+						>
+							{pgBusy ? 'Adding…' : `Add ${pgKept.length} to the review list`}
 						</button>
 					{:else if pgWasDryRun}
 						<p class="empty-note">Nothing to add — every playgroup report in that range is already in the review list.</p>
@@ -928,112 +1017,8 @@
 					</div>
 				{/if}
 			</section>
-
-			<section class="admin-card">
-				<div class="card-header">
-					<div>
-						<p class="section-kicker">Users</p>
-						<h3 class="section-title">Manage users</h3>
-						<p class="section-copy">Profiles appear here after a person signs in for the first time.</p>
-					</div>
-					<button class="ghost-btn" type="button" on:click={loadUsers} disabled={usersLoading || savingUserId !== null}>
-						{usersLoading ? 'Refreshing…' : 'Refresh users'}
-					</button>
-				</div>
-
-				<div class="role-summary">
-					{#each roleCounts as entry}
-						<span class={`role-chip ${roleTone(entry.role)}`}>{entry.role}: {entry.count}</span>
-					{/each}
-				</div>
-
-				{#if usersError}
-					<p class="error-note">{usersError}</p>
-				{:else if usersLoading}
-					<p class="empty-note">Loading users…</p>
-				{:else if users.length === 0}
-					<p class="empty-note">No user profiles exist yet.</p>
-				{:else}
-					<div class="user-list">
-						{#each users as user}
-							<article class="user-row">
-								<div class="user-main">
-									<div class="user-fields">
-										<label class="field">
-											<span class="field-label">Display name</span>
-											<input
-												class="field-input"
-												type="text"
-												value={user.draftDisplayName}
-												on:input={(event) => updateDraft(user.uid, 'draftDisplayName', event.currentTarget.value)}
-												disabled={savingUserId === user.uid}
-											/>
-										</label>
-
-										<label class="field field-role">
-											<span class="field-label">Role</span>
-											<select
-												class="field-select"
-												value={user.draftRole}
-												on:change={(event) => updateDraft(user.uid, 'draftRole', event.currentTarget.value)}
-												disabled={savingUserId === user.uid}
-											>
-												{#each roleOptions as role}
-													<option value={role}>{role}</option>
-												{/each}
-											</select>
-										</label>
-
-										<label class="field">
-											<span class="field-label">Phone (update line)</span>
-											<input
-												class="field-input"
-												type="tel"
-												placeholder="(435) 555-0134"
-												value={user.draftPhone}
-												on:input={(event) => updateDraft(user.uid, 'draftPhone', event.currentTarget.value)}
-												disabled={savingUserId === user.uid}
-											/>
-										</label>
-									</div>
-
-									<div class="user-meta">
-										<span>{user.email || 'No email on profile'}</span>
-										<span>{user.uid}</span>
-										{#if user.uid === currentUserId}
-											<span class="current-user-badge">Current account</span>
-										{/if}
-										{#if !isProfileApproved(user)}
-											<span class="pending-badge">Awaiting approval</span>
-										{/if}
-									</div>
-								</div>
-
-								<div class="user-actions">
-									<span class="status-meta">Updated {formatDateTime(user.updatedAt)}</span>
-									<button
-										class={`action-btn ${isProfileApproved(user) ? '' : 'action-btn-approve'}`}
-										type="button"
-										on:click={() => toggleApproval(user)}
-										disabled={savingUserId === user.uid}
-									>
-										{isProfileApproved(user) ? 'Set to pending' : 'Approve'}
-									</button>
-									<button
-										class="action-btn"
-										type="button"
-										on:click={() => saveUser(user)}
-										disabled={savingUserId !== null || !hasPendingChanges(user)}
-									>
-										{savingUserId === user.uid ? 'Saving…' : hasPendingChanges(user) ? 'Save' : 'Saved'}
-									</button>
-								</div>
-							</article>
-						{/each}
-					</div>
-				{/if}
-			</section>
-		</div>
+			</div>
+		</details>
 	</section>
 {/if}
 
@@ -1133,6 +1118,22 @@
 		padding: 1rem 1.05rem;
 	}
 
+	.admin-wide {
+		grid-column: 1 / -1;
+		min-width: 0;
+	}
+
+	.admin-more {
+		margin-top: 1.2rem;
+	}
+
+	.admin-more > summary {
+		cursor: pointer;
+		font-weight: 700;
+		color: #214866;
+		padding: 0.6rem 0;
+	}
+
 	.admin-card-centered {
 		padding: 1.4rem;
 		text-align: center;
@@ -1180,6 +1181,69 @@
 		padding: 0.3rem 0.6rem;
 		font-size: 0.72rem;
 		border-radius: 0.5rem;
+	}
+
+	.pg-legend {
+		margin: 0.4rem 0;
+		font-size: 0.72rem;
+		color: #526b81;
+	}
+
+	.pg-everywhere {
+		display: grid;
+		gap: 0.3rem;
+		margin: 0.4rem 0 0.6rem;
+	}
+
+	.pg-pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin: 0.25rem 0;
+	}
+
+	.pg-pill {
+		border-radius: 999px;
+		padding: 0.14rem 0.5rem;
+		font-size: 0.66rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		font-family: inherit;
+		cursor: pointer;
+	}
+
+	.pg-pill:disabled {
+		cursor: default;
+	}
+
+	.pill-matched {
+		background: #e9f6ec;
+		color: #256640;
+		border: 1px solid #abd5b4;
+	}
+
+	.pill-archived {
+		background: #fef3e2;
+		color: #7a4f10;
+		border: 1px solid #f0c87a;
+	}
+
+	.pill-unmatched {
+		background: #f0f2f5;
+		color: #7a8fa6;
+		border: 1px solid #c8d3df;
+	}
+
+	.pill-excluded {
+		background: #f5f5f5;
+		color: #b0b0b0;
+		border: 1px solid #d4d4d4;
+		text-decoration: line-through;
+		opacity: 0.6;
+	}
+
+	.pg-skipped {
+		opacity: 0.45;
 	}
 
 	.repair-actions {
@@ -1320,44 +1384,8 @@
 		font-size: 0.94rem;
 		line-height: 1.5;
 	}
-	.pending-entries {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: grid;
-		gap: 3px;
-	}
-	.pending-entries li {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 96px 62px 74px;
-		gap: 10px;
-		align-items: baseline;
-		font-size: 0.86rem;
-		padding: 3px 0;
-	}
-	.pending-dog {
-		font-weight: 600;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
 	.pending-amount {
 		color: #6b6459;
-	}
-	.pending-meal {
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: #6b6459;
-	}
-	.pending-why {
-		margin: 0;
-		font-size: 0.82rem;
-		font-weight: 600;
-		color: #a8501b;
-		padding: 7px 10px;
-		background: #f6e6d9;
-		border-radius: 3px;
 	}
 	.pending-implied {
 		margin: 0;
@@ -1388,11 +1416,6 @@
 	}
 	.group-missing {
 		color: #a8501b;
-	}
-	.pending-time {
-		font-size: 0.78rem;
-		color: #6b6459;
-		font-variant-numeric: tabular-nums;
 	}
 	.pending-actions {
 		display: flex;
