@@ -1,13 +1,12 @@
 import { env } from '$env/dynamic/private';
 import { getAdminDb } from '$lib/firebase/admin';
-import { slack, resolveAuthors } from '$lib/server/slackClient';
+import { newChannelMessages, resolveAuthors } from '$lib/server/slackClient';
 import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 
 /** Where the last-read message timestamp lives, so each run starts where the last stopped. */
 const CURSOR_DOC = 'syncState/slackPlaygroupCursor';
 /** A first run with no cursor takes this much history rather than the whole channel. */
 const FIRST_RUN_DAYS = 2;
-const MAX_MESSAGES = 200;
 
 interface SlackMessage {
 	ts: string;
@@ -41,19 +40,8 @@ export async function pollSlackPlaygroups(): Promise<PlaygroupPollResult> {
 	const db = getAdminDb();
 	const cursorSnap = await db.doc(CURSOR_DOC).get();
 	const lastTs: string | null = cursorSnap.exists ? (cursorSnap.data()?.ts ?? null) : null;
-	const oldest = lastTs ?? String(Math.floor((Date.now() - FIRST_RUN_DAYS * 86_400_000) / 1000));
-
-	const history = await slack(SLACK_BOT_TOKEN, 'conversations.history', {
-		channel: SLACK_PLAYGROUPS_CHANNEL_ID,
-		oldest,
-		limit: String(MAX_MESSAGES)
-	});
-
-	// Slack returns newest first; oldest is inclusive, so drop the cursor message itself.
-	const messages: SlackMessage[] = (history.messages ?? []).filter(
-		(m: SlackMessage) =>
-			m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim() && m.ts !== lastTs
-	);
+	// New messages and new thread replies since the cursor, newest first.
+	const messages: SlackMessage[] = await newChannelMessages(SLACK_BOT_TOKEN, SLACK_PLAYGROUPS_CHANNEL_ID, lastTs, FIRST_RUN_DAYS);
 	if (messages.length === 0) return { scanned: 0, queued: 0 };
 
 	const dogsSnap = await db.collection('dogs').select('name').get();

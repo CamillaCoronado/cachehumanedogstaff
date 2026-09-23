@@ -1,19 +1,10 @@
 import { env } from '$env/dynamic/private';
 import { getAdminDb } from '$lib/firebase/admin';
-import { slack, resolveAuthors } from '$lib/server/slackClient';
+import { channelHistory, resolveAuthors } from '$lib/server/slackClient';
 import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 
-const PAGE_SIZE = 200;
 /** Stops a very long range from running past the function's time limit (3,000 messages). */
 const MAX_PAGES = 15;
-
-interface SlackMessage {
-	ts: string;
-	text?: string;
-	user?: string;
-	subtype?: string;
-	bot_id?: string;
-}
 
 export interface PlaygroupBackfillSample {
 	slackTs: string;
@@ -62,25 +53,8 @@ export async function backfillSlackPlaygroups(
 	if (!SLACK_BOT_TOKEN || !SLACK_PLAYGROUPS_CHANNEL_ID) return { ...empty, skipped: 'not configured' };
 
 	const db = getAdminDb();
-	const messages: SlackMessage[] = [];
-	let cursor: string | undefined;
-	let pages = 0;
-	do {
-		const body = await slack(SLACK_BOT_TOKEN, 'conversations.history', {
-			channel: SLACK_PLAYGROUPS_CHANNEL_ID,
-			oldest: String(Math.floor(since.getTime() / 1000)),
-			limit: String(PAGE_SIZE),
-			...(cursor ? { cursor } : {})
-		});
-		messages.push(...(body.messages ?? []));
-		cursor = body.response_metadata?.next_cursor || undefined;
-		pages++;
-	} while (cursor && pages < MAX_PAGES);
-	const truncated = Boolean(cursor);
-
-	const reports = messages.filter(
-		(m) => m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim()
-	);
+	// Replies too: a playgroup is sometimes written up inside a thread.
+	const { messages: reports, truncated } = await channelHistory(SLACK_BOT_TOKEN, SLACK_PLAYGROUPS_CHANNEL_ID, since, MAX_PAGES, true);
 	if (reports.length === 0) return { ...empty, truncated };
 
 	const [dogsSnap, existingSnap] = await Promise.all([
