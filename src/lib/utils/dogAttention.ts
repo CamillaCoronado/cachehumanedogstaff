@@ -1,6 +1,7 @@
 import type { Dog, UserRole } from '$lib/types';
 import { checkDayTripEligibility, daysSince, sinceReturn } from '$lib/utils/dates';
 import {
+	clockStart,
 	enrichmentOverdueDays,
 	getBathStatus,
 	getDayTripGapDays,
@@ -94,7 +95,8 @@ export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
 	if (dog.status !== 'active' || dog.inFoster || dog.permanentFoster) return flags;
 	if (dog.isolationStatus !== 'none') return flags;
 
-	const arrivedDays = daysSince(dog.shelterSince ?? dog.intakeDate, today) ?? 0;
+	// Days since the clocks started: reaching the floor, or back from foster.
+	const arrivedDays = daysSince(clockStart(dog), today) ?? 0;
 
 	if (isBathDue(dog, today)) {
 		const bath = getBathStatus(dog, today);
@@ -136,7 +138,7 @@ export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
 	}
 
 	if (isPlaygroupEligible(dog, today)) {
-		const gap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince ?? dog.intakeDate), today);
+		const gap = daysSince(sinceReturn(lastPlaygroupDate, clockStart(dog)), today);
 		if (gap === null) {
 			flags.push({ kind: 'playgroup', label: 'No playgroup logged yet.', short: 'no playgroup yet', days: arrivedDays, priority: 63, tone: 'info' });
 		} else if (gap >= PLAYGROUP_OVERDUE_DAYS) {

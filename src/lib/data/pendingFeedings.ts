@@ -43,6 +43,7 @@ async function currentDogIndex() {
 			permanentFoster: d.permanentFoster,
 			inFosterSince: toIso(d.inFosterSince),
 			shelterSince: toIso(d.shelterSince),
+			fosterReturnedAt: toIso(d.fosterReturnedAt),
 			isolationStatus: d.isolationStatus,
 			isIncoming: d.isIncoming,
 			surgeryDate: toIso(d.surgeryDate),

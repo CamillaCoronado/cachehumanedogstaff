@@ -148,6 +148,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			'permanentFoster',
 			'inFosterSince',
 			'shelterSince',
+			'fosterReturnedAt',
 			'isolationStatus',
 			'isIncoming',
 			'surgeryDate',

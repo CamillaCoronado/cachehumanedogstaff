@@ -85,16 +85,30 @@ describe('bath for transfers', () => {
 	});
 
 	it('counts a return from foster as a bath — fosters bathe the dogs', () => {
-		const back = makeDog({ intakeDate: new Date(2026, 1, 1), shelterSince: new Date(2026, 5, 1), shelterSinceReason: 'foster', lastBathDate: null });
+		const back = makeDog({ intakeDate: new Date(2026, 1, 1), fosterReturnedAt: new Date(2026, 5, 1), lastBathDate: null });
 		expect(kinds(back)).not.toContain('bath');
-		// Older records have no reason: a shelterSince long after intake reads as a foster return.
-		const legacy = makeDog({ intakeDate: new Date(2026, 1, 1), shelterSince: new Date(2026, 5, 1), lastBathDate: null });
-		expect(kinds(legacy)).not.toContain('bath');
 	});
 
-	it('flags a transfer that sat in Incoming a long time, when the reason is recorded', () => {
-		const slow = makeDog({ intakeDate: new Date(2026, 3, 1), shelterSince: new Date(2026, 5, 1), shelterSinceReason: 'incoming', lastBathDate: null });
-		expect(kinds(slow)).toContain('bath');
+	it('restarts the enrichment clocks on a foster return, but not the length of stay', () => {
+		// Day trip well before foster; back from foster 3 days ago (today is 12 June).
+		const back = makeDog({
+			intakeDate: new Date(2026, 1, 1),
+			lastDayTripDate: new Date(2026, 2, 1),
+			lastYardDate: null,
+			fosterReturnedAt: new Date(2026, 5, 9)
+		});
+		const flags = dogAttention(back, { today, lastPlaygroupDate: new Date(2026, 5, 11), tripEligibility: eligible });
+		// Fresh clocks: 3 days since return is not overdue, and the pre-foster trip no
+		// longer counts, so it reads "no day trip yet" rather than months overdue.
+		expect(flags.map((f) => f.kind)).not.toContain('enrichment');
+		expect(flags.find((f) => f.kind === 'daytrip')?.short).toBe('no day trip yet');
+	});
+
+	it('uses the later of a real bath and a foster return', () => {
+		const back = makeDog({ intakeDate: new Date(2026, 1, 1), lastBathDate: new Date(2026, 1, 2), fosterReturnedAt: new Date(2026, 5, 1) });
+		expect(kinds(back)).not.toContain('bath');
+		const longAgo = makeDog({ intakeDate: new Date(2026, 1, 1), lastBathDate: new Date(2026, 1, 2), fosterReturnedAt: new Date(2026, 3, 1) });
+		expect(kinds(longAgo)).toContain('bath');
 	});
 
 	it('flags a bath 30+ days after the last one this stay', () => {
