@@ -550,9 +550,12 @@
 
 	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
 		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none' && !d.isIncoming);
+		// Baths include Incoming dogs: transfers come in through ASM's Incoming location
+		// and need their first bath like any other new arrival.
+		const bathDogs = activeDogs.filter((d) => d.isolationStatus === 'none');
 		const items: AttentionItem[] = [];
 
-		for (const { dog, days, isNewIntake } of getBathAttentionDogs(shelterDogs, today)) {
+		for (const { dog, days, isNewIntake } of getBathAttentionDogs(bathDogs, today)) {
 			items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days, isNewIntake });
 		}
 		for (const { dog, days } of getOverdueEnrichmentDogs(shelterDogs, sessions, today)) {
