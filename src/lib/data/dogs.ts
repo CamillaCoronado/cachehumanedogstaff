@@ -126,6 +126,7 @@ interface StoredDog {
 	inFoster: boolean;
 	inFosterSince?: string | null;
 	shelterSince?: string | null;
+	shelterSinceReason?: 'foster' | 'incoming' | null;
 	playgroupReadyDate?: string | null;
 	awaitingEvaluation?: boolean;
 	evaluationAutoCleared?: boolean;
@@ -455,6 +456,7 @@ function serializeDog(dog: Dog): StoredDog {
 		inFoster: dog.inFoster ?? false,
 		inFosterSince: toDateString(dog.inFosterSince) ?? null,
 		shelterSince: toDateString(dog.shelterSince) ?? null,
+		shelterSinceReason: dog.shelterSinceReason ?? null,
 		playgroupReadyDate: toDateString(dog.playgroupReadyDate) ?? null,
 		awaitingEvaluation: dog.awaitingEvaluation ?? false,
 		evaluationAutoCleared: dog.evaluationAutoCleared ?? false,
@@ -654,6 +656,8 @@ function deserializeDog(stored: StoredDog): Dog {
 		inFoster: stored.inFoster ?? false,
 		inFosterSince: stored.inFosterSince ? toDate(stored.inFosterSince) : null,
 		shelterSince: stored.shelterSince ? toDate(stored.shelterSince) : null,
+		shelterSinceReason:
+			stored.shelterSinceReason === 'foster' || stored.shelterSinceReason === 'incoming' ? stored.shelterSinceReason : null,
 		playgroupReadyDate: stored.playgroupReadyDate ? toDate(stored.playgroupReadyDate) : null,
 		awaitingEvaluation: stored.awaitingEvaluation ?? false,
 		evaluationAutoCleared: stored.evaluationAutoCleared ?? false,

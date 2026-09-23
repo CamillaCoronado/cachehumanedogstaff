@@ -427,7 +427,9 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 				const recentIntake = intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000;
 				const needsEvalFlag = existing?.awaitingEvaluation === undefined && recentIntake && !isPuppy;
 				const extra = {
-					...(returningFromFoster || leavingIncoming ? { shelterSince: now } : {}),
+					...(returningFromFoster || leavingIncoming
+						? { shelterSince: now, shelterSinceReason: returningFromFoster ? 'foster' : 'incoming' }
+						: {}),
 					...(needsEvalFlag ? { awaitingEvaluation: true } : {})
 				};
 				writes.push({

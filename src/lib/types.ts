@@ -184,6 +184,8 @@ export interface Dog {
 	inFoster: boolean;
 	inFosterSince?: DateValue | null;
 	shelterSince?: DateValue | null;
+	/** Why shelterSince was stamped: back from foster, or moved off Incoming (transfers). */
+	shelterSinceReason?: 'foster' | 'incoming' | null;
 	playgroupReadyDate?: DateValue | null;
 	awaitingEvaluation?: boolean;
 	/** True once the sheet-color auto-clear has fired for this dog, so a later manual

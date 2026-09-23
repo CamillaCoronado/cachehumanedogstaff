@@ -653,7 +653,7 @@
 		setFosterUpdating(dog.id, true);
 		errorMessage = '';
 		try {
-			await updateDog(dog.id, { inFoster: false, shelterSince: new Date() });
+			await updateDog(dog.id, { inFoster: false, shelterSince: new Date(), shelterSinceReason: 'foster' });
 			await loadBoard();
 		} catch (error) {
 			console.error(error);

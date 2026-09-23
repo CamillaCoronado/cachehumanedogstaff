@@ -84,6 +84,19 @@ describe('bath for transfers', () => {
 		expect(kinds(bathed)).not.toContain('bath');
 	});
 
+	it('counts a return from foster as a bath — fosters bathe the dogs', () => {
+		const back = makeDog({ intakeDate: new Date(2026, 1, 1), shelterSince: new Date(2026, 5, 1), shelterSinceReason: 'foster', lastBathDate: null });
+		expect(kinds(back)).not.toContain('bath');
+		// Older records have no reason: a shelterSince long after intake reads as a foster return.
+		const legacy = makeDog({ intakeDate: new Date(2026, 1, 1), shelterSince: new Date(2026, 5, 1), lastBathDate: null });
+		expect(kinds(legacy)).not.toContain('bath');
+	});
+
+	it('flags a transfer that sat in Incoming a long time, when the reason is recorded', () => {
+		const slow = makeDog({ intakeDate: new Date(2026, 3, 1), shelterSince: new Date(2026, 5, 1), shelterSinceReason: 'incoming', lastBathDate: null });
+		expect(kinds(slow)).toContain('bath');
+	});
+
 	it('flags a bath 30+ days after the last one this stay', () => {
 		const due = makeDog({ intakeDate: new Date(2026, 3, 1), lastBathDate: new Date(2026, 4, 1) });
 		expect(kinds(due)).toContain('bath');

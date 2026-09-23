@@ -70,16 +70,22 @@ export function getBathStatus(dog: Dog, today: Date): BathStatus {
 	const absent = { isDue: false, isNewIntake: false, overdueDays: null, daysSinceArrival: 0 };
 	if (!bathEligible(dog.surgeryDate, today)) return absent;
 
-	// Only a real bath counts. shelterSince is stamped when a dog moves off Incoming —
-	// every transfer does — and it used to stand in for a bath, so no transfer was ever
-	// flagged for its first one. A bath given any time this stay (on or after the intake
-	// date, including while still in Incoming) counts; otherwise the dog needs one.
 	const intakeMs = toDate(dog.intakeDate)?.getTime() ?? 0;
 	const bathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
-	const bathCountsForStay =
-		dog.lastBathDate != null &&
-		(bathMs >= intakeMs || isSameCalendarDay(dog.lastBathDate, dog.intakeDate));
-	const effectiveBathDate: Dog['lastBathDate'] | string | null = bathCountsForStay ? dog.lastBathDate : null;
+	let effectiveBathDate: Dog['lastBathDate'] | string | null;
+	if (dog.shelterSince && cameBackFromFoster(dog)) {
+		// Fosters bathe the dogs, so coming back counts as a bath.
+		const returnMs = toDate(dog.shelterSince)?.getTime() ?? 0;
+		effectiveBathDate = bathMs > returnMs ? dog.lastBathDate : dog.shelterSince;
+	} else {
+		// A new arrival — including a transfer moving off Incoming, which stamps
+		// shelterSince too — needs a real bath. One given any time this stay counts,
+		// even while the dog was still in Incoming.
+		const bathCountsForStay =
+			dog.lastBathDate != null &&
+			(bathMs >= intakeMs || isSameCalendarDay(dog.lastBathDate, dog.intakeDate));
+		effectiveBathDate = bathCountsForStay ? dog.lastBathDate : null;
+	}
 
 	const days = daysSince(effectiveBathDate, today);
 	const isNewIntake = !effectiveBathDate;
@@ -90,6 +96,23 @@ export function getBathStatus(dog: Dog, today: Date): BathStatus {
 		return { isDue: true, isNewIntake: false, overdueDays: days - BATH_OVERDUE_DAYS, daysSinceArrival };
 	}
 	return absent;
+}
+
+/** Leaving Incoming happens soon after intake; a stay in foster runs longer. */
+const INCOMING_EXIT_MAX_DAYS = 14;
+
+/**
+ * Whether shelterSince marks a return from foster rather than a transfer moving off
+ * Incoming. Recorded on the dog from now on; older records carry no reason, so a
+ * shelterSince within two weeks of intake is read as leaving Incoming.
+ */
+export function cameBackFromFoster(dog: Dog): boolean {
+	if (dog.shelterSinceReason) return dog.shelterSinceReason === 'foster';
+	const since = toDate(dog.shelterSince)?.getTime();
+	const intake = toDate(dog.intakeDate)?.getTime();
+	if (since === undefined) return false;
+	if (intake === undefined) return true;
+	return since - intake > INCOMING_EXIT_MAX_DAYS * 86_400_000;
 }
 
 export interface BathAttentionItem {
