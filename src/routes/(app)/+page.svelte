@@ -96,7 +96,7 @@
 	const departureDisplay = {
 		adopted: { emoji: '🏠', label: 'adopted', tagClass: 'movement-tag-adopted' },
 		transferred: { emoji: '🚌', label: 'transferred', tagClass: 'movement-tag-adopted' },
-		euthanized: { emoji: '🌈', label: 'rainbow bridge', tagClass: 'movement-tag-rainbow' }
+		euthanized: { emoji: '🌈', label: 'deceased', tagClass: 'movement-tag-rainbow' }
 	} as const;
 	let failedThumbs = new Set<string>();
 

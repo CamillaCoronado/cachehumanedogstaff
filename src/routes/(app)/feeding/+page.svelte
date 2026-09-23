@@ -107,7 +107,7 @@
 	$: displayDogs = mealTime === 'second'
 		? [...secondMealDogs].sort((a, b) => compareByWalkPath(a, b, walkPath))
 		: [...shelterDogs].sort((a, b) => compareByWalkPath(a, b, walkPath));
-	$: specialFeedDogs = displayDogs.filter((dog) => isSpecialFeeding(dog));
+	$: specialFeedDogs = displayDogs.filter((dog) => isSpecialFeeding(dog, mealTime, selectedDay));
 	// Today's exceptions, pinned above the special list: surgery-day dogs and
 	// dogs whose most recent meal was refused or barely touched.
 	$: exceptionDogs = displayDogs
@@ -606,7 +606,7 @@
 								<div class="feeding-special-row">
 									<a class="feeding-special-name dog-name-link" href="/dogs/{dog.id}">{dog.name}</a>
 									<span class="feeding-special-amount">{activeFoodAmountLabel(dog)}</span>
-									<span class="feeding-special-reasons">{specialFeedingReasons(dog, mealTime).join(' • ')}</span>
+									<span class="feeding-special-reasons">{specialFeedingReasons(dog, mealTime, selectedDay).join(' • ')}</span>
 								</div>
 							{/each}
 						</div>
@@ -637,7 +637,7 @@
 						{#each displayDogs as dog, index}
 							{@const flags = feedingFlags(dog)}
 							{@const notes = dog.dietaryNotes?.trim() ?? ''}
-							{@const specialReasons = specialFeedingReasons(dog, mealTime)}
+							{@const specialReasons = specialFeedingReasons(dog, mealTime, selectedDay)}
 							{@const fedLog = fedMap[dog.id]}
 							<article
 								class={`feeding-feed-row ${fedLog ? `feeding-feed-row-fed feeding-feed-row-fed-${fedLog.amountEaten}` : ''} ${
@@ -1982,15 +1982,22 @@
 	}
 
 	.feeding-feed-notes {
-		margin: 0;
-		font-size: 0.66rem;
-		line-height: 1.3;
-		color: #425971;
+		margin: 0.2rem 0 0;
+		padding: 0.35rem 0.5rem;
+		border-left: 3px solid #d9a21b;
+		border-radius: 0.2rem;
+		background: #fff4cc;
+		font-size: 0.82rem;
+		font-weight: 600;
+		line-height: 1.35;
+		color: #1f2d3d;
 	}
 
 	.feeding-feed-notes span {
-		font-weight: 700;
-		color: #273c55;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #7a4f00;
 	}
 
 	.feeding-feed-actions {

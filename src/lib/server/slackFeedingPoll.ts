@@ -8,6 +8,7 @@ import {
 	yardLogId,
 	planBaths,
 	planYardTime,
+	feedingDate,
 	planFeedingsDetailed,
 	shelterDay,
 	planSurgery,
@@ -73,17 +74,18 @@ async function writeFeedings(
 		chunk.forEach((entry, j) => {
 			// Compared on the shelter's calendar day, not the server's: an evening report
 			// is already the next day in UTC, and would miss the log it should defer to.
-			const day = shelterDay(postedAt);
+			const fedAt = feedingDate(postedAt, entry.mealTime);
+			const day = shelterDay(fedAt);
 			const already = existing[j].docs.some((d) => {
 				const x = d.data();
 				return x.mealTime === entry.mealTime && shelterDay(new Date(x.date)) === day;
 			});
 			if (entry.implied && already) return;
 
-			const id = feedingLogId(postedAt, entry.dogId, entry.mealTime);
+			const id = feedingLogId(fedAt, entry.dogId, entry.mealTime);
 			batch.set(db.collection('dogs').doc(entry.dogId).collection('feedingLogs').doc(id), {
 				id,
-				date: postedAt.toISOString(),
+				date: fedAt.toISOString(),
 				mealTime: entry.mealTime,
 				amountEaten: entry.amountEaten,
 				notes,

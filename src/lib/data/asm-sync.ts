@@ -33,6 +33,12 @@ export interface SyncEnvironment {
 	fetchAnimals(): Promise<AsmAnimal[] | null>;
 	fetchRecentAdoptions(days: number): Promise<{ id: string; shelterCode: string; adoptedAt: string }[]>;
 	/**
+	 * Dogs ASM has recorded as deceased lately (json_recent_changes, about a month back).
+	 * The shelter list drops a dog the moment it dies, so without this a death looks
+	 * like any other disappearance and gets archived as an adoption.
+	 */
+	fetchRecentDeaths?(): Promise<{ shelterCode: string; deceasedAt: string }[]>;
+	/**
 	 * Cross-sync bookkeeping (which dog and adoption ids were already seen). This used to
 	 * live in localStorage, which made "new arrival" a per-browser notion — every browser
 	 * discovered the same arrival separately, and a shared record could not exist.
@@ -485,9 +491,20 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		}
 	} catch { /* ignore */ }
 
-	// Deceased dogs still present in the ASM payload: archive as euthanized, with
-	// the deceased date as the movement date. This must win over the adoptions
-	// feed so a passed dog is never mislabeled "adopted".
+	// Deceased dogs: archive as euthanized, with the deceased date as the movement
+	// date. This must win over the adoptions feed so a passed dog is never mislabeled
+	// "adopted". The recent-changes feed is where they normally show up, since the
+	// shelter list has usually dropped them already.
+	let recentDeaths: { shelterCode: string; deceasedAt: string }[] = [];
+	try {
+		recentDeaths = (await env.fetchRecentDeaths?.()) ?? [];
+	} catch { /* ignore — falls back to what the shelter list says */ }
+	for (const d of recentDeaths) {
+		if (!d.shelterCode) continue;
+		shelterCodeOutcomes.set(d.shelterCode, 'euthanized');
+		const deceased = normalizeDateStr(d.deceasedAt);
+		if (deceased) movementDateByShelterCode.set(d.shelterCode, deceased);
+	}
 	for (const a of allAnimals) {
 		if (!a.DECEASEDDATE) continue;
 		if ((a.SPECIESNAME ?? '').toLowerCase() !== 'dog') continue;
@@ -498,6 +515,7 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 	}
 
 	const archived = await markStaleAsmDogsArchived(env, currentAsmIds, shelterCodeOutcomes, movementDateByShelterCode);
+	await correctMislabeledDeaths(env, existingDocs, shelterCodeOutcomes, movementDateByShelterCode);
 
 	const archivedChanges: SyncChange[] = archived.map(({ id, name, outcome }) => ({
 		id,
@@ -540,6 +558,46 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		changes.push(change);
 	}
 	return { changes };
+}
+
+/**
+ * Dogs archived as adopted that ASM records as deceased. Before the sync read the
+ * recent-changes feed, every death was archived as an adoption, so this puts those
+ * right. It only moves adopted to euthanized, never the other way, and only when the
+ * death was around the day the dog was archived: a dog adopted months ago that later
+ * died at home was genuinely adopted.
+ */
+const MISLABEL_WINDOW_MS = 3 * 86_400_000;
+
+export async function correctMislabeledDeaths(
+	env: SyncEnvironment,
+	allDocs: Map<string, Record<string, unknown>>,
+	shelterCodeOutcomes: Map<string, ArchiveOutcome>,
+	movementDateByShelterCode: Map<string, string>
+): Promise<string[]> {
+	const writes: { id: string; data: Record<string, unknown> }[] = [];
+	const now = new Date().toISOString();
+	for (const [id, data] of allDocs) {
+		if (data.status !== 'adopted') continue;
+		const shelterCode = data.asmShelterCode as string | undefined;
+		if (!shelterCode || shelterCodeOutcomes.get(shelterCode) !== 'euthanized') continue;
+		const deceased = movementDateByShelterCode.get(shelterCode);
+		const leftAt = new Date(String(data.leftShelterDate ?? '')).getTime();
+		const diedAt = deceased ? new Date(deceased).getTime() : NaN;
+		if (!Number.isFinite(leftAt) || !Number.isFinite(diedAt)) continue;
+		if (Math.abs(leftAt - diedAt) > MISLABEL_WINDOW_MS) continue;
+		writes.push({
+			id,
+			data: {
+				status: 'euthanized',
+				...(deceased ? { leftShelterDate: deceased } : {}),
+				updatedAt: now,
+				_lastSyncedAt: now
+			}
+		});
+	}
+	for (let i = 0; i < writes.length; i += 499) await env.commit(writes.slice(i, i + 499));
+	return writes.map((w) => w.id);
 }
 
 /**
