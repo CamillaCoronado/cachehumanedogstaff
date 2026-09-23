@@ -151,7 +151,8 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 			'isolationStatus',
 			'isIncoming',
 			'surgeryDate',
-			'nicknames'
+			'nicknames',
+			'hasSecondMeal'
 		)
 			.get(),
 		db.collection('dogGroups').get()

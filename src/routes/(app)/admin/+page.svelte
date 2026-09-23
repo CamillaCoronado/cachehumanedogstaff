@@ -7,7 +7,7 @@
 	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
 	import { matchDogByName } from '$lib/utils/dogs';
-	import { listPendingFeedings, acceptPendingFeeding, dismissPendingFeeding } from '$lib/data/pendingFeedings';
+	import { listPendingFeedings, acceptPendingFeeding, dismissPendingFeeding, withCurrentReading } from '$lib/data/pendingFeedings';
 	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
@@ -139,7 +139,7 @@
 		pendingLoading = true;
 		pendingError = '';
 		try {
-			pendingFeedings = await listPendingFeedings();
+			pendingFeedings = await withCurrentReading(await listPendingFeedings());
 		} catch (error) {
 			console.error(error);
 			// Shown rather than toasted: a failure here is indistinguishable from an empty
