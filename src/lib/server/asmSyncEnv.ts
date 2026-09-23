@@ -73,7 +73,8 @@ export function createAdminSyncEnvironment(): SyncEnvironment {
 		async fetchRecentDeaths() {
 			const base = asmBase();
 			if (!base) return [];
-			const res = await fetch(`${base}&method=json_recent_changes`);
+			// ASM's changes feed is slow; never let it hold the sync past a few seconds.
+			const res = await fetch(`${base}&method=json_recent_changes`, { signal: AbortSignal.timeout(8000) });
 			if (!res.ok) return [];
 			const body = await res.json();
 			if (!Array.isArray(body)) return [];

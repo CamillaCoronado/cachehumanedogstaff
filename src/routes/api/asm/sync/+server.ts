@@ -37,15 +37,18 @@ export async function POST({ request }: RequestEvent) {
 
 	// Claim the slot in a transaction so two simultaneous logins cannot both decide they
 	// are the one to run it.
+	let lastSyncAt = 0;
 	const claimed = await db.runTransaction(async (tx) => {
 		const snap = await tx.get(lockRef);
 		const last = snap.exists ? Number(snap.data()?.at ?? 0) : 0;
+		lastSyncAt = last;
 		if (Date.now() - last < MIN_INTERVAL_MS) return false;
 		tx.set(lockRef, { at: Date.now(), by: uid });
 		return true;
 	});
 
-	if (!claimed) return json({ synced: false, reason: 'recent', changes: [] });
+	// Someone synced moments ago: say when, so the badge can show it rather than nothing.
+	if (!claimed) return json({ synced: false, reason: 'recent', lastSyncAt, changes: [] });
 
 	const result = await syncAnimalsFromASM(createAdminSyncEnvironment());
 	if (result.changes.length > 0) await recordSyncEventsAdmin(result.changes);

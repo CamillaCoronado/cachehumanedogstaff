@@ -252,7 +252,17 @@
 			headers: { authorization: `Bearer ${token}` }
 		});
 		if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
-		const result: { synced: boolean; changes: SyncChange[] } = await res.json();
+		const result: { synced: boolean; changes: SyncChange[]; lastSyncAt?: number } = await res.json();
+
+		// Skipped because someone synced in the last few minutes: show that sync's time,
+		// so the badge says it is current instead of showing nothing.
+		if (!result.synced && result.lastSyncAt) {
+			asmSyncedAt = new Intl.DateTimeFormat('en-US', {
+				hour: 'numeric',
+				minute: '2-digit',
+				hour12: true
+			}).format(new Date(result.lastSyncAt));
+		}
 
 		if (result.synced) {
 			asmSyncedAt = new Intl.DateTimeFormat('en-US', {

@@ -495,10 +495,16 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 	// date. This must win over the adoptions feed so a passed dog is never mislabeled
 	// "adopted". The recent-changes feed is where they normally show up, since the
 	// shelter list has usually dropped them already.
+	//
+	// That feed is slow, so it is only read when it can change something: a dog has
+	// dropped off the shelter list, or one was archived as adopted recently enough to be
+	// corrected. Reading it on every sync held every sync up behind it.
 	let recentDeaths: { shelterCode: string; deceasedAt: string }[] = [];
-	try {
-		recentDeaths = (await env.fetchRecentDeaths?.()) ?? [];
-	} catch { /* ignore — falls back to what the shelter list says */ }
+	if (anyDogDisappeared(existingDocs, currentAsmIds) || anyRecentAdoption(existingDocs)) {
+		try {
+			recentDeaths = (await env.fetchRecentDeaths?.()) ?? [];
+		} catch { /* ignore — falls back to what the shelter list says */ }
+	}
 	for (const d of recentDeaths) {
 		if (!d.shelterCode) continue;
 		shelterCodeOutcomes.set(d.shelterCode, 'euthanized');
@@ -558,6 +564,27 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		changes.push(change);
 	}
 	return { changes };
+}
+
+/** A dog archived as adopted inside the window a mislabeled death can be corrected in. */
+function anyRecentAdoption(docs: Map<string, Record<string, unknown>>): boolean {
+	const cutoff = Date.now() - MISLABEL_WINDOW_MS;
+	for (const data of docs.values()) {
+		if (data.status !== 'adopted') continue;
+		const left = new Date(String(data.leftShelterDate ?? '')).getTime();
+		if (Number.isFinite(left) && left >= cutoff) return true;
+	}
+	return false;
+}
+
+/** An active, ASM-synced dog that is no longer on ASM's shelter list. */
+function anyDogDisappeared(docs: Map<string, Record<string, unknown>>, currentAsmIds: Set<number>): boolean {
+	for (const [id, data] of docs) {
+		if (data.status === 'adopted' || data.status === 'transferred' || data.status === 'euthanized') continue;
+		const asmId = (data.asmId as number | undefined) ?? (/^\d+$/.test(id) ? Number(id) : undefined);
+		if (asmId !== undefined && !currentAsmIds.has(asmId)) return true;
+	}
+	return false;
 }
 
 /**

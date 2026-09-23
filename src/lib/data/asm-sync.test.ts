@@ -5,6 +5,7 @@ function fakeEnv(
 	docs: Record<string, Record<string, unknown>>,
 	opts: { animals?: Partial<AsmAnimal>[]; deaths?: { shelterCode: string; deceasedAt: string }[] } = {}
 ) {
+	const deathReads = { count: 0 };
 	const store = new Map(Object.entries(docs).map(([id, d]) => [id, { ...d }]));
 	const state = new Map<string, unknown>();
 	const env: SyncEnvironment = {
@@ -21,6 +22,7 @@ function fakeEnv(
 			return [];
 		},
 		async fetchRecentDeaths() {
+			deathReads.count++;
 			return opts.deaths ?? [];
 		},
 		async readState<T>(key: string, fallback: T) {
@@ -30,7 +32,7 @@ function fakeEnv(
 			state.set(key, value);
 		}
 	};
-	return { env, store };
+	return { env, store, deathReads };
 }
 
 // One dog still on the shelter list, so the sync never sees an empty shelter.
@@ -58,9 +60,10 @@ describe('deaths from ASM', () => {
 	});
 
 	it('corrects a death that was archived as an adoption', async () => {
+		const yesterday = new Date(Date.now() - 86_400_000);
 		const { env, store } = fakeEnv(
-			{ '7': { name: 'Misfiled', status: 'adopted', asmId: 7, asmShelterCode: 'A7', leftShelterDate: '2026-09-20T18:00:00.000Z' } },
-			{ animals: [stayer], deaths: [{ shelterCode: 'A7', deceasedAt: '2026-09-20' }] }
+			{ '7': { name: 'Misfiled', status: 'adopted', asmId: 7, asmShelterCode: 'A7', leftShelterDate: yesterday.toISOString() } },
+			{ animals: [stayer], deaths: [{ shelterCode: 'A7', deceasedAt: yesterday.toISOString().slice(0, 10) }] }
 		);
 		await syncAnimalsFromASM(env);
 		expect(store.get('7')?.status).toBe('euthanized');
@@ -73,5 +76,25 @@ describe('deaths from ASM', () => {
 		);
 		await syncAnimalsFromASM(env);
 		expect(store.get('8')?.status).toBe('adopted');
+	});
+});
+
+describe('the slow deaths feed', () => {
+	it('is not read when no dog has left and nothing could need correcting', async () => {
+		const { env, deathReads } = fakeEnv(
+			{ '1': { name: 'Stayer', status: 'active', asmId: 1, asmShelterCode: 'A1' } },
+			{ animals: [stayer] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(deathReads.count).toBe(0);
+	});
+
+	it('is read when a dog drops off the shelter list', async () => {
+		const { env, deathReads } = fakeEnv(
+			{ '9': { name: 'Gone', status: 'active', asmId: 9, asmShelterCode: 'A9' } },
+			{ animals: [stayer] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(deathReads.count).toBe(1);
 	});
 });
