@@ -212,7 +212,8 @@ export function getOverdueEnrichmentDogs(
 
 	const items: EnrichmentAttentionItem[] = [];
 	for (const dog of dogs) {
-		if (dog.inFoster || dog.isIncoming) continue;
+		// Incoming dogs count: transfers come in through ASM's Incoming location.
+		if (dog.inFoster) continue;
 		if (dog.isOutOnDayTrip) continue;
 		if (dog.isolationStatus !== 'none') continue;
 		if (dog.sickHold) continue;
