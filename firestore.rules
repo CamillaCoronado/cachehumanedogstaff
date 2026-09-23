@@ -192,12 +192,12 @@ service cloud.firestore {
     }
 
     // Feeding messages read from Slack, waiting for an admin to accept or dismiss them.
-    // Written server-side by the webhook; nothing here reaches a dog's history until an
+    // Written server-side by the poll; nothing here reaches a dog's history until an
     // admin approves it on the Admin page.
     match /pendingFeedings/{docId} {
       allow read, update: if canManageUsers();
       allow delete: if canManageUsers();
-      // Created only by the webhook, where firebase-admin bypasses these rules.
+      // Created only by the poll, where firebase-admin bypasses these rules.
       allow create: if false;
     }
 

@@ -5,6 +5,7 @@ import { syncAnimalsFromASM } from '$lib/data/asm-sync';
 import { createAdminSyncEnvironment } from '$lib/server/asmSyncEnv';
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
+import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
 
 /**
  * Twenty people opening the app at 8am should not each reconcile the whole roster
@@ -56,6 +57,11 @@ export async function POST({ request }: RequestEvent) {
 		await pollSlackFeedings();
 	} catch (e) {
 		console.error('[slack feedings]', e);
+	}
+	try {
+		await pollSlackPlaygroups();
+	} catch (e) {
+		console.error('[slack playgroups]', e);
 	}
 
 	// Return the changes themselves, not just a count — the sync log panel lists them.

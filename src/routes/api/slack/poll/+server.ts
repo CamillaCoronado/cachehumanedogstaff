@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
+import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
 
 /**
  * Daily safety net. The queue is kept current by the ASM sync every user triggers on
@@ -15,5 +16,6 @@ export async function GET({ request }: RequestEvent) {
 	if (!CRON_SECRET) throw error(503, 'CRON_SECRET not configured');
 	if (request.headers.get('authorization') !== `Bearer ${CRON_SECRET}`) throw error(401, 'Unauthorized');
 
-	return json({ polled: true, ...(await pollSlackFeedings()) });
+	const [feedings, playgroups] = await Promise.all([pollSlackFeedings(), pollSlackPlaygroups()]);
+	return json({ polled: true, feedings, playgroups });
 }

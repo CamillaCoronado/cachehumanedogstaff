@@ -34,8 +34,8 @@ adoption/transfer/foster/incoming celebration overlays intentionally stay custom
 - Candidate spots: feeding page (didn't-eat list, per-meal summary), playgroups page
   (sessions logged today), bath logs, possibly day trips out/returned.
 - Existing pieces to build on: the daytrips page already has a `copyToClipboard`
-  helper; there is an inbound Slack webhook (`src/routes/api/slack/events/+server.ts`)
-  that imports playgroup messages — this feature is the outbound counterpart
+  helper; there is a Slack poller (`src/lib/server/slackPlaygroupPoll.ts`) that
+  imports playgroup messages — this feature is the outbound counterpart
   (clipboard first; true Slack API posting could come later).
 - Suggested shape: a shared `$lib/utils/slackFormat.ts` with one formatter per update
   type + small copy buttons on each page.
