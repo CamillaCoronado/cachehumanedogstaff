@@ -78,13 +78,14 @@ describe('pendingItems', () => {
 		expect(bath?.tone).toBe('ready');
 	});
 
-	it('sorts by priority descending (evaluation above bath)', () => {
-		const dog = makeDog({ goodWithDogs: 'unknown', lastBathDate: null });
+	it('sorts by priority descending (dog test above bath), with no other evaluations', () => {
+		const dog = makeDog({ goodWithDogs: 'unknown', goodWithCats: 'unknown', lastBathDate: null, dateOfBirth: new Date(2022, 0, 1) });
 		const items = pendingItems(dog, eligible, null, today);
-		const evalIdx = items.findIndex((i) => i.label.startsWith('Needs evaluation'));
+		const testIdx = items.findIndex((i) => i.label.startsWith('Needs a dog compatibility test'));
 		const bathIdx = items.findIndex((i) => i.action === 'log_bath');
-		expect(evalIdx).toBeGreaterThanOrEqual(0);
-		expect(evalIdx).toBeLessThan(bathIdx);
+		expect(testIdx).toBeGreaterThanOrEqual(0);
+		expect(testIdx).toBeLessThan(bathIdx);
+		expect(items.some((i) => i.label.startsWith('Needs evaluation'))).toBe(false);
 	});
 
 	it('treats manager-only reasons as info when otherwise eligible', () => {

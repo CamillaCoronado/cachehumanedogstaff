@@ -53,14 +53,14 @@ describe('dogAttention', () => {
 		expect(kinds(makeDog({ ...due, status: 'adopted' }))).toEqual([]);
 	});
 
-	it('applies every rule: enrichment, day trip, playgroup, dog test, evaluation', () => {
+	it('applies every rule: enrichment, day trip, dog test (no other evaluations)', () => {
 		const dog = makeDog({
 			goodWithDogs: 'unknown',
 			lastDayTripDate: new Date(2026, 4, 20),
 			lastYardDate: null
 		});
 		// No playgroup ever, trip 23 days ago, unknown with dogs.
-		expect(kinds(dog, null)).toEqual(['daytrip', 'dogtest', 'enrichment', 'evaluation']);
+		expect(kinds(dog, null)).toEqual(['daytrip', 'dogtest', 'enrichment']);
 	});
 
 	it('is exactly what the dog card lists as to-dos', () => {
