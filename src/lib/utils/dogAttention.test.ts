@@ -70,3 +70,22 @@ describe('dogAttention', () => {
 		for (const f of flags) expect(card).toContain(f.label);
 	});
 });
+
+describe('bath for transfers', () => {
+	it('flags a transfer that moved off Incoming without a bath', () => {
+		// shelterSince is stamped when a dog leaves Incoming; it is not a bath.
+		const dior = makeDog({ intakeDate: new Date(2026, 5, 5), shelterSince: new Date(2026, 5, 8), lastBathDate: null });
+		const bath = dogAttention(dior, { today, lastPlaygroupDate: new Date(2026, 5, 11), tripEligibility: eligible }).find((f) => f.kind === 'bath');
+		expect(bath?.short).toContain('new intake');
+	});
+
+	it('counts a bath given while the dog was still in Incoming', () => {
+		const bathed = makeDog({ intakeDate: new Date(2026, 5, 5), lastBathDate: new Date(2026, 5, 6), shelterSince: new Date(2026, 5, 8) });
+		expect(kinds(bathed)).not.toContain('bath');
+	});
+
+	it('flags a bath 30+ days after the last one this stay', () => {
+		const due = makeDog({ intakeDate: new Date(2026, 3, 1), lastBathDate: new Date(2026, 4, 1) });
+		expect(kinds(due)).toContain('bath');
+	});
+});

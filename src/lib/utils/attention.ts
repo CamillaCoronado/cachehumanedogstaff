@@ -70,19 +70,16 @@ export function getBathStatus(dog: Dog, today: Date): BathStatus {
 	const absent = { isDue: false, isNewIntake: false, overdueDays: null, daysSinceArrival: 0 };
 	if (!bathEligible(dog.surgeryDate, today)) return absent;
 
-	let effectiveBathDate: Dog['lastBathDate'] | string | null;
-	if (dog.shelterSince) {
-		const returnMs = toDate(dog.shelterSince)?.getTime() ?? 0;
-		const bathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
-		effectiveBathDate = bathMs > returnMs ? dog.lastBathDate : dog.shelterSince;
-	} else {
-		const intakeMs = toDate(dog.intakeDate)?.getTime() ?? 0;
-		const bathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
-		const bathCountsForStay =
-			dog.lastBathDate != null &&
-			(bathMs >= intakeMs || isSameCalendarDay(dog.lastBathDate, dog.intakeDate));
-		effectiveBathDate = bathCountsForStay ? dog.lastBathDate : null;
-	}
+	// Only a real bath counts. shelterSince is stamped when a dog moves off Incoming —
+	// every transfer does — and it used to stand in for a bath, so no transfer was ever
+	// flagged for its first one. A bath given any time this stay (on or after the intake
+	// date, including while still in Incoming) counts; otherwise the dog needs one.
+	const intakeMs = toDate(dog.intakeDate)?.getTime() ?? 0;
+	const bathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
+	const bathCountsForStay =
+		dog.lastBathDate != null &&
+		(bathMs >= intakeMs || isSameCalendarDay(dog.lastBathDate, dog.intakeDate));
+	const effectiveBathDate: Dog['lastBathDate'] | string | null = bathCountsForStay ? dog.lastBathDate : null;
 
 	const days = daysSince(effectiveBathDate, today);
 	const isNewIntake = !effectiveBathDate;
