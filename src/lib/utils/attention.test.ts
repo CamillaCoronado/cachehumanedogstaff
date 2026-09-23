@@ -121,9 +121,9 @@ describe('getOverdueEnrichmentDogs', () => {
 		expect(items[0].days).toBe(16);
 	});
 
-	it('excludes foster and incoming dogs', () => {
+	it('excludes foster dogs but includes incoming ones (transfers)', () => {
 		expect(getOverdueEnrichmentDogs([makeDog({ inFoster: true })], [], today)).toEqual([]);
-		expect(getOverdueEnrichmentDogs([makeDog({ isIncoming: true })], [], today)).toEqual([]);
+		expect(getOverdueEnrichmentDogs([makeDog({ isIncoming: true })], [], today)).toHaveLength(1);
 	});
 
 	it('hides dogs on medical rest or manager-only handling while the clock keeps running', () => {

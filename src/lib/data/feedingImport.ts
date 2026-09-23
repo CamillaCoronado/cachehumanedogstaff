@@ -337,9 +337,10 @@ function presentDogsOn(index: DogIndex, when: Date): Candidate[] {
 		for (const c of preferCandidates(candidates, at)) {
 			if (seen.has(c.id) || !c.feedable || inFosterOn(c, at)) continue;
 			if (c.departedUndated || c.fosterUndated) continue;
-			// Incoming dogs are only here on the day they arrive, as on the Feeding page;
-			// after that they are either in (no longer incoming) or not coming.
-			if (c.isIncoming && (c.from === null || shelterDay(new Date(c.from)) !== day)) continue;
+			// Incoming dogs count once their intake day has come. Transfers arrive through
+			// ASM's Incoming location and can stay marked Incoming after they are here and
+			// being fed; one booked for a later day is not here yet.
+			if (c.isIncoming && (c.from === null || shelterDay(new Date(c.from)) > day)) continue;
 			seen.add(c.id);
 			out.push(c);
 		}

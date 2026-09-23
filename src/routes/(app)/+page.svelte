@@ -4,14 +4,16 @@
 	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, updateDog } from '$lib/data/dogs';
 	import { ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
-	import { canEditDogs } from '$lib/utils/permissions';
+	import { canEditDogs, resolveRole } from '$lib/utils/permissions';
+	import { localRole } from '$lib/stores/role';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import { logPhotoRender } from '$lib/utils/photoLog';
 	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
-	import { getBathAttentionDogs, getCautionDogs, getOverdueEnrichmentDogs } from '$lib/utils/attention';
+	import { buildLastPlaygroupMap } from '$lib/utils/attention';
+	import { dogAttention, tripEligibilityFor, type AttentionKind } from '$lib/utils/dogAttention';
 	import { getDailyMovements, type DailyMovements } from '$lib/utils/movements';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import { subscribeHandoff, saveHandoff, type ShiftHandoff } from '$lib/data/handoff';
@@ -19,7 +21,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { syncVersion } from '$lib/stores/sync';
-	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
+	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession, UserRole } from '$lib/types';
 
 	type TodayActionId = 'feeding' | 'cleaning' | 'movement' | 'slack';
 	type ActionBusyMap = Record<TodayActionId, boolean>;
@@ -34,9 +36,9 @@
 	interface AttentionItem {
 		dogId: string;
 		dogName: string;
-		type: 'bath' | 'enrichment' | 'dogstest';
+		type: AttentionKind;
+		short: string;
 		days: number;
-		isNewIntake?: boolean;
 	}
 
 	interface AsmRecentAdoption {
@@ -408,7 +410,8 @@
 					{ id: 'movement', label: 'Bring Dogs In @ 4:15', done: movementDone },
 					{ id: 'slack', label: 'Slack Update (PM)', done: slackDone }
 				];
-	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs);
+	$: viewerRole = resolveRole($authProfile, $localRole as UserRole);
+	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs, viewerRole);
 
 
 	function hasFeedingLogForShift(dogId: string, mealTime: MealTime) {
@@ -451,14 +454,6 @@
 		if (dog.isolationReason === 'sick') return '🩺';
 		if (dog.isolationReason === 'bite_quarantine') return '⚠';
 		return '🔒';
-	}
-
-	function dayGapLabel(days: number) {
-		if (days >= 14) {
-			const weeks = Math.round(days / 7);
-			return `${weeks} wk${weeks === 1 ? '' : 's'}`;
-		}
-		return `${days} day${days === 1 ? '' : 's'}`;
 	}
 
 	async function fetchRecentAsmAdoptions() {
@@ -548,21 +543,21 @@
 			.slice(0, 5);
 	}
 
-	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
-		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none' && !d.isIncoming);
+	// The same rules the dog cards use (dogAttention), for every dog at the shelter —
+	// transfers still marked Incoming included.
+	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[], viewerRole: UserRole): AttentionItem[] {
+		const lastPlaygroup = buildLastPlaygroupMap(sessions);
 		const items: AttentionItem[] = [];
-
-		for (const { dog, days, isNewIntake } of getBathAttentionDogs(shelterDogs, today)) {
-			items.push({ dogId: dog.id, dogName: dog.name, type: 'bath', days, isNewIntake });
+		for (const dog of activeDogs) {
+			const flags = dogAttention(dog, {
+				today,
+				lastPlaygroupDate: lastPlaygroup[dog.id] ?? null,
+				tripEligibility: tripEligibilityFor(dog, viewerRole, today)
+			});
+			for (const flag of flags) {
+				items.push({ dogId: dog.id, dogName: dog.name, type: flag.kind, short: flag.short, days: flag.days });
+			}
 		}
-		for (const { dog, days } of getOverdueEnrichmentDogs(shelterDogs, sessions, today)) {
-			items.push({ dogId: dog.id, dogName: dog.name, type: 'enrichment', days });
-		}
-		for (const dog of getCautionDogs(shelterDogs, sessions)) {
-			const days = daysSince(dog.shelterSince ?? dog.intakeDate, today) ?? 0;
-			items.push({ dogId: dog.id, dogName: dog.name, type: 'dogstest', days });
-		}
-
 		return items.sort((a, b) => b.days - a.days);
 	}
 
@@ -1025,18 +1020,12 @@
 						<a class="planner-row planner-row-link" href="/dogs/{item.dogId}">
 							<span class="planner-row-main">
 								<span class="planner-bullet">
-									{#if item.type === 'bath'}🛁{:else if item.type === 'enrichment'}🐾{:else}🔍{/if}
+									{#if item.type === 'bath'}🛁{:else if item.type === 'enrichment' || item.type === 'daytrip' || item.type === 'playgroup'}🐾{:else}🔍{/if}
 								</span>
 								<span class="planner-row-text">{item.dogName}</span>
 							</span>
 							<span class="attention-tag attention-tag-{item.type}">
-								{#if item.type === 'bath'}
-									{item.isNewIntake ? `bath · new intake · ${item.days}d` : `bath · ${item.days}d overdue`}
-								{:else if item.type === 'enrichment'}
-									no enrichment · {dayGapLabel(item.days)}
-								{:else}
-									test compatibility · {dayGapLabel(item.days)}
-								{/if}
+								{item.short}
 							</span>
 						</a>
 					{/each}
@@ -1718,7 +1707,9 @@
 		color: #3a6090;
 	}
 
-	.attention-tag-enrichment {
+	.attention-tag-enrichment,
+	.attention-tag-daytrip,
+	.attention-tag-playgroup {
 		background: rgba(90, 150, 90, 0.14);
 		color: #3a6e3a;
 	}
@@ -1792,7 +1783,8 @@
 		color: #4a4a58;
 	}
 
-	.attention-tag-dogstest {
+	.attention-tag-dogtest,
+	.attention-tag-evaluation {
 		background: rgba(147, 57, 128, 0.12);
 		color: #6b2060;
 	}

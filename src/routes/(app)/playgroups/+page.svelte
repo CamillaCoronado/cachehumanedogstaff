@@ -32,7 +32,7 @@
 	import { matchDogByName } from '$lib/utils/dogs';
 	import { canAccessPlaygroups, canEditPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, DogPlayStyle, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
-	import { energyLabel, compatibilityLabel } from '$lib/utils/labels';
+	import { energyLabel, dogCompatLabel } from '$lib/utils/labels';
 	import { syncVersion } from '$lib/stores/sync';
 
 	$: dogs = $dogsStore;
@@ -686,7 +686,7 @@
 									<tr>
 										<td>
 											<a href={`/dogs/${dog.id}`} class="dog-link">{dog.name}</a>
-											<p class="table-meta typewriter">Good with dogs: {compatibilityLabel(dog.goodWithDogs)}</p>
+											<p class="table-meta typewriter">Good with dogs: {dogCompatLabel(dog, 'goodWithDogs')}</p>
 										</td>
 										<td>
 											<span class={`readiness-pill readiness-${readiness}`}>{readinessLabel(readiness)}</span>

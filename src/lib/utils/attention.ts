@@ -39,14 +39,16 @@ export function getCautionDogs(dogs: Dog[], sessions: PlaygroupSession[], today 
 		}
 	}
 
-	return dogs.filter((dog) => {
-		if (dog.isolationStatus !== 'none') return false;
-		if (dog.goodWithDogs !== 'unknown') return false;
-		const ageWeeks = dogAgeWeeks(dog, today);
-		if (ageWeeks !== null && ageWeeks < PUPPY_AGE_WEEKS) return false;
+	return dogs.filter((dog) => needsDogTest(dog, lastSessionMs[dog.id] !== undefined, today));
+}
 
-		return lastSessionMs[dog.id] === undefined;
-	});
+/** Unknown with other dogs and never in a playgroup — puppies exempt. */
+export function needsDogTest(dog: Dog, hasPlayed: boolean, today = new Date()): boolean {
+	if (dog.isolationStatus !== 'none') return false;
+	if (dog.goodWithDogs !== 'unknown') return false;
+	const ageWeeks = dogAgeWeeks(dog, today);
+	if (ageWeeks !== null && ageWeeks < PUPPY_AGE_WEEKS) return false;
+	return !hasPlayed;
 }
 
 // ─── Thresholds ──────────────────────────────────────────────────────────────
@@ -212,29 +214,37 @@ export function getOverdueEnrichmentDogs(
 
 	const items: EnrichmentAttentionItem[] = [];
 	for (const dog of dogs) {
-		if (dog.inFoster || dog.isIncoming) continue;
-		if (dog.isOutOnDayTrip) continue;
-		if (dog.isolationStatus !== 'none') continue;
-		if (dog.sickHold) continue;
-		if (isSurgeryResting(dog, today)) continue;
-		if (dog.handlingLevel === 'manager_only') continue;
-
-		const availableSince = dog.shelterSince ?? dog.intakeDate;
-		const availableMs = toDate(availableSince)?.getTime() ?? 0;
-		// Coming off an isolation/sick hold reset the clock — ignore anything before it.
-		const resetMs = toDate(dog.enrichmentResetDate)?.getTime() ?? 0;
-		const baselineMs = Math.max(availableMs, resetMs);
-
-		const activityDates = [toDate(dog.lastDayTripDate), lastPgMap[dog.id] ?? null, toDate(dog.lastYardDate)];
-		const lastEnrichmentMs = activityDates.reduce((latest, date) => {
-			if (!date || date.getTime() < baselineMs) return latest;
-			return Math.max(latest, date.getTime());
-		}, baselineMs);
-
-		const days = daysSince(new Date(lastEnrichmentMs), today) ?? 0;
-		if (days >= ENRICHMENT_OVERDUE_DAYS) {
-			items.push({ dog, days });
-		}
+		const days = enrichmentOverdueDays(dog, lastPgMap[dog.id] ?? null, today);
+		if (days !== null) items.push({ dog, days });
 	}
 	return items;
+}
+
+/**
+ * Days since the dog's last day trip, playgroup or yard time, when that is past the
+ * enrichment threshold; null when it is not due or the dog cannot go out.
+ */
+export function enrichmentOverdueDays(dog: Dog, lastPlaygroupDate: Date | null, today: Date): number | null {
+	// Incoming dogs count: transfers come in through ASM's Incoming location.
+	if (dog.inFoster) return null;
+	if (dog.isOutOnDayTrip) return null;
+	if (dog.isolationStatus !== 'none') return null;
+	if (dog.sickHold) return null;
+	if (isSurgeryResting(dog, today)) return null;
+	if (dog.handlingLevel === 'manager_only') return null;
+
+	const availableSince = dog.shelterSince ?? dog.intakeDate;
+	const availableMs = toDate(availableSince)?.getTime() ?? 0;
+	// Coming off an isolation/sick hold reset the clock — ignore anything before it.
+	const resetMs = toDate(dog.enrichmentResetDate)?.getTime() ?? 0;
+	const baselineMs = Math.max(availableMs, resetMs);
+
+	const activityDates = [toDate(dog.lastDayTripDate), lastPlaygroupDate, toDate(dog.lastYardDate)];
+	const lastEnrichmentMs = activityDates.reduce((latest, date) => {
+		if (!date || date.getTime() < baselineMs) return latest;
+		return Math.max(latest, date.getTime());
+	}, baselineMs);
+
+	const days = daysSince(new Date(lastEnrichmentMs), today) ?? 0;
+	return days >= ENRICHMENT_OVERDUE_DAYS ? days : null;
 }

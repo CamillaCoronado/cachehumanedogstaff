@@ -1,15 +1,9 @@
 import type { Dog } from '$lib/types';
-import { checkDayTripEligibility, daysSince, isPuppyAge, sinceReturn } from '$lib/utils/dates';
-import {
-	getBathStatus,
-	getDayTripGapDays,
-	isPlaygroupEligible,
-	DAYTRIP_OVERDUE_DAYS,
-	PLAYGROUP_OVERDUE_DAYS
-} from '$lib/utils/attention';
+import { checkDayTripEligibility } from '$lib/utils/dates';
+import { dogAttention, missingEvaluations } from '$lib/utils/dogAttention';
 import { getAdoptionAvailability } from '$lib/utils/adoption';
 import { resolveDogHandlingLevel } from '$lib/utils/permissions';
-import { compatibilityLabel, energyLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+import { dogCompatLabel, energyLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 export type TripEligibility = ReturnType<typeof checkDayTripEligibility>;
 export type CardActionTone = 'ready' | 'blocked' | 'info';
@@ -87,22 +81,12 @@ export function adoptionPillClass(dog: Dog) {
 	return 'status-pill-red';
 }
 
-export function missingEvaluations(dog: Dog) {
-	const missing: string[] = [];
-	if (dog.goodWithDogs === 'unknown') missing.push('dogs');
-	if (dog.goodWithCats === 'unknown') missing.push('cats');
-	if (dog.goodWithKids === 'unknown') missing.push('kids');
-	if (dog.pottyTrained === 'unknown') missing.push('potty training');
-	if (dog.energyLevel === 'unknown') missing.push('energy');
-	if ((dog.goodOnLead ?? 'unknown') === 'unknown') missing.push('on-lead');
-	if ((dog.crateTrained ?? 'unknown') === 'unknown') missing.push('crate');
-	return missing;
-}
+// Lives with the other attention rules now; re-exported for existing imports.
+export { missingEvaluations };
 
 export function pendingItems(
 	dog: Dog,
 	tripEligibility: TripEligibility,
-	bathDue: boolean,
 	lastPlaygroupDate: Date | null,
 	today: Date
 ): CardActionItem[] {
@@ -149,46 +133,10 @@ export function pendingItems(
 		});
 	}
 
-	if (!dog.inFoster && !dog.awaitingEvaluation && tripEligibility.eligible) {
-		const dayTripGap = getDayTripGapDays(dog, today);
-		if (dayTripGap === null) {
-			items.push({ label: 'No day trip logged yet.', tone: 'info', priority: 68 });
-		} else if (dayTripGap >= DAYTRIP_OVERDUE_DAYS) {
-			items.push({ label: `${dayTripGap} days since last day trip — overdue.`, tone: 'info', priority: 66 });
-		}
-	}
-
-	if (isPlaygroupEligible(dog, today)) {
-		const playgroupGap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince ?? dog.intakeDate), today);
-		if (playgroupGap === null) {
-			items.push({ label: 'No playgroup logged yet.', tone: 'info', priority: 63 });
-		} else if (playgroupGap >= PLAYGROUP_OVERDUE_DAYS) {
-			items.push({ label: `${playgroupGap} days since last playgroup — overdue.`, tone: 'info', priority: 62 });
-		}
-	}
-
-	// Puppies don't need evaluation — no "Needs evaluation" nag for them.
-	const pendingEvaluation = isPuppyAge(dog.dateOfBirth, today) ? [] : missingEvaluations(dog);
-	if (pendingEvaluation.length > 0) {
-		items.push({
-			label: `Needs evaluation: ${pendingEvaluation.join(', ')}`,
-			tone: 'blocked',
-			priority: 60
-		});
-	}
-
-	if (bathDue) {
-		const bathStatus = getBathStatus(dog, today);
-		items.push({
-			label: bathStatus.isNewIntake
-				? 'Bath needed (new intake).'
-				: bathStatus.overdueDays !== null && bathStatus.overdueDays > 0
-					? `Bath overdue by ${bathStatus.overdueDays} day${bathStatus.overdueDays === 1 ? '' : 's'}.`
-					: 'Bath is due.',
-			tone: 'ready',
-			priority: 59,
-			action: 'log_bath'
-		});
+	// Everything the dog needs doing comes from the shared rules, the same ones the
+	// dashboard's Needs attention list uses.
+	for (const flag of dogAttention(dog, { today, lastPlaygroupDate, tripEligibility })) {
+		items.push({ label: flag.label, tone: flag.tone, priority: flag.priority, ...(flag.action ? { action: flag.action } : {}) });
 	}
 
 	return items.sort((a, b) => b.priority - a.priority);
@@ -226,9 +174,9 @@ export function toSearchText(dog: Dog) {
 		dog.origin,
 		dog.idealHome,
 		pottyLabel(dog.pottyTrained),
-		compatibilityLabel(dog.goodWithDogs),
-		compatibilityLabel(dog.goodWithCats),
-		compatibilityLabel(dog.goodWithKids),
+		dogCompatLabel(dog, 'goodWithDogs'),
+		dogCompatLabel(dog, 'goodWithCats'),
+		dogCompatLabel(dog, 'goodWithKids'),
 		handlingLevelLabel(dogHandlingLevel(dog)),
 		energyLabel(dog.energyLevel)
 	]

@@ -7,7 +7,7 @@ import type {
 	EnergyLevel,
 	PottyTrainedStatus
 } from '$lib/types';
-import { daysSince, formatDate, toDate } from '$lib/utils/dates';
+import { daysSince, formatDate, isPuppyAge, toDate } from '$lib/utils/dates';
 
 export function energyLabel(value: EnergyLevel | null | undefined): string {
 	if (value === 'very_high') return 'Very high';
@@ -17,20 +17,47 @@ export function energyLabel(value: EnergyLevel | null | undefined): string {
 	return 'Unknown';
 }
 
-/** Legend for the marker compatibilityLabel() puts on an untested trait. */
+/** Legend for the marker compatibilityLabel() puts on a puppy's untested trait. */
 export const COMPATIBILITY_ASSUMED_NOTE =
-	'* Not yet tested — assumed friendly until we learn otherwise.';
+	'* Puppy, not yet tested — assumed friendly until we learn otherwise.';
 
 /**
- * An untested trait reads as "Yes*", not "Unknown" or "No". A dog nobody has tried with
- * cats isn't a dog that failed with cats, and showing it as a negative costs adoptions.
- * The marker keeps it honest — display only; the stored value stays 'unknown', which is
- * what playgroup eligibility and every other rule still branch on.
+ * Only puppies are assumed friendly with dogs, cats and kids before anyone has tested
+ * them. An adult nobody has tested is just that — not tested — and reads that way.
  */
-export function compatibilityLabel(value: Compatibility | null | undefined): string {
+export function isAssumedFriendly(dog: Pick<Dog, 'dateOfBirth'>, today = new Date()): boolean {
+	return isPuppyAge(dog.dateOfBirth, today);
+}
+
+/**
+ * Display only; the stored value stays 'unknown', which is what playgroup eligibility and
+ * every other rule branch on. An untested trait reads "Yes*" when the dog is assumed
+ * friendly (a puppy, for dogs/cats/kids) and "Not tested" otherwise.
+ */
+export function compatibilityLabel(value: Compatibility | null | undefined, assumeFriendly = false): string {
 	if (value === 'yes') return 'Yes';
 	if (value === 'no') return 'No';
-	return 'Yes*';
+	return assumeFriendly ? 'Yes*' : 'Not tested';
+}
+
+type FriendlyTrait = 'goodWithDogs' | 'goodWithCats' | 'goodWithKids';
+
+/** Good with dogs / cats / kids for this dog, with the puppy assumption applied. */
+export function dogCompatLabel(dog: Dog, trait: FriendlyTrait, today = new Date()): string {
+	return compatibilityLabel(dog[trait], isAssumedFriendly(dog, today));
+}
+
+/** True when a card should carry the "* assumed friendly" legend. */
+export function showsAssumedNote(dog: Dog, today = new Date()): boolean {
+	return (
+		isAssumedFriendly(dog, today) &&
+		(dog.goodWithDogs === 'unknown' || dog.goodWithCats === 'unknown' || dog.goodWithKids === 'unknown')
+	);
+}
+
+/** Passes a "good with …" filter: confirmed yes, or an untested puppy. */
+export function matchesGoodWith(dog: Dog, trait: FriendlyTrait, today = new Date()): boolean {
+	return dog[trait] === 'yes' || (dog[trait] === 'unknown' && isAssumedFriendly(dog, today));
 }
 
 export function pottyLabel(value: PottyTrainedStatus | null | undefined): string {

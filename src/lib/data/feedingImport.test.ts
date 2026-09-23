@@ -69,14 +69,17 @@ describe('who "everyone else" covers', () => {
 		).toEqual([]);
 	});
 
-	it('counts an incoming dog only on the day it arrives', () => {
-		const incoming = (intakeDate: string) => [
+	it('counts an incoming dog once its intake day has come', () => {
+		const incoming = (intakeDate: string | null) => [
 			{ id: 'buck', name: 'Buck', ...base },
 			{ id: 'new', name: 'Newbie', ...base, isIncoming: true, intakeDate }
 		];
+		// Arrived today, or a transfer that arrived earlier and is still marked Incoming.
 		expect(filledIn(incoming('2026-09-22T15:00:00Z'))).toEqual(['new']);
+		expect(filledIn(incoming('2026-09-10T15:00:00Z'))).toEqual(['new']);
+		// Booked for tomorrow, or no date at all: not here.
 		expect(filledIn(incoming('2026-09-23T15:00:00Z'))).toEqual([]);
-		expect(filledIn(incoming('2026-09-10T15:00:00Z'))).toEqual([]);
+		expect(filledIn(incoming(null))).toEqual([]);
 	});
 
 	it('fills in the second meal only for dogs that get one', () => {
