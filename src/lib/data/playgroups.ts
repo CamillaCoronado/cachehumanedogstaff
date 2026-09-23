@@ -2,7 +2,7 @@ import type { PlaygroupOutcome, PlaygroupSession, UserProfile } from '$lib/types
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { toDate, toDateString } from '$lib/utils/dates';
 import { db } from '$lib/firebase/config';
-import { collection, deleteDoc, doc, getDocs, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 
 const PLAYGROUP_SESSIONS_KEY = 'shelter.playgroupSessions';
 
@@ -13,7 +13,16 @@ export interface PendingPlaygroup {
 	suggestedNotes: string | null;
 	suggestedOutcome: PlaygroupOutcome;
 	receivedAt: string; // ISO string
+	/** Slack's message timestamp (seconds, as a string): when the playgroup was posted. */
+	slackTs?: string;
 	processed: boolean;
+}
+
+/** When the message was posted in Slack, falling back to when the app received it. */
+export function pendingPostedAt(p: PendingPlaygroup): Date {
+	const ts = Number(p.slackTs);
+	if (Number.isFinite(ts) && ts > 0) return new Date(ts * 1000);
+	return toDate(p.receivedAt) ?? new Date();
 }
 
 interface StoredPlaygroupSession {
@@ -91,14 +100,16 @@ export async function listPlaygroupSessions() {
 export async function listPendingPlaygroups(): Promise<PendingPlaygroup[]> {
 	if (!db) return [];
 	try {
-		const q = query(
-			collection(db, 'pendingPlaygroups'),
-			where('processed', '==', false),
-			orderBy('receivedAt', 'desc')
-		);
+		// Sorted here rather than with orderBy: a filter on one field plus an order on
+		// another needs a composite index, and without it the query failed and this
+		// quietly returned nothing, so Slack playgroups never showed up.
+		const q = query(collection(db, 'pendingPlaygroups'), where('processed', '==', false));
 		const snapshot = await getDocs(q);
-		return snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingPlaygroup, 'id'>) }));
-	} catch {
+		return snapshot.docs
+			.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingPlaygroup, 'id'>) }))
+			.sort((a, b) => (a.receivedAt < b.receivedAt ? 1 : -1));
+	} catch (e) {
+		console.error('Failed to load Slack playgroups', e);
 		return [];
 	}
 }

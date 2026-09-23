@@ -11,6 +11,7 @@
 		listPlaygroupSessions,
 		listPendingPlaygroups,
 		markPendingProcessed,
+		pendingPostedAt,
 		updatePlaygroupSession
 	} from '$lib/data/playgroups';
 	import type { PendingPlaygroup } from '$lib/data/playgroups';
@@ -281,7 +282,8 @@
 
 	function openPending(p: PendingPlaygroup) {
 		activePending = p;
-		importDate = format(new Date(), 'yyyy-MM-dd');
+		// The day it was posted, not the day someone gets round to reviewing it.
+		importDate = format(pendingPostedAt(p), 'yyyy-MM-dd');
 		importOutcome = p.suggestedOutcome;
 		importNotes = p.suggestedNotes ?? '';
 		importGroupName = '';

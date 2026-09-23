@@ -94,7 +94,11 @@ export async function POST({ request }) {
 
 	try {
 		const adminDb = getAdminDb();
-		await adminDb.collection('pendingPlaygroups').add({
+		// Keyed by message: Slack resends an event it did not get a quick 200 for, and a
+		// random id turned each resend into a duplicate in the review list.
+		const key = `${String(event.channel ?? 'unknown')}-${String(event.ts ?? Date.now())}`.replace(/[./]/g, '-');
+		// create, not set: a resend must not reopen a message someone already reviewed.
+		await adminDb.collection('pendingPlaygroups').doc(key).create({
 			rawText,
 			dogNames: parsed.dogNames,
 			suggestedNotes: parsed.notes,
@@ -104,6 +108,8 @@ export async function POST({ request }) {
 			processed: false
 		});
 	} catch (e) {
+		// Already stored from an earlier delivery of the same message: nothing to do.
+		if ((e as { code?: number }).code === 6) return json({ ok: true });
 		// Log but don't fail — Slack requires 200 within 3 s or it will retry
 		console.error('[Slack webhook] Firestore write failed:', e);
 	}
