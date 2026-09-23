@@ -18,7 +18,7 @@
 	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
-	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel, COMPATIBILITY_ASSUMED_NOTE } from '$lib/utils/labels';
+	import { energyLabel, dogCompatLabel, matchesGoodWith, showsAssumedNote, handlingLevelLabel, pottyLabel, sexLabel, COMPATIBILITY_ASSUMED_NOTE } from '$lib/utils/labels';
 	import { syncVersion } from '$lib/stores/sync';
 	import {
 		tripPillClass,
@@ -101,11 +101,11 @@ const today = new Date();
 		.filter((dog) => fosterOnly ? dog.inFoster : true)
 		.filter((dog) => incomingOnly ? dog.isIncoming : true)
 		.filter((dog) => hideIncoming ? !dog.isIncoming : true)
-		// A trait nobody has tested isn't a failed trait — it still matches the filter, but
-		// it lands in its own group below so nobody reads it as confirmed.
-		.filter((dog) => filterGoodWithDogs ? dog.goodWithDogs !== 'no' : true)
-		.filter((dog) => filterGoodWithCats ? dog.goodWithCats !== 'no' : true)
-		.filter((dog) => filterGoodWithKids ? dog.goodWithKids !== 'no' : true)
+		// Confirmed yes, or an untested puppy (only puppies are assumed friendly). Those
+		// puppies land in their own group below so nobody reads them as confirmed.
+		.filter((dog) => filterGoodWithDogs ? matchesGoodWith(dog, 'goodWithDogs', today) : true)
+		.filter((dog) => filterGoodWithCats ? matchesGoodWith(dog, 'goodWithCats', today) : true)
+		.filter((dog) => filterGoodWithKids ? matchesGoodWith(dog, 'goodWithKids', today) : true)
 		.filter((dog) => filterAdoptable ? getAdoptionAvailability(dog).available : true)
 		.filter((dog) => filterMedical ? isMedicalHold(dog) : true)
 		.filter((dog) => stripeFilter === 'all' ? true : dogStripeColor(dog) === stripeFilter)
@@ -123,7 +123,7 @@ const today = new Date();
 	$: dogGroups = compatFilterOn
 		? [
 				{ label: null, dogs: sortedDogs.filter((dog) => !compatIsUntested(dog)) },
-				{ label: 'Not yet tested', dogs: sortedDogs.filter(compatIsUntested) }
+				{ label: 'Puppies, not yet tested', dogs: sortedDogs.filter(compatIsUntested) }
 			].filter((group) => group.dogs.length > 0)
 		: [{ label: null, dogs: sortedDogs }];
 
@@ -591,7 +591,7 @@ const today = new Date();
 					<div class="compat-group-head">
 						<p class="compat-group-title typewriter">{group.label}</p>
 						<span class="compat-group-count">{group.dogs.length}</span>
-						<p class="compat-group-note">Assumed friendly — no one has tested this yet.</p>
+						<p class="compat-group-note">Puppies are assumed friendly until someone tests them.</p>
 					</div>
 				{/if}
 				<div class="dogs-card-grid">
@@ -703,13 +703,15 @@ const today = new Date();
 										<div class="card-facts">
 											<p><span>Origin</span><strong class="card-fact-value">{dog.origin || 'Unknown'}</strong></p>
 											<p><span>Potty Trained</span><strong class="card-fact-value">{pottyLabel(dog.pottyTrained)}</strong></p>
-											<p><span>Good w/ Dogs</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
-											<p><span>Good w/ Cats</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
-											<p><span>Good w/ Kids</span><strong class="card-fact-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
+											<p><span>Good w/ Dogs</span><strong class="card-fact-value">{dogCompatLabel(dog, 'goodWithDogs')}</strong></p>
+											<p><span>Good w/ Cats</span><strong class="card-fact-value">{dogCompatLabel(dog, 'goodWithCats')}</strong></p>
+											<p><span>Good w/ Kids</span><strong class="card-fact-value">{dogCompatLabel(dog, 'goodWithKids')}</strong></p>
 											<p><span>Energy</span><strong class="card-fact-value">{energyLabel(dog.energyLevel)}</strong></p>
 											<p><span>Best Home</span><strong class="card-fact-value">{dog.idealHome || 'Not documented'}</strong></p>
 										</div>
-										<p class="compat-note">{COMPATIBILITY_ASSUMED_NOTE}</p>
+										{#if showsAssumedNote(dog)}
+											<p class="compat-note">{COMPATIBILITY_ASSUMED_NOTE}</p>
+										{/if}
 									</div>
 								</details>
 

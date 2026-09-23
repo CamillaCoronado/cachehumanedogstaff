@@ -52,7 +52,7 @@
 		document.body.appendChild(node);
 		return { destroy() { node.remove(); } };
 	}
-	import { energyLabel, compatibilityLabel, handlingLevelLabel, pottyLabel, sexLabel, COMPATIBILITY_ASSUMED_NOTE } from '$lib/utils/labels';
+	import { energyLabel, compatibilityLabel, dogCompatLabel, showsAssumedNote, handlingLevelLabel, pottyLabel, sexLabel, COMPATIBILITY_ASSUMED_NOTE } from '$lib/utils/labels';
 	import { PLAY_STYLE_LABELS } from '$lib/utils/playgroupRecommendations';
 	import { syncVersion } from '$lib/stores/sync';
 
@@ -898,9 +898,9 @@
 												<p><span>Health Problems:</span> <strong class="detail-note">{dog.healthProblems}</strong></p>
 											{/if}
 										{/if}
-										<p><span>Good with Dogs:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithDogs)}</strong></p>
-										<p><span>Good with Cats:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithCats)}</strong></p>
-										<p><span>Good with Kids:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithKids)}</strong></p>
+										<p><span>Good with Dogs:</span> <strong class="detail-value">{dogCompatLabel(dog, 'goodWithDogs')}</strong></p>
+										<p><span>Good with Cats:</span> <strong class="detail-value">{dogCompatLabel(dog, 'goodWithCats')}</strong></p>
+										<p><span>Good with Kids:</span> <strong class="detail-value">{dogCompatLabel(dog, 'goodWithKids')}</strong></p>
 										<p><span>Good with Elderly:</span> <strong class="detail-value">{compatibilityLabel(dog.goodWithElderly)}</strong></p>
 										<p><span>Good on Lead:</span> <strong class="detail-value">{compatibilityLabel(dog.goodOnLead)}</strong></p>
 										<p><span>Good Traveller:</span> <strong class="detail-value">{compatibilityLabel(dog.goodTraveller)}</strong></p>
@@ -917,7 +917,9 @@
 											<p><span>Evaluation Notes:</span> <strong class="detail-note">{dog.evaluationNotes}</strong></p>
 										{/if}
 										<p><span>Best Home Fit:</span> <strong class="detail-value">{dog.idealHome || 'Not yet documented'}</strong></p>
-										<p class="compat-note">{COMPATIBILITY_ASSUMED_NOTE}</p>
+										{#if showsAssumedNote(dog)}
+											<p class="compat-note">{COMPATIBILITY_ASSUMED_NOTE}</p>
+										{/if}
 									</div>
 								</details>
 							</div>
@@ -1025,11 +1027,11 @@
 					</div>
 					<div>
 						<dt>Good with Dogs</dt>
-						<dd>{compatibilityLabel(dog.goodWithDogs)}</dd>
+						<dd>{dogCompatLabel(dog, 'goodWithDogs')}</dd>
 					</div>
 					<div>
 						<dt>Good with Cats/Kids</dt>
-						<dd>{compatibilityLabel(dog.goodWithCats)} / {compatibilityLabel(dog.goodWithKids)}</dd>
+						<dd>{dogCompatLabel(dog, 'goodWithCats')} / {dogCompatLabel(dog, 'goodWithKids')}</dd>
 					</div>
 				</dl>
 

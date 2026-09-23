@@ -3,7 +3,7 @@ import { checkDayTripEligibility } from '$lib/utils/dates';
 import { dogAttention, missingEvaluations } from '$lib/utils/dogAttention';
 import { getAdoptionAvailability } from '$lib/utils/adoption';
 import { resolveDogHandlingLevel } from '$lib/utils/permissions';
-import { compatibilityLabel, energyLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
+import { dogCompatLabel, energyLabel, handlingLevelLabel, pottyLabel, sexLabel } from '$lib/utils/labels';
 
 export type TripEligibility = ReturnType<typeof checkDayTripEligibility>;
 export type CardActionTone = 'ready' | 'blocked' | 'info';
@@ -174,9 +174,9 @@ export function toSearchText(dog: Dog) {
 		dog.origin,
 		dog.idealHome,
 		pottyLabel(dog.pottyTrained),
-		compatibilityLabel(dog.goodWithDogs),
-		compatibilityLabel(dog.goodWithCats),
-		compatibilityLabel(dog.goodWithKids),
+		dogCompatLabel(dog, 'goodWithDogs'),
+		dogCompatLabel(dog, 'goodWithCats'),
+		dogCompatLabel(dog, 'goodWithKids'),
 		handlingLevelLabel(dogHandlingLevel(dog)),
 		energyLabel(dog.energyLevel)
 	]
