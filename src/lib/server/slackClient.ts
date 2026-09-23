@@ -44,8 +44,9 @@ export interface HistoryMessage {
 	user?: string;
 	subtype?: string;
 	bot_id?: string;
-	/** Set on a thread's parent message: how many replies it has. */
+	/** Set on a thread's parent message: how many replies it has, and the newest one. */
 	reply_count?: number;
+	latest_reply?: string;
 	thread_ts?: string;
 }
 
@@ -118,4 +119,63 @@ export async function channelHistory(
 		return m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim();
 	});
 	return { messages, truncated: Boolean(cursor), threadsSkipped };
+}
+
+/** How far back the live polls look for threads that may have picked up new replies. */
+const THREAD_LOOKBACK_DAYS = 3;
+/** Most threads a live poll re-reads in one go. */
+const MAX_LIVE_THREADS = 50;
+
+const isFromPerson = (m: HistoryMessage) =>
+	m.subtype === undefined && m.bot_id === undefined && Boolean(String(m.text ?? '').trim());
+
+/**
+ * What the live polls read each run: everything posted after `lastTs` — new messages,
+ * and new replies inside threads, newest first (the order history returns).
+ *
+ * History alone returns only top-level messages, and only ones newer than the cursor,
+ * so a reply added to an older thread was never seen. Threads from the last few days
+ * are checked for replies newer than the cursor, which is where those land.
+ */
+export async function newChannelMessages(
+	token: string,
+	channel: string,
+	lastTs: string | null,
+	firstRunDays: number
+): Promise<HistoryMessage[]> {
+	const now = Date.now() / 1000;
+	const floor = Number(lastTs ?? now - firstRunDays * 86_400);
+	const lookback = Math.min(floor, now - THREAD_LOOKBACK_DAYS * 86_400);
+
+	const all: HistoryMessage[] = [];
+	let cursor: string | undefined;
+	let pages = 0;
+	do {
+		const body = await slack(token, 'conversations.history', {
+			channel,
+			oldest: String(lookback),
+			limit: '200',
+			...(cursor ? { cursor } : {})
+		});
+		all.push(...((body.messages ?? []) as HistoryMessage[]));
+		cursor = body.response_metadata?.next_cursor || undefined;
+		pages++;
+	} while (cursor && pages < 5);
+
+	const fresh: HistoryMessage[] = all.filter((m) => Number(m.ts) > floor);
+	const threads = all
+		.filter((m) => (m.reply_count ?? 0) > 0 && Number(m.latest_reply ?? 0) > floor)
+		.slice(0, MAX_LIVE_THREADS);
+	for (const parent of threads) {
+		fresh.push(...(await threadReplies(token, channel, parent.ts)).filter((r) => Number(r.ts) > floor));
+	}
+
+	const seen = new Set<string>();
+	return fresh
+		.filter((m) => {
+			if (seen.has(m.ts)) return false;
+			seen.add(m.ts);
+			return isFromPerson(m);
+		})
+		.sort((a, b) => Number(b.ts) - Number(a.ts));
 }

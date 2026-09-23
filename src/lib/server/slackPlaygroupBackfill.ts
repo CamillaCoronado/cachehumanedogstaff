@@ -53,7 +53,8 @@ export async function backfillSlackPlaygroups(
 	if (!SLACK_BOT_TOKEN || !SLACK_PLAYGROUPS_CHANNEL_ID) return { ...empty, skipped: 'not configured' };
 
 	const db = getAdminDb();
-	const { messages: reports, truncated } = await channelHistory(SLACK_BOT_TOKEN, SLACK_PLAYGROUPS_CHANNEL_ID, since, MAX_PAGES);
+	// Replies too: a playgroup is sometimes written up inside a thread.
+	const { messages: reports, truncated } = await channelHistory(SLACK_BOT_TOKEN, SLACK_PLAYGROUPS_CHANNEL_ID, since, MAX_PAGES, true);
 	if (reports.length === 0) return { ...empty, truncated };
 
 	const [dogsSnap, existingSnap] = await Promise.all([
