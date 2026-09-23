@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDogIndex, feedingDate, feedingLogId, planEditedFeedings, planFeedingsDetailed, shelterDay } from './feedingImport';
+import { buildDogIndex, feedingDate, feedingLogId, planEditedFeedings, planFeedingsDetailed, planYardTime, shelterDay } from './feedingImport';
 
 const index = buildDogIndex([
 	{ id: 'buck', name: 'Buck', status: 'active', intakeDate: '2026-01-01T12:00:00Z', hasSecondMeal: true },
@@ -131,5 +131,28 @@ describe('planEditedFeedings', () => {
 	it('follows a meal changed to the second meal', () => {
 		const out = planEditedFeedings('x', at, idx, { mealTime: 'second', named: [], fillIn: true });
 		expect(out.map((e) => e.dogId)).toEqual(['cora']);
+	});
+});
+
+describe('planYardTime — all dogs', () => {
+	const base = { status: 'active', intakeDate: '2026-01-01T12:00:00Z' };
+	const idx = buildDogIndex([
+		{ id: 'rex', name: 'Rex', ...base },
+		{ id: 'dot', name: 'Dot', ...base },
+		{ id: 'dior', name: 'Dior', ...base, isIncoming: true, intakeDate: '2026-09-10T12:00:00Z' },
+		{ id: 'later', name: 'Later', ...base, isIncoming: true, intakeDate: '2026-09-30T12:00:00Z' },
+		{ id: 'iso', name: 'Iso', ...base, isolationStatus: 'iso' },
+		{ id: 'fos', name: 'Fos', ...base, inFoster: true, inFosterSince: '2026-08-01T12:00:00Z' }
+	]);
+	const at = new Date('2026-09-22T15:00:00-06:00');
+	const logged = (t: string) => planYardTime(t, at, idx).map((d) => d.dogId).sort();
+
+	it('logs every dog at the shelter that day, transfers included', () => {
+		expect(logged('All dogs got yard time')).toEqual(['dior', 'dot', 'rex']);
+		expect(logged('Yard time for all dogs')).toEqual(['dior', 'dot', 'rex']);
+	});
+
+	it('honours the carve-out', () => {
+		expect(logged('all dogs went out except for Rex')).toEqual(['dior', 'dot']);
 	});
 });

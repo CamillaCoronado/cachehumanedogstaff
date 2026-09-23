@@ -73,6 +73,13 @@ const NOT_A_REPORT =
 const ALL_DOGS =
 	/\ball\s+(?:the\s+)?(?!my\b|your\b|his\b|her\b|their\b|our\b)(?:\w+\s+)?dogs?\b|\bevery\s?(?:one|body)\b|\bevery\s+dog\b|\ball\s+of\s+(?:the\s+)?dogs?\b/i;
 
+/**
+ * The blanket said after the activity: "yard time for all dogs", "yard time for everyone".
+ * Only with "for", so "Rex got yard time, all dogs need baths" stays about Rex.
+ */
+const FOR_ALL =
+	/^\s*(?:\S+\s+){0,3}?for\s+(?:all(?:\s+(?:the\s+)?(?!my\b|your\b|his\b|her\b|their\b|our\b)(?:\w+\s+)?dogs?)?|every\s?(?:one|body)|every\s+dog)\b/i;
+
 const DURATION = /\b(\d{1,3})\s*(?:min|mins|minutes)\b/i;
 
 function normalizeForCompare(value: string): string {
@@ -152,7 +159,8 @@ export function parseYardMessage(text: string, knownDogNames: string[] = []): Pa
 
 	// A blanket covers the shelter, so no name list is needed or expected — but it may
 	// still carve dogs out: "all dogs went out except for punch".
-	if (ALL_DOGS.test(text.slice(0, marker.index + marker[0].length))) {
+	const afterMarker = text.slice(marker.index + marker[0].length);
+	if (ALL_DOGS.test(text.slice(0, marker.index + marker[0].length)) || FOR_ALL.test(afterMarker)) {
 		const except = EXCEPT.exec(text.slice(marker.index));
 		const exceptNames = except
 			? namesIn(text.slice(marker.index + except.index + except[0].length), roster)

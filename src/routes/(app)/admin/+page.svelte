@@ -10,6 +10,7 @@
 	import CheckList from '$lib/components/admin/CheckList.svelte';
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
+	import { checkDeparture, type AsmDeparture } from '$lib/utils/departureCheck';
 	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
@@ -124,11 +125,14 @@
 	let savingUserId: string | null = null;
 
 	// One-time backfill: archived dogs missing a departure date
-	type DateFix = { dog: Dog; date: string; source: string };
+	type DateFix = { dog: Dog; date: string; source: string; status: Dog['status'] };
 	type DateUnknown = { dog: Dog; manualDate: string };
 	let backfillRunning = false;
 	let backfillRan = false;
 	let backfillMatched: DateFix[] = [];
+	let backfillSelected: string[] = [];
+	let backfillStillHere: { dog: Dog; label: string }[] = [];
+	let backfillProgress = '';
 	let backfillUnknown: DateUnknown[] = [];
 	let backfillApplying = false;
 	let backfillFixingId: string | null = null;
@@ -391,53 +395,60 @@
 		return formatDate(new Date(Number(ts) * 1000));
 	}
 
-	// Dry run: find archived dogs with no leftShelterDate and propose real dates
-	// from ASM (adoption movement dates + deceased dates). Reads only.
+	// Dry run: every archived dog checked against ASM — the real departure date and
+	// outcome from its last movement or death, not the day the sync noticed it was gone.
+	// Asked in batches so each request stays inside the server's time limit. Reads only.
 	async function runBackfillDryRun() {
 		backfillRunning = true;
 		backfillRan = false;
 		backfillMatched = [];
+		backfillSelected = [];
 		backfillUnknown = [];
+		backfillStillHere = [];
 		try {
-			const today = new Date().toISOString().slice(0, 10);
-			// App first shipped 2026-03-02 — Feb 2026 gives a month of margin.
-			const [dogs, res] = await Promise.all([
-				listDogs(),
-				fetch(`/api/asm/departures?fromdate=2026-02-01&todate=${today}`)
-			]);
-			if (!res.ok) throw new Error(`ASM departures feed failed (${res.status})`);
-			const departures: { id: number; shelterCode: string; date: string; outcome: string }[] = await res.json();
-			const byId = new Map(departures.map((d) => [d.id, d]));
-			const byCode = new Map(departures.filter((d) => d.shelterCode).map((d) => [d.shelterCode, d]));
-
-			const missing = dogs.filter(
-				(d) =>
-					(d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized') &&
-					!toDate(d.leftShelterDate)
+			const dogs = (await listDogs()).filter(
+				(d) => d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized'
 			);
-			for (const dog of missing) {
-				const asmId = dog.asmId ?? (/^\d+$/.test(dog.id) ? Number(dog.id) : null);
-				const match =
-					(asmId !== null ? byId.get(asmId) : undefined) ??
-					(dog.asmShelterCode ? byCode.get(dog.asmShelterCode) : undefined);
-				if (match) {
-					backfillMatched = [...backfillMatched, { dog, date: match.date, source: match.outcome === 'euthanized' ? '🌈 euthanized — ASM deceased record' : '🏠 adopted — ASM adoption record' }];
-				} else {
-					// No exact record in ASM — pre-fill with the day the sync archived
-					// the dog (usually within a day of the real departure). Editable.
-					const archivedAt = toDate(dog.lastSyncedAt);
-					const approx = archivedAt
-						? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
-						: '';
-					backfillUnknown = [...backfillUnknown, { dog, manualDate: approx }];
+			const token = await $authUser?.getIdToken();
+			const BATCH = 25;
+			for (let i = 0; i < dogs.length; i += BATCH) {
+				backfillProgress = `Checked ${i} of ${dogs.length} in ASM…`;
+				const batch = dogs.slice(i, i + BATCH);
+				const res = await fetch('/api/asm/departure-check', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+					body: JSON.stringify({
+						dogs: batch.map((d) => ({
+							id: d.id,
+							asmId: d.asmId ?? (/^\d+$/.test(d.id) ? Number(d.id) : null),
+							shelterCode: d.asmShelterCode ?? null
+						}))
+					})
+				});
+				if (!res.ok) throw new Error(`ASM lookup failed (${res.status})`);
+				const found: Record<string, AsmDeparture> = await res.json();
+				for (const dog of batch) {
+					const result = checkDeparture(dog, found[dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null });
+					if (result.kind === 'fix') {
+						backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status }];
+					} else if (result.kind === 'still-here') {
+						backfillStillHere = [...backfillStillHere, { dog, label: result.label }];
+					} else if (result.kind === 'not-found' && !toDate(dog.leftShelterDate)) {
+						// Not in ASM and no date on record — pre-fill with the day the sync
+						// archived the dog (usually within a day of the real departure). Editable.
+						const archivedAt = toDate(dog.lastSyncedAt);
+						const approx = archivedAt
+							? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
+							: '';
+						backfillUnknown = [...backfillUnknown, { dog, manualDate: approx }];
+					}
 				}
 			}
 			backfillMatched.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
+			backfillSelected = backfillMatched.map((f) => f.dog.id);
 			backfillUnknown.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
+			backfillProgress = `Checked all ${dogs.length} archived dogs in ASM.`;
 			backfillRan = true;
-			if (backfillMatched.length === 0 && backfillUnknown.length === 0) {
-				toast.success('Every archived dog already has a departure date.');
-			}
 		} catch (e) {
 			toast.error('Dry run failed: ' + (e instanceof Error ? e.message : String(e)));
 		} finally {
@@ -445,20 +456,29 @@
 		}
 	}
 
+	function toggleBackfill(id: string) {
+		backfillSelected = backfillSelected.includes(id) ? backfillSelected.filter((x) => x !== id) : [...backfillSelected, id];
+	}
+
 	async function applyBackfillMatches() {
-		if (backfillApplying || backfillMatched.length === 0) return;
+		if (backfillApplying) return;
+		const chosen = backfillMatched.filter((f) => backfillSelected.includes(f.dog.id));
+		if (chosen.length === 0) return;
 		backfillApplying = true;
 		let applied = 0;
 		try {
-			for (const fix of backfillMatched) {
-				await updateDog(fix.dog.id, { leftShelterDate: toDate(fix.date) });
+			for (const fix of chosen) {
+				await updateDog(fix.dog.id, {
+					leftShelterDate: toDate(fix.date),
+					...(fix.status !== fix.dog.status ? { status: fix.status } : {})
+				});
 				applied += 1;
 			}
-			backfillMatched = [];
-			toast.success(`Set departure dates for ${applied} dog${applied === 1 ? '' : 's'}.`);
+			backfillMatched = backfillMatched.filter((f) => !backfillSelected.includes(f.dog.id));
+			backfillSelected = [];
+			toast.success(`Updated ${applied} dog${applied === 1 ? '' : 's'} from ASM.`);
 		} catch (e) {
-			backfillMatched = backfillMatched.slice(applied);
-			toast.error('Stopped after an error: ' + (e instanceof Error ? e.message : String(e)));
+			toast.error(`Stopped after ${applied} — ` + (e instanceof Error ? e.message : String(e)));
 		} finally {
 			backfillApplying = false;
 		}
@@ -904,38 +924,54 @@
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
-						<h3 class="section-title">Backfill departure dates</h3>
+						<h3 class="section-title">Departure dates and outcomes from ASM</h3>
 						<p class="section-copy">
-							One-time cleanup: archived dogs saved without a departure date don't appear in the dashboard's
-							Movements history. The dry run finds them and proposes real dates from ASM (adoption and deceased
-							records). Transfers have no ASM feed — set those by hand below. <strong>Nothing changes until you apply.</strong>
-							Takes a minute or two; ASM's changes feed is slow.
+							Checks every adopted, transferred and deceased dog against ASM — its last movement and date,
+							or its death — and lists each one where the app differs: a wrong date (usually the day the
+							sync noticed rather than the day the dog left) or a wrong outcome. <strong>Nothing changes
+							until you apply, and only ticked dogs.</strong> Asks ASM a few dogs at a time, so it takes a
+							little while.
 						</p>
 					</div>
 					<button class="action-btn" type="button" on:click={runBackfillDryRun} disabled={backfillRunning}>
 						{backfillRunning ? 'Checking…' : 'Dry run'}
 					</button>
 				</div>
-				{#if backfillRan && backfillMatched.length === 0 && backfillUnknown.length === 0}
-					<p class="empty-note">Every archived dog already has a departure date — nothing to fix.</p>
+				{#if backfillProgress}
+					<p class="status-meta">{backfillProgress}</p>
+				{/if}
+				{#if backfillRan && backfillMatched.length === 0 && backfillUnknown.length === 0 && backfillStillHere.length === 0}
+					<p class="empty-note">Every archived dog matches ASM — nothing to fix.</p>
 				{/if}
 				{#if backfillMatched.length > 0}
 					<div class="status-row-plain">
-						<span class="status-meta">{backfillMatched.length} dog{backfillMatched.length === 1 ? '' : 's'} with a date found in ASM:</span>
+						<span class="status-meta">{backfillMatched.length} dog{backfillMatched.length === 1 ? '' : 's'} where ASM says otherwise:</span>
 					</div>
 					<ul class="user-list">
 						{#each backfillMatched as fix (fix.dog.id)}
 							<li class="user-row">
-								<div class="user-main">
-									<p class="suspect-name">{fix.dog.name}</p>
-									<p class="suspect-detail">{fix.dog.status} · will set departure to <strong>{formatDate(fix.date)}</strong> ({fix.source})</p>
-								</div>
+								<label class="user-main fr-row">
+									<input type="checkbox" checked={backfillSelected.includes(fix.dog.id)} on:change={() => toggleBackfill(fix.dog.id)} />
+									<span>
+										<span class="suspect-name">{fix.dog.name}</span>
+										<span class="suspect-detail">{fix.source}</span>
+									</span>
+								</label>
 							</li>
 						{/each}
 					</ul>
-					<button class="action-btn backfill-apply" type="button" on:click={applyBackfillMatches} disabled={backfillApplying}>
-						{backfillApplying ? 'Applying…' : `Apply ${backfillMatched.length} date${backfillMatched.length === 1 ? '' : 's'}`}
+					<button class="action-btn backfill-apply" type="button" on:click={applyBackfillMatches} disabled={backfillApplying || backfillSelected.length === 0}>
+						{backfillApplying ? 'Applying…' : `Apply ${backfillSelected.length} fix${backfillSelected.length === 1 ? '' : 'es'}`}
 					</button>
+				{/if}
+				{#if backfillStillHere.length > 0}
+					<div class="status-row-plain">
+						<span class="status-meta">
+							{backfillStillHere.length} archived dog{backfillStillHere.length === 1 ? '' : 's'} ASM still has on the
+							shelter or in foster — not changed here; check these in ASM:
+							{backfillStillHere.map((x) => `${x.dog.name} (${x.label})`).join(', ')}
+						</span>
+					</div>
 				{/if}
 				{#if backfillUnknown.length > 0}
 					<div class="status-row-plain">
