@@ -452,6 +452,50 @@ export function planFeedingsDetailed(
 	return { entries: planned, uncertain };
 }
 
+/** What a person settled on when editing a report before logging it. */
+export interface FeedingEdit {
+	mealTime: MealTime;
+	/** The dogs the report is about, with what each ate. */
+	named: { dogId: string; dogName: string; amountEaten: AmountEaten }[];
+	/** "Everyone else ate": fill in the rest of that meal's dogs as having eaten. */
+	fillIn: boolean;
+}
+
+/**
+ * The logs a report implies once someone has corrected it. The named dogs are taken as
+ * given; the fill-in follows the same rules as an unedited report — the dogs at the
+ * shelter for that meal, less the named ones and any the message said not to feed.
+ */
+export function planEditedFeedings(text: string, postedAt: Date, index: DogIndex, edit: FeedingEdit): PlannedFeeding[] {
+	const planned: PlannedFeeding[] = edit.named.map((n) => ({
+		dogId: n.dogId,
+		dogName: n.dogName,
+		amountEaten: n.amountEaten,
+		mealTime: edit.mealTime,
+		mealTimeInferred: false,
+		implied: false
+	}));
+	if (!edit.fillIn) return planned;
+
+	const parsed = parseFeedingMessage(text, rosterOn(index, postedAt));
+	const skip = new Set([
+		...edit.named.map((n) => n.dogId),
+		...(parsed.doNotFeed.map((name) => resolveDogId(index, name, postedAt)).filter(Boolean) as string[])
+	]);
+	for (const dog of feedableOn(index, feedingDate(postedAt, edit.mealTime), edit.mealTime)) {
+		if (skip.has(dog.id)) continue;
+		planned.push({
+			dogId: dog.id,
+			dogName: dog.name,
+			amountEaten: 'all',
+			mealTime: edit.mealTime,
+			mealTimeInferred: false,
+			implied: true
+		});
+	}
+	return planned;
+}
+
 export interface PlannedSurgery {
 	dogId: string;
 	dogName: string;

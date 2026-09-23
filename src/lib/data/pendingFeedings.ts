@@ -1,7 +1,7 @@
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import type { PendingFeeding, UserProfile } from '$lib/types';
 import { db } from '$lib/firebase/config';
-import { buildDogIndex, feedingDate, feedingLogId, planFeedings } from '$lib/data/feedingImport';
+import { buildDogIndex, feedingDate, feedingLogId, planEditedFeedings, planFeedings, type FeedingEdit } from '$lib/data/feedingImport';
 import { addFeedingLog, listDogs } from '$lib/data/dogs';
 import { listDogGroups } from '$lib/data/dogGroups';
 import { db as firestore } from '$lib/firebase/config';
@@ -100,14 +100,18 @@ async function alreadyLogged(dogId: string, date: Date, mealTime: string): Promi
  */
 export async function acceptPendingFeeding(
 	pending: PendingFeeding,
-	profile?: UserProfile | null
+	profile?: UserProfile | null,
+	/** A person's correction of the reading; without one the message is read afresh. */
+	edit?: FeedingEdit
 ): Promise<number> {
 	if (!db) return 0;
 	const postedAt = new Date(pending.postedAt);
 	const notes = `via Slack — ${pending.author}: "${pending.rawText.slice(0, 180)}"`;
 
 	const index = await currentDogIndex();
-	const entries = planFeedings(pending.rawText, postedAt, index);
+	const entries = edit
+		? planEditedFeedings(pending.rawText, postedAt, index, edit)
+		: planFeedings(pending.rawText, postedAt, index);
 
 	let written = 0;
 	for (const entry of entries) {

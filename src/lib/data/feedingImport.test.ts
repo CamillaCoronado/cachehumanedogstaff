@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDogIndex, feedingDate, feedingLogId, planFeedingsDetailed, shelterDay } from './feedingImport';
+import { buildDogIndex, feedingDate, feedingLogId, planEditedFeedings, planFeedingsDetailed, shelterDay } from './feedingImport';
 
 const index = buildDogIndex([
 	{ id: 'buck', name: 'Buck', status: 'active', intakeDate: '2026-01-01T12:00:00Z', hasSecondMeal: true },
@@ -92,5 +92,41 @@ describe('who "everyone else" covers', () => {
 				evening
 			)
 		).toEqual(['two']);
+	});
+});
+
+describe('planEditedFeedings', () => {
+	const at = new Date('2026-09-22T08:30:00-06:00');
+	const base = { status: 'active', intakeDate: '2026-01-01T12:00:00Z' };
+	const idx = buildDogIndex([
+		{ id: 'buck', name: 'Buck', ...base },
+		{ id: 'cora', name: 'Cora', ...base, hasSecondMeal: true },
+		{ id: 'dot', name: 'Dot', ...base }
+	]);
+
+	it('takes the named dogs as given and fills in the rest', () => {
+		const out = planEditedFeedings("Buck didn't eat", at, idx, {
+			mealTime: 'am',
+			named: [{ dogId: 'cora', dogName: 'Cora', amountEaten: 'half' }],
+			fillIn: true
+		});
+		expect(out.filter((e) => !e.implied)).toEqual([
+			expect.objectContaining({ dogId: 'cora', amountEaten: 'half', mealTime: 'am' })
+		]);
+		expect(out.filter((e) => e.implied).map((e) => e.dogId).sort()).toEqual(['buck', 'dot']);
+	});
+
+	it('fills in nothing when everyone-else is off', () => {
+		const out = planEditedFeedings('x', at, idx, {
+			mealTime: 'am',
+			named: [{ dogId: 'buck', dogName: 'Buck', amountEaten: 'none' }],
+			fillIn: false
+		});
+		expect(out).toHaveLength(1);
+	});
+
+	it('follows a meal changed to the second meal', () => {
+		const out = planEditedFeedings('x', at, idx, { mealTime: 'second', named: [], fillIn: true });
+		expect(out.map((e) => e.dogId)).toEqual(['cora']);
 	});
 });
