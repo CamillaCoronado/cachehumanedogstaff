@@ -114,7 +114,7 @@
 		{ value: 'active', label: 'Active' },
 		{ value: 'adopted', label: 'Adopted' },
 		{ value: 'transferred', label: 'Transferred' },
-		{ value: 'euthanized', label: 'Euthanized' }
+		{ value: 'euthanized', label: 'Deceased' }
 	];
 	const isolationStatuses: { value: IsolationStatus; label: string }[] = [
 		{ value: 'none', label: 'Not in Isolation' },
