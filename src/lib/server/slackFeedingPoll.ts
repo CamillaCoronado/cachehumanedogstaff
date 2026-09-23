@@ -2,19 +2,14 @@ import { env } from '$env/dynamic/private';
 import { getAdminDb } from '$lib/firebase/admin';
 import { newChannelMessages, resolveAuthors } from '$lib/server/slackClient';
 import {
-	bathLogId,
 	buildDogIndex,
-	feedingLogId,
-	yardLogId,
 	planBaths,
 	planYardTime,
-	feedingDate,
 	planFeedingsDetailed,
-	shelterDay,
 	planSurgery,
-	type DogRecord,
-	type PlannedFeeding
+	type DogRecord
 } from '$lib/data/feedingImport';
+import { applySurgeryList, writeBaths, writeFeedings, writeYard } from '$lib/server/slackWriters';
 
 /** Where the last-read message timestamp lives, so each run starts where the last stopped. */
 const CURSOR_DOC = 'syncState/slackFeedingCursor';
@@ -42,66 +37,6 @@ export interface PollResult {
 	skipped?: string;
 }
 
-/**
- * Writes a report's logs, leaving alone any meal that already has one.
- *
- * A filled-in dog is an inference from the exceptions, so anything already standing —
- * a staff entry, an earlier report of the same feed — knows more than it does. A dog the
- * message actually named overwrites, since that is an observation.
- */
-async function writeFeedings(
-	db: FirebaseFirestore.Firestore,
-	entries: PlannedFeeding[],
-	postedAt: Date,
-	author: string,
-	rawText: string,
-	slackTs: string
-): Promise<number> {
-	const notes = `via Slack — ${author}: "${rawText.slice(0, 180)}"`;
-	const now = new Date().toISOString();
-	let written = 0;
-
-	for (let i = 0; i < entries.length; i += 200) {
-		const chunk = entries.slice(i, i + 200);
-		const existing = await Promise.all(
-			chunk.map((e) =>
-				db.collection('dogs').doc(e.dogId).collection('feedingLogs').get()
-			)
-		);
-
-		const batch = db.batch();
-		chunk.forEach((entry, j) => {
-			// Compared on the shelter's calendar day, not the server's: an evening report
-			// is already the next day in UTC, and would miss the log it should defer to.
-			const fedAt = feedingDate(postedAt, entry.mealTime);
-			const day = shelterDay(fedAt);
-			const already = existing[j].docs.some((d) => {
-				const x = d.data();
-				return x.mealTime === entry.mealTime && shelterDay(new Date(x.date)) === day;
-			});
-			if (entry.implied && already) return;
-
-			const id = feedingLogId(fedAt, entry.dogId, entry.mealTime);
-			batch.set(db.collection('dogs').doc(entry.dogId).collection('feedingLogs').doc(id), {
-				id,
-				date: fedAt.toISOString(),
-				mealTime: entry.mealTime,
-				amountEaten: entry.amountEaten,
-				notes,
-				loggedBy: 'slack-import',
-				loggedByName: `${author} (via Slack)`,
-				createdAt: now,
-				source: 'slack',
-				sourceTs: slackTs,
-				mealTimeInferred: entry.mealTimeInferred,
-				impliedFromExceptions: entry.implied
-			});
-			written++;
-		});
-		await batch.commit();
-	}
-	return written;
-}
 
 /**
  * Pulls new feeding reports from Slack and queues them for admin approval.
@@ -173,34 +108,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		const surgery = planSurgery(String(m.text), postedAt, index);
 		if (surgery.length > 0) {
 			const author = authors[String(m.user ?? '')] ?? 'Unknown';
-			const note = `Surgery list via Slack — ${author}: "${String(m.text).slice(0, 180)}"`;
-			const batch = db.batch();
-			for (const dog of surgery) {
-				batch.set(
-					db.collection('dogs').doc(dog.dogId),
-					{
-						surgeryDate: postedAt.toISOString(),
-						surgerySource: `slack:${slackTs}`,
-						surgeryNote: note,
-						updatedAt: new Date().toISOString()
-					},
-					{ merge: true }
-				);
-			}
-			await batch.commit();
-
-			// Recorded as already handled, so the Admin page can show what was applied
-			// without asking anyone to approve it again.
-			await db.collection('pendingSurgeries').doc(slackTs.replace('.', '-')).set({
-				rawText: String(m.text),
-				author,
-				slackTs,
-				postedAt: postedAt.toISOString(),
-				receivedAt: new Date().toISOString(),
-				processed: true,
-				appliedAt: new Date().toISOString(),
-				dogs: surgery
-			});
+			await applySurgeryList(db, surgery, String(m.text), postedAt, author, slackTs);
 			queued++;
 			continue;
 		}
@@ -210,39 +118,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		// A message can report a bath and a feeding at once, so this does not short-circuit.
 		const bathed = planBaths(String(m.text), postedAt, index);
 		if (bathed.length > 0) {
-			const author = authors[String(m.user ?? '')] ?? 'Unknown';
-			const loggedByName = `${author} (via Slack)`;
-
-			// The dog's own lastBathDate drives the overdue list, so it may only move
-			// forward: a report arriving late must not undo a bath given since.
-			const current = await Promise.all(
-				bathed.map((d) => db.collection('dogs').doc(d.dogId).get())
-			);
-
-			const batch = db.batch();
-			bathed.forEach((dog, i) => {
-				const id = bathLogId(dog.at, dog.dogId);
-				batch.set(db.collection('dogs').doc(dog.dogId).collection('bathLogs').doc(id), {
-					id,
-					timestamp: dog.at.toISOString(),
-					loggedBy: 'slack-import',
-					loggedByName,
-					source: 'slack',
-					sourceTs: slackTs
-				});
-
-				const existing = current[i].data()?.lastBathDate;
-				const isNewer = !existing || new Date(existing).getTime() < dog.at.getTime();
-				if (isNewer) {
-					batch.set(
-						db.collection('dogs').doc(dog.dogId),
-						{ lastBathDate: dog.at.toISOString(), lastBathBy: loggedByName },
-						{ merge: true }
-					);
-				}
-				baths++;
-			});
-			await batch.commit();
+			baths += await writeBaths(db, bathed, authors[String(m.user ?? '')] ?? 'Unknown', slackTs);
 		}
 
 		// Yard time is enrichment, and the only kind with no path into the app but by hand.
@@ -250,34 +126,7 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		// inverse — "No dogs got yard time" reads almost identically to a blanket.
 		const inYard = planYardTime(String(m.text), postedAt, index);
 		if (inYard.length > 0) {
-			const author = authors[String(m.user ?? '')] ?? 'Unknown';
-			const current = await Promise.all(
-				inYard.map((d) => db.collection('dogs').doc(d.dogId).get())
-			);
-			const batch = db.batch();
-			inYard.forEach((dog, i) => {
-				const id = yardLogId(postedAt, dog.dogId);
-				batch.set(db.collection('dogs').doc(dog.dogId).collection('yardLogs').doc(id), {
-					id,
-					timestamp: postedAt.toISOString(),
-					durationMinutes: dog.durationMinutes,
-					loggedBy: 'slack-import',
-					loggedByName: `${author} (via Slack)`,
-					source: 'slack',
-					sourceTs: slackTs
-				});
-				// lastYardDate feeds the overdue-enrichment list, so it only moves forward.
-				const existing = current[i].data()?.lastYardDate;
-				if (!existing || new Date(existing).getTime() < postedAt.getTime()) {
-					batch.set(
-						db.collection('dogs').doc(dog.dogId),
-						{ lastYardDate: postedAt.toISOString() },
-						{ merge: true }
-					);
-				}
-				yard++;
-			});
-			await batch.commit();
+			yard += await writeYard(db, inYard, postedAt, authors[String(m.user ?? '')] ?? 'Unknown', slackTs);
 		}
 
 		const plan = planFeedingsDetailed(String(m.text), postedAt, index);

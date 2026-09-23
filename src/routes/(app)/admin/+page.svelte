@@ -165,40 +165,61 @@
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
 
-	// Slack bath backfill: past "gave X a bath" reports in #dog-staff, logged the way the
-	// live poll logs them. Dry run first; every row starts ticked and can be unticked.
-	type BathRow = { key: string; dogId: string; dogName: string; at: string; author: string; text: string };
-	let bathSince = '2026-03-01';
-	let bathBusy = false;
-	let bathWasDryRun = true;
-	let bathResult: { scanned: number; rows: BathRow[]; alreadyLogged: number; written: number; truncated: boolean; threadsSkipped: number; skipped?: string } | null = null;
-	let bathKeep: string[] = [];
+	// #dog-staff backfill: past surgery lists, baths, yard time and feedings (thread
+	// replies included), read and written the way the live Slack poll does. Dry run first;
+	// every row starts ticked except uncertain feeding readings.
+	type StaffKind = 'surgery' | 'bath' | 'yard' | 'feeding';
+	type StaffRow = { key: string; kind: StaffKind; at: string; author: string; text: string; summary: string; uncertain: string[] };
+	type StaffResult = {
+		scanned: number;
+		rows: StaffRow[];
+		alreadyLogged: Record<StaffKind, number>;
+		written: Record<StaffKind, number>;
+		truncated: boolean;
+		threadsSkipped: number;
+		skipped?: string;
+	};
+	const STAFF_KIND_LABELS: Record<StaffKind, string> = { feeding: 'Feedings', surgery: 'Surgery lists', bath: 'Baths', yard: 'Yard time' };
+	const STAFF_KIND_ORDER: StaffKind[] = ['feeding', 'surgery', 'bath', 'yard'];
+	let staffSince = '2026-03-01';
+	let staffKinds: StaffKind[] = ['feeding', 'surgery', 'bath', 'yard'];
+	let staffBusy = false;
+	let staffWasDryRun = true;
+	let staffResult: StaffResult | null = null;
+	let staffKeep: string[] = [];
 
-	async function runBathBackfill(dryRun: boolean) {
-		if (bathBusy) return;
-		bathBusy = true;
+	function toggleStaffKind(kind: StaffKind) {
+		staffKinds = staffKinds.includes(kind) ? staffKinds.filter((k) => k !== kind) : [...staffKinds, kind];
+	}
+
+	async function runStaffBackfill(dryRun: boolean) {
+		if (staffBusy) return;
+		staffBusy = true;
 		try {
 			const token = await $authUser?.getIdToken();
-			const res = await fetch('/api/slack/bath-backfill', {
+			const res = await fetch('/api/slack/staff-backfill', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-				body: JSON.stringify({ since: bathSince, dryRun, ...(dryRun ? {} : { keep: bathKeep }) })
+				body: JSON.stringify({ since: staffSince, dryRun, kinds: staffKinds, ...(dryRun ? {} : { keep: staffKeep }) })
 			});
 			if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-			bathResult = await res.json();
-			bathWasDryRun = dryRun;
-			if (bathResult?.skipped) toast.error('Slack is not configured for #dog-staff.');
-			else if (dryRun) bathKeep = (bathResult?.rows ?? []).map((r) => r.key);
-			else toast.success(`Logged ${bathResult?.written ?? 0} bath${bathResult?.written === 1 ? '' : 's'}.`);
+			staffResult = await res.json();
+			staffWasDryRun = dryRun;
+			if (staffResult?.skipped) toast.error('Slack is not configured for #dog-staff.');
+			else if (dryRun) staffKeep = (staffResult?.rows ?? []).filter((r) => r.uncertain.length === 0).map((r) => r.key);
+			else {
+				const w = staffResult?.written;
+				toast.success(`Logged ${w?.feeding ?? 0} feedings, ${w?.bath ?? 0} baths, ${w?.yard ?? 0} yard times, ${w?.surgery ?? 0} surgery lists.`);
+			}
 		} catch (e) {
-			toast.error('Bath backfill failed: ' + (e instanceof Error ? e.message : String(e)));
+			toast.error('Backfill failed: ' + (e instanceof Error ? e.message : String(e)));
 		} finally {
-			bathBusy = false;
+			staffBusy = false;
 		}
 	}
 
-	function toggleBathRow(key: string) {
-		bathKeep = bathKeep.includes(key) ? bathKeep.filter((k) => k !== key) : [...bathKeep, key];
+	function toggleStaffRow(key: string) {
+		staffKeep = staffKeep.includes(key) ? staffKeep.filter((k) => k !== key) : [...staffKeep, key];
 	}
 
 	// Foster-return repair: before foster returns had their own stamp, coming back from
@@ -954,63 +975,78 @@
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
-						<h3 class="section-title">Backfill baths from Slack</h3>
+						<h3 class="section-title">Backfill #dog-staff from Slack</h3>
 						<p class="section-copy">
-							Reads bath reports in #dog-staff, thread replies included ("gave Roe a bath", "the hat puppies got baths"), from the
-							date below and logs them the way the live Slack poll does. Baths already logged are left
-							alone, and a dog's last bath only ever moves forward. <strong>Dry run first — nothing is
-							logged until you apply, and only ticked rows.</strong>
+							Reads #dog-staff, thread replies included, from the date below and logs what it finds the
+							way the live Slack poll does: surgery lists, baths, yard time and feedings. Anything already
+							logged is left alone, and last-bath / last-yard dates only move forward. <strong>Dry run
+							first — nothing is logged until you apply, and only ticked rows.</strong> Feeding readings
+							the app is unsure of start unticked, with the reason.
 						</p>
 					</div>
 				</div>
 				<div class="repair-actions">
-					<input type="date" class="field-input backfill-date-input" bind:value={bathSince} max={new Date().toISOString().slice(0, 10)} />
-					<button class="action-btn" type="button" on:click={() => runBathBackfill(true)} disabled={bathBusy || !bathSince}>
-						{bathBusy && bathWasDryRun ? 'Checking…' : 'Dry run'}
+					{#each STAFF_KIND_ORDER as k}
+						<label class="staff-kind">
+							<input type="checkbox" checked={staffKinds.includes(k)} on:change={() => toggleStaffKind(k)} />
+							{STAFF_KIND_LABELS[k]}
+						</label>
+					{/each}
+				</div>
+				<div class="repair-actions">
+					<input type="date" class="field-input backfill-date-input" bind:value={staffSince} max={new Date().toISOString().slice(0, 10)} />
+					<button class="action-btn" type="button" on:click={() => runStaffBackfill(true)} disabled={staffBusy || !staffSince || staffKinds.length === 0}>
+						{staffBusy && staffWasDryRun ? 'Checking…' : 'Dry run'}
 					</button>
 				</div>
-				{#if bathResult && !bathResult.skipped}
+				{#if staffResult && !staffResult.skipped}
 					<div class="status-row-plain">
 						<span class="status-meta">
-							{#if bathWasDryRun}
-								{bathResult.scanned} messages and thread replies since {formatDate(bathSince)}: <strong>{bathResult.rows.length}</strong>
-								bath{bathResult.rows.length === 1 ? '' : 's'} to log, {bathResult.alreadyLogged} already logged.
+							{#if staffWasDryRun}
+								{staffResult.scanned} messages and thread replies since {formatDate(staffSince)}:
+								<strong>{staffResult.rows.length}</strong> to log.
+								Already logged: {staffResult.alreadyLogged.feeding} feedings, {staffResult.alreadyLogged.bath} baths,
+								{staffResult.alreadyLogged.yard} yard, {staffResult.alreadyLogged.surgery} surgery lists.
 							{:else}
-								Logged {bathResult.written} bath{bathResult.written === 1 ? '' : 's'}.
+								Logged {staffResult.written.feeding} feedings, {staffResult.written.bath} baths,
+								{staffResult.written.yard} yard times, {staffResult.written.surgery} surgery lists.
 							{/if}
-							{#if bathResult.truncated}
-								Over 3,000 messages in that range: only the newest were read, so the earliest baths
-								were missed. Pick a later start date.
+							{#if staffResult.truncated}
+								Over 3,000 messages in that range: only the newest were read, so the earliest were
+								missed. Pick a later start date.
 							{/if}
-							{#if bathResult.threadsSkipped > 0}
-								{bathResult.threadsSkipped} older thread{bathResult.threadsSkipped === 1 ? '' : 's'} not read
+							{#if staffResult.threadsSkipped > 0}
+								{staffResult.threadsSkipped} older thread{staffResult.threadsSkipped === 1 ? '' : 's'} not read
 								(too many for one run) — pick a later start date to include them.
 							{/if}
 						</span>
 					</div>
-					{#if bathWasDryRun && bathResult.rows.length > 0}
+					{#if staffWasDryRun && staffResult.rows.length > 0}
 						<div class="repair-actions">
-							<button class="ghost-btn action-btn-small" type="button" on:click={() => (bathKeep = (bathResult?.rows ?? []).map((r) => r.key))}>Tick all</button>
-							<button class="ghost-btn action-btn-small" type="button" on:click={() => (bathKeep = [])}>Untick all</button>
+							<button class="ghost-btn action-btn-small" type="button" on:click={() => (staffKeep = (staffResult?.rows ?? []).map((r) => r.key))}>Tick all</button>
+							<button class="ghost-btn action-btn-small" type="button" on:click={() => (staffKeep = [])}>Untick all</button>
 						</div>
 						<ul class="user-list">
-							{#each bathResult.rows as r (r.key)}
+							{#each staffResult.rows as r (r.key)}
 								<li class="user-row">
 									<label class="user-main fr-row">
-										<input type="checkbox" checked={bathKeep.includes(r.key)} on:change={() => toggleBathRow(r.key)} />
+										<input type="checkbox" checked={staffKeep.includes(r.key)} on:change={() => toggleStaffRow(r.key)} />
 										<span>
-											<span class="suspect-name">{formatDate(r.at)} · {r.dogName}</span>
+											<span class="suspect-name"><span class="staff-tag staff-tag-{r.kind}">{STAFF_KIND_LABELS[r.kind]}</span> {formatDate(r.at)} · {r.summary}</span>
 											<span class="suspect-detail">{r.author}: “{r.text}”</span>
+											{#if r.uncertain.length > 0}
+												<span class="suspect-detail staff-unsure">Unsure: {r.uncertain.join(' · ')}</span>
+											{/if}
 										</span>
 									</label>
 								</li>
 							{/each}
 						</ul>
-						<button class="action-btn backfill-apply" type="button" on:click={() => runBathBackfill(false)} disabled={bathBusy || bathKeep.length === 0}>
-							{bathBusy ? 'Logging…' : `Log ${bathKeep.length} bath${bathKeep.length === 1 ? '' : 's'}`}
+						<button class="action-btn backfill-apply" type="button" on:click={() => runStaffBackfill(false)} disabled={staffBusy || staffKeep.length === 0}>
+							{staffBusy ? 'Logging…' : `Log ${staffKeep.length} report${staffKeep.length === 1 ? '' : 's'}`}
 						</button>
-					{:else if bathWasDryRun}
-						<p class="empty-note">No new baths to log in that range.</p>
+					{:else if staffWasDryRun}
+						<p class="empty-note">Nothing new to log in that range.</p>
 					{/if}
 				{/if}
 			</section>
@@ -1370,6 +1406,35 @@
 		padding: 0.3rem 0.6rem;
 		font-size: 0.72rem;
 		border-radius: 0.5rem;
+	}
+
+	.staff-kind {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.86rem;
+	}
+
+	.staff-tag {
+		font-size: 0.62rem;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		border-radius: 999px;
+		padding: 0.08rem 0.4rem;
+		margin-right: 0.2rem;
+		background: #eef3f8;
+		color: #214866;
+	}
+
+	.staff-tag-feeding { background: #fff4cc; color: #7a4f00; }
+	.staff-tag-surgery { background: #fde7e7; color: #9b2c2c; }
+	.staff-tag-bath { background: #e3f0fb; color: #1a4f7a; }
+	.staff-tag-yard { background: #e9f6ec; color: #256640; }
+
+	.staff-unsure {
+		color: #a8501b;
+		font-weight: 600;
 	}
 
 	.fr-row {
