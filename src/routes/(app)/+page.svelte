@@ -11,7 +11,7 @@
 	import { authProfile, authReady, authUser } from '$lib/stores/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
-	import { getBathAttentionDogs, getCautionDogs, getOverdueEnrichmentDogs, isInShelterOn } from '$lib/utils/attention';
+	import { getBathAttentionDogs, getCautionDogs, getOverdueEnrichmentDogs } from '$lib/utils/attention';
 	import { getDailyMovements, type DailyMovements } from '$lib/utils/movements';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import { subscribeHandoff, saveHandoff, type ShiftHandoff } from '$lib/data/handoff';
@@ -549,8 +549,7 @@
 	}
 
 	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
-		// The dogs at the shelter today, arrived transfers still marked Incoming included.
-		const shelterDogs = allActiveDogs.filter((d) => d.isolationStatus === 'none' && isInShelterOn(d, today));
+		const shelterDogs = activeDogs.filter((d) => d.isolationStatus === 'none' && !d.isIncoming);
 		const items: AttentionItem[] = [];
 
 		for (const { dog, days, isNewIntake } of getBathAttentionDogs(shelterDogs, today)) {

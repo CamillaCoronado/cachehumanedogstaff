@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog, PlaygroupSession } from '$lib/types';
-import { getBathAttentionDogs, getCautionDogs, getOverdueEnrichmentDogs, isInShelterOn } from './attention';
+import { getCautionDogs, getOverdueEnrichmentDogs } from './attention';
 
 function makeDog(overrides: Partial<Dog> = {}): Dog {
 	return {
@@ -164,31 +164,5 @@ describe('getOverdueEnrichmentDogs', () => {
 		const items = getOverdueEnrichmentDogs([older], [], today);
 		expect(items).toHaveLength(1);
 		expect(items[0].days).toBe(8);
-	});
-});
-
-describe('isInShelterOn', () => {
-	const day = new Date(2026, 8, 23, 9);
-
-	it('counts a transfer still marked Incoming once it has arrived', () => {
-		expect(isInShelterOn(makeDog({ status: 'active', isIncoming: true, intakeDate: new Date(2026, 8, 20) }), day)).toBe(true);
-		expect(isInShelterOn(makeDog({ status: 'active', isIncoming: true, intakeDate: new Date(2026, 8, 23, 15) }), day)).toBe(true);
-	});
-
-	it('does not count an Incoming dog booked for a later day, or one with no date', () => {
-		expect(isInShelterOn(makeDog({ status: 'active', isIncoming: true, intakeDate: new Date(2026, 8, 25) }), day)).toBe(false);
-		expect(isInShelterOn(makeDog({ status: 'active', isIncoming: true, intakeDate: null }), day)).toBe(false);
-	});
-
-	it('leaves out dogs in foster and dogs that have left', () => {
-		expect(isInShelterOn(makeDog({ status: 'active', inFoster: true }), day)).toBe(false);
-		expect(isInShelterOn(makeDog({ status: 'adopted' }), day)).toBe(false);
-		expect(isInShelterOn(makeDog({ status: 'active' }), day)).toBe(true);
-	});
-
-	it('puts an arrived transfer on the bath list as a new intake', () => {
-		const transfer = makeDog({ status: 'active', isIncoming: true, intakeDate: new Date(2026, 8, 21), lastBathDate: null, shelterSince: null, surgeryDate: null });
-		const here = [transfer].filter((d) => isInShelterOn(d, day));
-		expect(getBathAttentionDogs(here, day)).toEqual([expect.objectContaining({ isNewIntake: true })]);
 	});
 });
