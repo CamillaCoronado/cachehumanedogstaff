@@ -184,6 +184,13 @@ export interface Dog {
 	inFoster: boolean;
 	inFosterSince?: DateValue | null;
 	shelterSince?: DateValue | null;
+	/**
+	 * When the dog last came back from foster. Kept apart from shelterSince, which is the
+	 * length of the stay (from reaching the floor) and must not reset because a dog spent
+	 * time in foster. Fosters bathe the dogs, so it counts as a bath; the enrichment, day
+	 * trip and playgroup clocks start fresh from it; movements show it as returned.
+	 */
+	fosterReturnedAt?: DateValue | null;
 	playgroupReadyDate?: DateValue | null;
 	awaitingEvaluation?: boolean;
 	/** True once the sheet-color auto-clear has fired for this dog, so a later manual

@@ -54,6 +54,8 @@ export interface DogRecord {
 	permanentFoster?: boolean;
 	inFosterSince?: string | null;
 	shelterSince?: string | null;
+	/** When the dog last came back from foster (shelterSince no longer moves for it). */
+	fosterReturnedAt?: string | null;
 	isolationStatus?: string | null;
 	isIncoming?: boolean;
 	/** Set by the morning surgery list; the dog fasts that day. */
@@ -166,9 +168,10 @@ export function buildDogIndex(dogs: DogRecord[], groups: DogGroupRecord[] = []):
 		// a dog in foster today was still being fed here before it left, and one that went
 		// to foster in April was not being fed here in May.
 		const fosterFrom = dog.inFosterSince ? new Date(dog.inFosterSince).getTime() : null;
-		const backRaw = dog.shelterSince ? new Date(dog.shelterSince).getTime() : null;
-		// shelterSince is also stamped when a dog moves off Incoming, so it only marks a
-		// return from foster when it comes after the foster started.
+		// Back from foster: its own stamp now. Older records re-stamped shelterSince, which
+		// moving off Incoming also does, so that only counts when it follows the foster.
+		const returned = dog.fosterReturnedAt ? new Date(dog.fosterReturnedAt).getTime() : null;
+		const backRaw = returned ?? (dog.shelterSince ? new Date(dog.shelterSince).getTime() : null);
 		const backFrom = backRaw !== null && fosterFrom !== null && backRaw > fosterFrom ? backRaw : null;
 
 		const candidate: Candidate = {

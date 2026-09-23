@@ -33,11 +33,12 @@
 		checklistHref?: string;
 	}
 
+	/** One row per dog: everything it needs, as tags. */
 	interface AttentionItem {
 		dogId: string;
 		dogName: string;
-		type: AttentionKind;
-		short: string;
+		flags: { type: AttentionKind; short: string }[];
+		/** Longest wait among its flags, for ordering. */
 		days: number;
 	}
 
@@ -554,9 +555,13 @@
 				lastPlaygroupDate: lastPlaygroup[dog.id] ?? null,
 				tripEligibility: tripEligibilityFor(dog, viewerRole, today)
 			});
-			for (const flag of flags) {
-				items.push({ dogId: dog.id, dogName: dog.name, type: flag.kind, short: flag.short, days: flag.days });
-			}
+			if (flags.length === 0) continue;
+			items.push({
+				dogId: dog.id,
+				dogName: dog.name,
+				flags: flags.map((f) => ({ type: f.kind, short: f.short })),
+				days: Math.max(...flags.map((f) => f.days))
+			});
 		}
 		return items.sort((a, b) => b.days - a.days);
 	}
@@ -648,7 +653,7 @@
 		setFosterUpdating(dog.id, true);
 		errorMessage = '';
 		try {
-			await updateDog(dog.id, { inFoster: false, shelterSince: new Date() });
+			await updateDog(dog.id, { inFoster: false, fosterReturnedAt: new Date() });
 			await loadBoard();
 		} catch (error) {
 			console.error(error);
@@ -1016,16 +1021,15 @@
 				{:else if attentionItems.length === 0}
 					<p class="planner-empty-row">All caught up!</p>
 				{:else}
-					{#each attentionItems as item}
-						<a class="planner-row planner-row-link" href="/dogs/{item.dogId}">
-							<span class="planner-row-main">
-								<span class="planner-bullet">
-									{#if item.type === 'bath'}🛁{:else if item.type === 'enrichment' || item.type === 'daytrip' || item.type === 'playgroup'}🐾{:else}🔍{/if}
-								</span>
-								<span class="planner-row-text">{item.dogName}</span>
-							</span>
-							<span class="attention-tag attention-tag-{item.type}">
-								{item.short}
+					{#each attentionItems as item (item.dogId)}
+						<a class="planner-row planner-row-link attention-row" href="/dogs/{item.dogId}">
+							<span class="planner-row-text">{item.dogName}</span>
+							<span class="attention-tags">
+								{#each item.flags as flag}
+									<span class="attention-tag attention-tag-{flag.type}">
+										{flag.type === 'bath' ? '🛁' : flag.type === 'dogtest' ? '🔍' : '🐾'} {flag.short}
+									</span>
+								{/each}
 							</span>
 						</a>
 					{/each}
@@ -1691,6 +1695,21 @@
 		text-transform: uppercase;
 	}
 
+	/* A dog per row: name, then its tags wrapping underneath on a narrow screen. */
+	.attention-row {
+		flex-wrap: wrap;
+		align-items: flex-start;
+		row-gap: 0.3rem;
+	}
+
+	.attention-tags {
+		display: flex;
+		flex-wrap: wrap;
+		flex-basis: 100%;
+		gap: 0.25rem;
+		min-width: 0;
+	}
+
 	.attention-tag {
 		flex-shrink: 0;
 		padding: 0.14rem 0.38rem;
@@ -1783,8 +1802,7 @@
 		color: #4a4a58;
 	}
 
-	.attention-tag-dogtest,
-	.attention-tag-evaluation {
+	.attention-tag-dogtest {
 		background: rgba(147, 57, 128, 0.12);
 		color: #6b2060;
 	}

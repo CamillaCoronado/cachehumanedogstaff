@@ -135,3 +135,14 @@ export async function listUnseenSyncEvents(since: DateValue | null | undefined):
 				SYNC_EVENT_ORDER.indexOf(a.type) - SYNC_EVENT_ORDER.indexOf(b.type)
 		);
 }
+
+/** Every recorded move into foster, for the foster-return repair on the Admin page. */
+export async function listFosterEvents(): Promise<{ dogIds: string[]; createdAt: Date }[]> {
+	const ref = eventsRef();
+	if (!ref) return [];
+	const snapshot = await getDocs(query(ref, where('type', '==', 'foster')));
+	return snapshot.docs.map((d) => ({
+		dogIds: (d.data().dogIds ?? []) as string[],
+		createdAt: new Date(d.data().createdAt as string)
+	}));
+}

@@ -427,7 +427,10 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 				const recentIntake = intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000;
 				const needsEvalFlag = existing?.awaitingEvaluation === undefined && recentIntake && !isPuppy;
 				const extra = {
-					...(returningFromFoster || leavingIncoming ? { shelterSince: now } : {}),
+					// Back from foster is its own stamp: the stay did not restart, so
+					// shelterSince (how long the dog has been ours) is left alone.
+					...(returningFromFoster ? { fosterReturnedAt: now } : {}),
+					...(leavingIncoming ? { shelterSince: now } : {}),
 					...(needsEvalFlag ? { awaitingEvaluation: true } : {})
 				};
 				writes.push({

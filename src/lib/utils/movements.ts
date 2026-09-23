@@ -7,7 +7,7 @@ export type DepartureOutcome = 'adopted' | 'transferred' | 'euthanized';
 // maintains — no extra logging needed:
 //  - arrived:  first-time intakes (intakeDate today, not a re-entry)
 //  - returned: back at the shelter today — adoption returns (reentryDates) or
-//              foster returns / hitting the floor (shelterSince)
+//              foster returns (fosterReturnedAt) / hitting the floor (shelterSince)
 //  - toFoster: placed in a foster home today (inFosterSince)
 //  - departed: archived today, with the outcome (adopted / transferred /
 //              euthanized) so the UI can label each appropriately
@@ -41,7 +41,9 @@ export function getDailyMovements(dogs: Dog[], day: Date): DailyMovements {
 		if (
 			reentryToday ||
 			backAgain ||
-			(!intakeToday && isSameCalendarDay(dog.shelterSince ?? null, day))
+			(!intakeToday && isSameCalendarDay(dog.shelterSince ?? null, day)) ||
+			// Back from foster has its own stamp now; shelterSince no longer moves for it.
+			isSameCalendarDay(dog.fosterReturnedAt ?? null, day)
 		) {
 			returned.push(dog);
 		}

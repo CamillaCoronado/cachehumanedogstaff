@@ -6,6 +6,7 @@ import { createAdminSyncEnvironment } from '$lib/server/asmSyncEnv';
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
+import { recordSyncLog, syncLogSince } from '$lib/server/syncLog';
 
 /**
  * Twenty people opening the app at 8am should not each reconcile the whole roster
@@ -37,18 +38,32 @@ export async function POST({ request }: RequestEvent) {
 
 	// Claim the slot in a transaction so two simultaneous logins cannot both decide they
 	// are the one to run it.
+	let lastSyncAt = 0;
 	const claimed = await db.runTransaction(async (tx) => {
 		const snap = await tx.get(lockRef);
 		const last = snap.exists ? Number(snap.data()?.at ?? 0) : 0;
+		lastSyncAt = last;
 		if (Date.now() - last < MIN_INTERVAL_MS) return false;
 		tx.set(lockRef, { at: Date.now(), by: uid });
 		return true;
 	});
 
-	if (!claimed) return json({ synced: false, reason: 'recent', changes: [] });
+	// What this person has not seen yet, from any sync — theirs or anyone else's.
+	const body = (await request.json().catch(() => ({}))) as { since?: number };
+	const since = Number.isFinite(Number(body.since)) ? Number(body.since) : 0;
+	const unseen = () => syncLogSince(since).catch((e) => {
+		console.error('[sync log]', e);
+		return [];
+	});
+
+	// Someone synced moments ago: say when, and pass on what it found.
+	if (!claimed) return json({ synced: false, reason: 'recent', lastSyncAt, changes: [], unseen: await unseen() });
 
 	const result = await syncAnimalsFromASM(createAdminSyncEnvironment());
-	if (result.changes.length > 0) await recordSyncEventsAdmin(result.changes);
+	if (result.changes.length > 0) {
+		await recordSyncEventsAdmin(result.changes);
+		await recordSyncLog(result.changes).catch((e) => console.error('[sync log]', e));
+	}
 
 	// Same five-minute slot, so feeding reports reach the approval queue within minutes
 	// of someone opening the app rather than waiting for the daily cron. A Slack failure
@@ -65,5 +80,5 @@ export async function POST({ request }: RequestEvent) {
 	}
 
 	// Return the changes themselves, not just a count — the sync log panel lists them.
-	return json({ synced: true, changes: result.changes });
+	return json({ synced: true, lastSyncAt: Date.now(), changes: result.changes, unseen: await unseen() });
 }

@@ -8,6 +8,8 @@
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
 	import { matchDogByName } from '$lib/utils/dogs';
 	import CheckList from '$lib/components/admin/CheckList.svelte';
+	import { listFosterEvents } from '$lib/data/syncEvents';
+	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
 	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
@@ -162,6 +164,54 @@
 	$: mergeKeepDog = allDogs.find((d) => d.id === mergeKeepId) ?? null;
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
+
+	// Foster-return repair: before foster returns had their own stamp, coming back from
+	// foster reset shelterSince (the length of stay). Dry run lists them; nothing is
+	// written until applied, and only the ticked ones.
+	let frRunning = false;
+	let frRan = false;
+	let frApplying = false;
+	let frCandidates: FosterRepairCandidate[] = [];
+	let frSelected: string[] = [];
+
+	async function runFosterRepairDryRun() {
+		frRunning = true;
+		try {
+			const [dogs, events] = await Promise.all([listDogs(), listFosterEvents()]);
+			frCandidates = fosterRepairCandidates(dogs, events);
+			// A recorded foster is ticked; a guess from the dates waits for a person.
+			frSelected = frCandidates.filter((c) => c.confident).map((c) => c.dog.id);
+			frRan = true;
+		} catch (e) {
+			toast.error('Dry run failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			frRunning = false;
+		}
+	}
+
+	function toggleFosterRepair(id: string) {
+		frSelected = frSelected.includes(id) ? frSelected.filter((x) => x !== id) : [...frSelected, id];
+	}
+
+	async function applyFosterRepair() {
+		if (frApplying) return;
+		frApplying = true;
+		let done = 0;
+		try {
+			for (const c of frCandidates.filter((x) => frSelected.includes(x.dog.id))) {
+				// The overwritten date was the return; the stay counts from intake again.
+				await updateDog(c.dog.id, { fosterReturnedAt: c.returnedAt, shelterSince: null });
+				done++;
+			}
+			frCandidates = frCandidates.filter((c) => !frSelected.includes(c.dog.id));
+			frSelected = [];
+			toast.success(`Repaired ${done} dog${done === 1 ? '' : 's'}.`);
+		} catch (e) {
+			toast.error('Stopped after an error: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			frApplying = false;
+		}
+	}
 
 	// Slack playgroup backfill: the live poll only reaches two days back, so older
 	// playgroups are pulled in from here. Dry run first; queueing needs a second click.
@@ -868,6 +918,44 @@
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Repair foster returns</h3>
+						<p class="section-copy">
+							Coming back from foster used to reset the dog's length of stay. This finds those dogs and
+							moves that date to its own "back from foster" stamp, so the stay counts from intake again
+							(a transfer's floor date, if it had one, was already lost). <strong>Nothing changes until
+							you apply, and only ticked dogs.</strong> Guesses from the dates start unticked.
+						</p>
+					</div>
+					<button class="action-btn" type="button" on:click={runFosterRepairDryRun} disabled={frRunning}>
+						{frRunning ? 'Checking…' : 'Dry run'}
+					</button>
+				</div>
+				{#if frRan && frCandidates.length === 0}
+					<p class="empty-note">No dogs need repairing.</p>
+				{:else if frCandidates.length > 0}
+					<ul class="user-list">
+						{#each frCandidates as c (c.dog.id)}
+							<li class="user-row">
+								<label class="user-main fr-row">
+									<input type="checkbox" checked={frSelected.includes(c.dog.id)} on:change={() => toggleFosterRepair(c.dog.id)} />
+									<span>
+										<span class="suspect-name">{c.dog.name}{c.confident ? '' : ' · guess'}</span>
+										<span class="suspect-detail">{c.reason}. Intake {formatDate(c.dog.intakeDate)}.</span>
+									</span>
+								</label>
+							</li>
+						{/each}
+					</ul>
+					<button class="action-btn backfill-apply" type="button" on:click={applyFosterRepair} disabled={frApplying || frSelected.length === 0}>
+						{frApplying ? 'Repairing…' : `Repair ${frSelected.length} dog${frSelected.length === 1 ? '' : 's'}`}
+					</button>
+				{/if}
+			</section>
+
+			<section class="admin-card">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Backfill playgroups from Slack</h3>
 						<p class="section-copy">
 							The Slack poll only reaches two days back. This reads the playgroups channel from the date
@@ -1181,6 +1269,18 @@
 		padding: 0.3rem 0.6rem;
 		font-size: 0.72rem;
 		border-radius: 0.5rem;
+	}
+
+	.fr-row {
+		display: flex;
+		gap: 0.6rem;
+		align-items: flex-start;
+		cursor: pointer;
+	}
+
+	.fr-row .suspect-name,
+	.fr-row .suspect-detail {
+		display: block;
 	}
 
 	.pg-legend {

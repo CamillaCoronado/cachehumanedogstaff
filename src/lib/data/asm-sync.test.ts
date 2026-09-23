@@ -75,3 +75,25 @@ describe('deaths from ASM', () => {
 		expect(store.get('8')?.status).toBe('adopted');
 	});
 });
+
+describe('stamps on arrival and foster return', () => {
+	it('stamps fosterReturnedAt, not shelterSince, when a dog comes back from foster', async () => {
+		const { env, store } = fakeEnv(
+			{ '2': { name: 'Back', status: 'active', asmId: 2, asmShelterCode: 'A2', inFoster: true, shelterSince: '2026-03-01T12:00:00.000Z' } },
+			{ animals: [stayer, { ID: 2, ANIMALNAME: 'Back', SPECIESNAME: 'Dog', SHELTERCODE: 'A2' }] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('2')?.fosterReturnedAt).toBeTruthy();
+		expect(store.get('2')?.shelterSince).toBe('2026-03-01T12:00:00.000Z');
+	});
+
+	it('stamps shelterSince when a transfer moves off Incoming', async () => {
+		const { env, store } = fakeEnv(
+			{ '3': { name: 'Transfer', status: 'active', asmId: 3, asmShelterCode: 'A3', isIncoming: true } },
+			{ animals: [stayer, { ID: 3, ANIMALNAME: 'Transfer', SPECIESNAME: 'Dog', SHELTERCODE: 'A3', DISPLAYLOCATIONNAME: 'Kennel 4' }] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('3')?.shelterSince).toBeTruthy();
+		expect(store.get('3')?.fosterReturnedAt).toBeUndefined();
+	});
+});

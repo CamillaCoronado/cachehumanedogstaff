@@ -70,19 +70,19 @@ export function getBathStatus(dog: Dog, today: Date): BathStatus {
 	const absent = { isDue: false, isNewIntake: false, overdueDays: null, daysSinceArrival: 0 };
 	if (!bathEligible(dog.surgeryDate, today)) return absent;
 
-	let effectiveBathDate: Dog['lastBathDate'] | string | null;
-	if (dog.shelterSince) {
-		const returnMs = toDate(dog.shelterSince)?.getTime() ?? 0;
-		const bathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
-		effectiveBathDate = bathMs > returnMs ? dog.lastBathDate : dog.shelterSince;
-	} else {
-		const intakeMs = toDate(dog.intakeDate)?.getTime() ?? 0;
-		const bathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
-		const bathCountsForStay =
-			dog.lastBathDate != null &&
-			(bathMs >= intakeMs || isSameCalendarDay(dog.lastBathDate, dog.intakeDate));
-		effectiveBathDate = bathCountsForStay ? dog.lastBathDate : null;
-	}
+	// A real bath counts if it was given this stay (on or after intake — including while
+	// the dog was still in Incoming). Moving off Incoming is not a bath; coming back from
+	// foster is, since fosters bathe the dogs. The later of the two is the last bath.
+	const intakeMs = toDate(dog.intakeDate)?.getTime() ?? 0;
+	const bathMs = toDate(dog.lastBathDate)?.getTime() ?? 0;
+	const bathCountsForStay =
+		dog.lastBathDate != null &&
+		(bathMs >= intakeMs || isSameCalendarDay(dog.lastBathDate, dog.intakeDate));
+	const realBath = bathCountsForStay ? dog.lastBathDate : null;
+	const fosterReturn = fosterReturnDate(dog);
+	const fosterMs = toDate(fosterReturn)?.getTime() ?? null;
+	const effectiveBathDate: Dog['lastBathDate'] | string | null =
+		fosterMs !== null && (!realBath || fosterMs > bathMs) ? fosterReturn : realBath;
 
 	const days = daysSince(effectiveBathDate, today);
 	const isNewIntake = !effectiveBathDate;
@@ -93,6 +93,27 @@ export function getBathStatus(dog: Dog, today: Date): BathStatus {
 		return { isDue: true, isNewIntake: false, overdueDays: days - BATH_OVERDUE_DAYS, daysSinceArrival };
 	}
 	return absent;
+}
+
+/**
+ * When the dog last came back from foster, if it did. Older returns re-stamped
+ * shelterSince instead; the Admin page's repair moves those into fosterReturnedAt.
+ */
+export function fosterReturnDate(dog: Dog): Dog['fosterReturnedAt'] | string | null {
+	return dog.fosterReturnedAt ?? null;
+}
+
+/**
+ * Where the enrichment, day trip and playgroup clocks start: reaching the floor (or
+ * intake), or coming back from foster, whichever is later. Length of stay is not this —
+ * it stays shelterSince ?? intakeDate, which a stay in foster does not reset.
+ */
+export function clockStart(dog: Dog): Dog['intakeDate'] | string | null {
+	const stay = dog.shelterSince ?? dog.intakeDate ?? null;
+	const back = dog.fosterReturnedAt ?? null;
+	if (!back) return stay;
+	if (!stay) return back;
+	return (toDate(back)?.getTime() ?? 0) > (toDate(stay)?.getTime() ?? 0) ? back : stay;
 }
 
 export interface BathAttentionItem {
@@ -118,8 +139,7 @@ export function getBathAttentionDogs(dogs: Dog[], today: Date): BathAttentionIte
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
 export function getDayTripGapDays(dog: Dog, today: Date): number | null {
-	const effectiveSince = dog.shelterSince ?? dog.intakeDate;
-	return daysSince(sinceReturn(dog.lastDayTripDate, effectiveSince), today);
+	return daysSince(sinceReturn(dog.lastDayTripDate, clockStart(dog)), today);
 }
 
 export function buildLastPlaygroupMap(sessions: PlaygroupSession[]): Record<string, Date> {
@@ -183,7 +203,7 @@ export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
 
 	if (isSurgeryResting(dog, today)) return false;
 
-	const availableSince = dog.shelterSince ?? dog.intakeDate;
+	const availableSince = clockStart(dog);
 	const availableMs = toDate(availableSince)?.getTime() ?? 0;
 	const readyDate = toDate(dog.playgroupReadyDate) ?? new Date(availableMs + 7 * 86_400_000);
 	return today >= readyDate;
@@ -233,7 +253,7 @@ export function enrichmentOverdueDays(dog: Dog, lastPlaygroupDate: Date | null, 
 	if (isSurgeryResting(dog, today)) return null;
 	if (dog.handlingLevel === 'manager_only') return null;
 
-	const availableSince = dog.shelterSince ?? dog.intakeDate;
+	const availableSince = clockStart(dog);
 	const availableMs = toDate(availableSince)?.getTime() ?? 0;
 	// Coming off an isolation/sick hold reset the clock — ignore anything before it.
 	const resetMs = toDate(dog.enrichmentResetDate)?.getTime() ?? 0;

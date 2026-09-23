@@ -91,4 +91,10 @@ describe('getDailyMovements', () => {
 		expect(m.toFoster).toEqual([]);
 		expect(m.departed).toEqual([]);
 	});
+
+	it('shows a dog back from foster today as returned', () => {
+		const today = new Date();
+		const back = makeDog({ name: 'Home Again', status: 'active', intakeDate: new Date(2026, 0, 1), fosterReturnedAt: today });
+		expect(getDailyMovements([back], today).returned.map((d) => d.name)).toEqual(['Home Again']);
+	});
 });

@@ -1,6 +1,7 @@
 import type { Dog, UserRole } from '$lib/types';
-import { checkDayTripEligibility, daysSince, isPuppyAge, sinceReturn } from '$lib/utils/dates';
+import { checkDayTripEligibility, daysSince, sinceReturn } from '$lib/utils/dates';
 import {
+	clockStart,
 	enrichmentOverdueDays,
 	getBathStatus,
 	getDayTripGapDays,
@@ -44,7 +45,7 @@ export function tripEligibilityFor(dog: Dog, role: UserRole | null | undefined, 
 	);
 }
 
-export type AttentionKind = 'bath' | 'enrichment' | 'daytrip' | 'playgroup' | 'dogtest' | 'evaluation';
+export type AttentionKind = 'bath' | 'enrichment' | 'daytrip' | 'playgroup' | 'dogtest';
 
 export interface AttentionFlag {
 	kind: AttentionKind;
@@ -68,6 +69,10 @@ export interface AttentionContext {
 	tripEligibility: TripEligibility;
 }
 
+/**
+ * Traits not yet recorded. Shown on the dog's profile for reference only — the one
+ * evaluation the shelter asks for is the dog test, which is its own flag below.
+ */
 export function missingEvaluations(dog: Dog) {
 	const missing: string[] = [];
 	if (dog.goodWithDogs === 'unknown') missing.push('dogs');
@@ -90,7 +95,8 @@ export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
 	if (dog.status !== 'active' || dog.inFoster || dog.permanentFoster) return flags;
 	if (dog.isolationStatus !== 'none') return flags;
 
-	const arrivedDays = daysSince(dog.shelterSince ?? dog.intakeDate, today) ?? 0;
+	// Days since the clocks started: reaching the floor, or back from foster.
+	const arrivedDays = daysSince(clockStart(dog), today) ?? 0;
 
 	if (isBathDue(dog, today)) {
 		const bath = getBathStatus(dog, today);
@@ -132,7 +138,7 @@ export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
 	}
 
 	if (isPlaygroupEligible(dog, today)) {
-		const gap = daysSince(sinceReturn(lastPlaygroupDate, dog.shelterSince ?? dog.intakeDate), today);
+		const gap = daysSince(sinceReturn(lastPlaygroupDate, clockStart(dog)), today);
 		if (gap === null) {
 			flags.push({ kind: 'playgroup', label: 'No playgroup logged yet.', short: 'no playgroup yet', days: arrivedDays, priority: 63, tone: 'info' });
 		} else if (gap >= PLAYGROUP_OVERDUE_DAYS) {
@@ -151,18 +157,8 @@ export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
 		});
 	}
 
-	// Puppies don't need evaluation.
-	const missing = isPuppyAge(dog.dateOfBirth, today) ? [] : missingEvaluations(dog);
-	if (missing.length > 0) {
-		flags.push({
-			kind: 'evaluation',
-			label: `Needs evaluation: ${missing.join(', ')}`,
-			short: `evaluate · ${missing.join(', ')}`,
-			days: arrivedDays,
-			priority: 60,
-			tone: 'blocked'
-		});
-	}
+	// Cats, kids, potty training, energy and the rest are not asked for: the dog test
+	// above is the only evaluation the shelter requires.
 
 	return flags;
 }
