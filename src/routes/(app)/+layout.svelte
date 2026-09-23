@@ -449,7 +449,7 @@
 							{:else if change.isTransferredOut}
 								<span class="sync-log-tag sync-log-tag-transferred">Transferred out</span>
 							{:else if change.isEuthanized}
-								<span class="sync-log-tag sync-log-tag-euthanized">Euthanized</span>
+								<span class="sync-log-tag sync-log-tag-euthanized">🌈 Deceased</span>
 							{:else if change.isNew}
 								<span class="sync-log-tag sync-log-tag-new">Added to shelter</span>
 							{:else}
