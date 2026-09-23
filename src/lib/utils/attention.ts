@@ -49,6 +49,22 @@ export function getCautionDogs(dogs: Dog[], sessions: PlaygroupSession[], today 
 	});
 }
 
+// ─── Who is here ─────────────────────────────────────────────────────────────
+
+/**
+ * At the shelter on `day`: active, not in foster, and — for dogs still in ASM's
+ * Incoming location — already arrived by their intake date. Transfers come in through
+ * Incoming and can sit there a while after they arrive; they are here all the same.
+ * One booked for a later day is not.
+ */
+export function isInShelterOn(dog: Dog, day: Date): boolean {
+	if (dog.status !== 'active' || dog.inFoster || dog.permanentFoster) return false;
+	if (!dog.isIncoming) return true;
+	const intake = toDate(dog.intakeDate);
+	if (!intake) return false;
+	return startOfDay(intake).getTime() <= startOfDay(day).getTime();
+}
+
 // ─── Thresholds ──────────────────────────────────────────────────────────────
 
 export const BATH_OVERDUE_DAYS = 30;
