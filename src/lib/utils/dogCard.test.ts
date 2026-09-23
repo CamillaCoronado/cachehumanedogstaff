@@ -15,6 +15,7 @@ function makeDog(overrides: Partial<Dog> = {}): Dog {
 	return {
 		id: 'dog-1',
 		name: 'Rex',
+		status: 'active',
 		breed: 'Lab',
 		sex: 'male',
 		origin: '',
@@ -65,20 +66,21 @@ describe('missingEvaluations', () => {
 
 describe('pendingItems', () => {
 	it('puts the out-on-trip notice first', () => {
-		const items = pendingItems(makeDog({ isOutOnDayTrip: true }), eligible, false, null, today);
+		const items = pendingItems(makeDog({ isOutOnDayTrip: true }), eligible, null, today);
 		expect(items[0].label).toContain('Currently out on day trip');
 		expect(items[0].tone).toBe('info');
 	});
 
 	it('flags bath due as an actionable ready item', () => {
-		const items = pendingItems(makeDog(), eligible, true, null, today);
+		// Bath is worked out from the dog now: no bath this stay means one is due.
+		const items = pendingItems(makeDog({ lastBathDate: null }), eligible, null, today);
 		const bath = items.find((i) => i.action === 'log_bath');
 		expect(bath?.tone).toBe('ready');
 	});
 
 	it('sorts by priority descending (evaluation above bath)', () => {
-		const dog = makeDog({ goodWithDogs: 'unknown' });
-		const items = pendingItems(dog, eligible, true, null, today);
+		const dog = makeDog({ goodWithDogs: 'unknown', lastBathDate: null });
+		const items = pendingItems(dog, eligible, null, today);
 		const evalIdx = items.findIndex((i) => i.label.startsWith('Needs evaluation'));
 		const bathIdx = items.findIndex((i) => i.action === 'log_bath');
 		expect(evalIdx).toBeGreaterThanOrEqual(0);
@@ -87,7 +89,7 @@ describe('pendingItems', () => {
 
 	it('treats manager-only reasons as info when otherwise eligible', () => {
 		const elig: TripEligibility = { eligible: true, status: 'eligible', reasons: ['Manager only: senior staff'] };
-		const items = pendingItems(makeDog(), elig, false, null, today);
+		const items = pendingItems(makeDog(), elig, null, today);
 		expect(items.find((i) => i.label.includes('Manager only'))?.tone).toBe('info');
 	});
 });

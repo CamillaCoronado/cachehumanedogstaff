@@ -4,6 +4,7 @@
 	import toast from 'svelte-french-toast';
 	import { authProfile } from '$lib/stores/auth';
 	import { localRole } from '$lib/stores/role';
+	import { tripEligibilityFor } from '$lib/utils/dogAttention';
 	import { resolveRole, canEditDogs, resolveDogHandlingLevel, canViewInternalDogInfo } from '$lib/utils/permissions';
 	import { updateDog, createDog, logBath, setDogTripStatus, returnDog, syncSheetColorsToDogs } from '$lib/data/dogs';
 	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs as refreshDogStore, patchDogInStore } from '$lib/stores/dogs';
@@ -307,27 +308,7 @@ const today = new Date();
 	}
 
 	function getTripEligibility(dog: Dog): TripEligibility {
-		return checkDayTripEligibility(
-			dog.intakeDate,
-			dog.isVaccinated,
-			dog.isFixed,
-			dog.dayTripStatus,
-			dog.isolationStatus,
-			dog.dayTripIneligibleReason,
-			dog.dayTripManagerOnlyReason,
-			dog.dayTripNotes,
-			dog.handlingLevel,
-			dog.surgeryDate,
-			dog.surgeryRestDays,
-			dog.awaitingEvaluation,
-			role,
-			today,
-			dog.dateOfBirth,
-			dog.vaccineCount,
-			dog.vaccinesOutstanding,
-			dog.dayTripPuppyOverride,
-			dog.sickHold
-		);
+		return tripEligibilityFor(dog, role, today);
 	}
 
 	async function handleTripToggle(dog: Dog) {
@@ -620,7 +601,7 @@ const today = new Date();
 						{@const bathDue = isBathDue(dog, today)}
 						{@const effectiveHandlingLevel = dogHandlingLevel(dog)}
 						{@const lastPlaygroupDate = lastPlaygroupByDogId[dog.id] ?? null}
-						{@const cardPendingItems = pendingItems(dog, tripEligibility, bathDue, lastPlaygroupDate, today)}
+						{@const cardPendingItems = pendingItems(dog, tripEligibility, lastPlaygroupDate, today)}
 						<div
 							class={`dog-card dog-card-clickable ${dog.isOutOnDayTrip ? 'dog-card-trip' : ''} ${dog.inFoster ? 'dog-card-foster' : ''} ${dog.isIncoming ? 'dog-card-incoming' : ''} ${dog.status !== 'active' ? 'dog-card-archived' : ''}`}
 							role="link"
