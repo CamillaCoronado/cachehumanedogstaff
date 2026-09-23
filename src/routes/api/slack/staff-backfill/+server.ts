@@ -31,5 +31,11 @@ export async function POST({ request }: RequestEvent) {
 		: STAFF_KINDS;
 	const keep = Array.isArray(body.keep) ? body.keep.filter((k): k is string => typeof k === 'string') : undefined;
 
-	return json(await backfillDogStaff(since, body.dryRun !== false, kinds, keep));
+	try {
+		return json(await backfillDogStaff(since, body.dryRun !== false, kinds, keep));
+	} catch (e) {
+		// Say what went wrong, not just "Internal Error".
+		console.error('staff backfill failed', e);
+		throw error(500, e instanceof Error ? e.message : String(e));
+	}
 }

@@ -4,7 +4,11 @@ export async function slack(token: string, method: string, params: Record<string
 	for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 	const body = await res.json();
-	if (!body.ok) throw new Error(`slack ${method}: ${body.error}`);
+	if (!body.ok) {
+		const err = new Error(`slack ${method}: ${body.error}`) as Error & { retryAfter?: number };
+		err.retryAfter = Number(res.headers?.get?.('retry-after')) || undefined;
+		throw err;
+	}
 	return body;
 }
 
@@ -52,6 +56,8 @@ export interface HistoryMessage {
 
 /** Most threads read in one run, so a long range stays inside the time limit. */
 const MAX_THREADS = 150;
+/** Time a backfill may spend reading threads before it leaves the rest unread. */
+const THREAD_BUDGET_MS = 25_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -65,7 +71,7 @@ async function threadReplies(token: string, channel: string, ts: string): Promis
 			body = await slack(token, 'conversations.replies', { channel, ts, limit: '200', ...(cursor ? { cursor } : {}) });
 		} catch (e) {
 			if (!String(e).includes('ratelimited')) throw e;
-			await sleep(3000);
+			await sleep(Math.min(((e as { retryAfter?: number }).retryAfter ?? 3) * 1000, 10_000));
 			body = await slack(token, 'conversations.replies', { channel, ts, limit: '200', ...(cursor ? { cursor } : {}) });
 		}
 		out.push(...((body.messages ?? []) as HistoryMessage[]).filter((m) => m.ts !== ts));
@@ -105,10 +111,23 @@ export async function channelHistory(
 	let threadsSkipped = 0;
 	if (includeReplies) {
 		// Newest threads first, so a cap drops the oldest ones.
-		const threads = all.filter((m) => (m.reply_count ?? 0) > 0);
-		threadsSkipped = Math.max(0, threads.length - MAX_THREADS);
-		for (const parent of threads.slice(0, MAX_THREADS)) {
-			all.push(...(await threadReplies(token, channel, parent.ts)));
+		const threads = all.filter((m) => (m.reply_count ?? 0) > 0).slice(0, MAX_THREADS);
+		threadsSkipped = Math.max(0, all.filter((m) => (m.reply_count ?? 0) > 0).length - threads.length);
+		// Slack rate-limits thread reads. When it keeps saying slow down, or time runs
+		// short, the older threads are left unread and counted, rather than failing the run.
+		const deadline = Date.now() + THREAD_BUDGET_MS;
+		for (let i = 0; i < threads.length; i++) {
+			if (Date.now() > deadline) {
+				threadsSkipped += threads.length - i;
+				break;
+			}
+			try {
+				all.push(...(await threadReplies(token, channel, threads[i].ts)));
+			} catch (e) {
+				if (!String(e).includes('ratelimited')) throw e;
+				threadsSkipped += threads.length - i;
+				break;
+			}
 		}
 	}
 	const seen = new Set<string>();

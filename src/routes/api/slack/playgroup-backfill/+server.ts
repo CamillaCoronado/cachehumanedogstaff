@@ -37,5 +37,11 @@ export async function POST({ request }: RequestEvent) {
 				.map((e) => ({ slackTs: e.slackTs, dogNames: e.dogNames.filter((n) => typeof n === 'string') }))
 		: undefined;
 
-	return json(await backfillSlackPlaygroups(since, body.dryRun !== false, entries));
+	try {
+		return json(await backfillSlackPlaygroups(since, body.dryRun !== false, entries));
+	} catch (e) {
+		// Say what went wrong, not just "Internal Error".
+		console.error('playgroup backfill failed', e);
+		throw error(500, e instanceof Error ? e.message : String(e));
+	}
 }

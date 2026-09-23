@@ -88,7 +88,17 @@ export async function backfillDogStaff(
 
 	// What each dog already has, read once: log ids, and meals already logged by anyone.
 	const logs = new Map<string, { bath: Set<string>; yard: Set<string>; feed: Set<string>; mealDays: Set<string> }>();
-	const dogIds = dogsSnap.docs.map((d) => d.id);
+	// Only dogs the messages name: reading every dog's logs, ever, took too long.
+	const mentioned = new Set<string>();
+	for (const m of messages) {
+		const text = String(m.text);
+		const postedAt = new Date(Number(m.ts) * 1000);
+		if (planSurgery(text, postedAt, index).length > 0) continue;
+		if (kinds.includes('bath')) planBaths(text, postedAt, index).forEach((b) => mentioned.add(b.dogId));
+		if (kinds.includes('yard')) planYardTime(text, postedAt, index).forEach((y) => mentioned.add(y.dogId));
+		if (kinds.includes('feeding')) planFeedingsDetailed(text, postedAt, index).entries.forEach((e) => mentioned.add(e.dogId));
+	}
+	const dogIds = [...mentioned];
 	for (let i = 0; i < dogIds.length; i += 20) {
 		const ids = dogIds.slice(i, i + 20);
 		const snaps = await Promise.all(
