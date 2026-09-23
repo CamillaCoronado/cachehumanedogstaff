@@ -30,6 +30,11 @@ describe('parseYardMessage', () => {
 
 	it('reads a blanket over the whole shelter', () => {
 		expect(parse('All dogs got yard time').allDogs).toBe(true);
+		expect(parse('Yard time for all dogs').allDogs).toBe(true);
+		expect(parse('yard time for everyone today').allDogs).toBe(true);
+		expect(parse('Gave yard time for all the dogs except Sally').exceptNames).toEqual(['Sally']);
+		// A blanket about something else, after a yard report, stays about the named dog.
+		expect(parse('Sally got yard time, all dogs need baths').allDogs).toBe(false);
 		expect(parse('all the healthy dogs got yard time').allDogs).toBe(true);
 		expect(parse('All dogs got yard time or day trip').allDogs).toBe(true);
 	});
