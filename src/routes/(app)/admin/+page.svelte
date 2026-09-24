@@ -288,6 +288,8 @@
 	let pgSince = '2026-03-01';
 	let pgBusy = false;
 	let pgResult: PlaygroupBackfill | null = null;
+	// The review list at the top of the page; reloaded after a backfill adds to it.
+	let checkList: CheckList | undefined;
 	let pgWasDryRun = true;
 	// Review edits on the dry run, like the Playgroups page's own review: names removed
 	// from one message, names removed from every message, and messages skipped outright.
@@ -388,7 +390,10 @@
 				pgSkipped = [];
 			}
 			if (pgResult?.skipped) toast.error('Slack is not configured for playgroups.');
-			else if (!dryRun) toast.success(`Queued ${pgResult?.queued ?? 0} for review on the Playgroups page.`);
+			else if (!dryRun) {
+				toast.success(`Added ${pgResult?.queued ?? 0} to "Check these" at the top of this page.`);
+				await checkList?.load();
+			}
 		} catch (e) {
 			toast.error('Playgroup backfill failed: ' + (e instanceof Error ? e.message : String(e)));
 		} finally {
@@ -711,7 +716,7 @@
 
 		<div class="admin-grid">
 			<div class="admin-wide">
-				<CheckList dogs={allDogs} profile={$authProfile} />
+				<CheckList bind:this={checkList} dogs={allDogs} profile={$authProfile} />
 			</div>
 
 			<section class="admin-card">
@@ -1156,7 +1161,7 @@
 								{pgResult.scanned} messages since {formatDate(pgSince)}: <strong>{pgResult.toQueue}</strong> to add,
 								{pgResult.alreadyQueued} already in the review list.
 							{:else}
-								Added {pgResult.queued} to the review list on the Playgroups page.
+								Added {pgResult.queued} to “Check these” at the top of this page — confirm each one there to log it.
 							{/if}
 							{#if pgResult.truncated}
 								Over 3,000 messages in that range: only the newest were read, so the earliest
