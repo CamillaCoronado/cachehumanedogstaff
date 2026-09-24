@@ -56,17 +56,35 @@ function normalizeForCompare(s: string): string {
 	return s.toLowerCase().replace(/[^a-z]/g, '');
 }
 
+/**
+ * Every way a roster name can be written: the full name, without a parenthetical
+ * ("Sadie (Jazmine)" → "sadie"), the parenthetical itself ("jazmine"), and a multi-word
+ * name's first word ("Chunky Monkey" → "chunky").
+ */
+function rosterKeys(knownDogNames: string[]): Set<string> {
+	const keys = new Set<string>();
+	for (const name of knownDogNames) {
+		keys.add(normalizeForCompare(name));
+		const paren = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(name);
+		const base = (paren ? paren[1] : name).trim();
+		keys.add(normalizeForCompare(base));
+		if (paren) keys.add(normalizeForCompare(paren[2]));
+		const first = base.split(/\s+/)[0];
+		if (first && first !== base) keys.add(normalizeForCompare(first));
+	}
+	keys.delete('');
+	return keys;
+}
+
 // Any capture containing an obvious filler/incident word is ordinary prose,
 // not a name ("back in", "everyone's out", "a fight broke out") — regardless
-// of word count or whether a roster was supplied. Past that screen: a
-// single-word capture is accepted on its own (a real dog may legitimately not
-// be in the roster yet — foster, visiting dog); a multi-word capture needs a
-// roster hit when a roster is available, and is accepted permissively when
-// none was supplied (the word-count cap above is the only guard in that case).
+// of word count or whether a roster was supplied. Past that screen, with a roster
+// the name must be a dog on it — "Played in" and "Wtc" are words, not dogs. With no
+// roster supplied, a single word is accepted and a multi-word capture too (the
+// word-count cap above is the only guard in that case).
 function isPlausibleName(name: string, knownNameSet: Set<string> | null): boolean {
 	const words = name.trim().split(/\s+/);
 	if (words.some((w) => STOP_WORDS.has(w.toLowerCase()))) return false;
-	if (words.length === 1) return true;
 	if (!knownNameSet) return true;
 	return knownNameSet.has(normalizeForCompare(name));
 }
@@ -152,7 +170,7 @@ export function parsePlaygroupMessage(
 ): ParsedPlaygroupMessage {
 	const entries: ParsedEntry[] = [];
 	const freeformLines: string[] = [];
-	const knownNameSet = knownDogNames.length > 0 ? new Set(knownDogNames.map(normalizeForCompare)) : null;
+	const knownNameSet = knownDogNames.length > 0 ? rosterKeys(knownDogNames) : null;
 
 	for (const raw of text.split('\n')) {
 		const line = raw.trim();
@@ -182,7 +200,7 @@ export function parsePlaygroupMessage(
 	}
 
 	// Scan freeform lines and entry notes for any capitalized word that looks like a name.
-	// This catches dogs mentioned in notes that are no longer in the shelter roster.
+	// With a roster, only words that are a dog on it count ("Played", "Wtc" are not).
 	const capitalWordRe = /\b([A-Z][a-z']{1,})\b/g;
 	const scanTexts = [
 		...freeformLines,
@@ -192,7 +210,7 @@ export function parsePlaygroupMessage(
 		for (const m of line.matchAll(capitalWordRe)) {
 			const word = m[1];
 			const key = word.toLowerCase();
-			if (!seenNames.has(key) && !STOP_WORDS.has(key)) {
+			if (!seenNames.has(key) && !STOP_WORDS.has(key) && (!knownNameSet || knownNameSet.has(normalizeForCompare(word)))) {
 				seenNames.set(key, word);
 			}
 		}
