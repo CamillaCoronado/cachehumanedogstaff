@@ -56,9 +56,18 @@ describe('parsePlaygroupMessage', () => {
 		expect(result.dogNames).toEqual(['Chunky Monkey']);
 	});
 
-	it('accepts single-word names even when off-roster (foster/visiting dog)', () => {
-		const result = parsePlaygroupMessage('Buddy in', ['Birdie', 'Rosie']);
-		expect(result.dogNames).toEqual(['Buddy']);
+	it('drops words that are not a dog on the roster', () => {
+		const result = parsePlaygroupMessage('Played in, Birdie in\nWtc Rosie was great', ['Birdie', 'Rosie']);
+		expect(result.dogNames).toEqual(['Birdie', 'Rosie']);
+	});
+
+	it('still accepts off-roster single names when no roster is supplied', () => {
+		expect(parsePlaygroupMessage('Buddy in').dogNames).toEqual(['Buddy']);
+	});
+
+	it('matches a roster name by its first word or parenthetical', () => {
+		const result = parsePlaygroupMessage('Sadie in, Chunky in', ['Sadie (Jazmine)', 'Chunky Monkey']);
+		expect(result.dogNames).toEqual(['Sadie', 'Chunky']);
 	});
 
 	it('infers outcome from incident/mixed keywords', () => {
