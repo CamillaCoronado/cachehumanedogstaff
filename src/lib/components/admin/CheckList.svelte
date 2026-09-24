@@ -16,7 +16,7 @@
 		pendingPostedAt,
 		type PendingPlaygroup
 	} from '$lib/data/playgroups';
-	import { matchDogByName } from '$lib/utils/dogs';
+	import { matchDogOnDate, wasInShelterOn } from '$lib/utils/dogs';
 	import { formatDateTime } from '$lib/utils/dates';
 
 	/** Every dog, for matching names and for adding a dog when editing. */
@@ -156,15 +156,15 @@
 	};
 	let playgroupDraft: PlaygroupDraft | null = null;
 
-	// Same matching as the Playgroups page: dogs here now first, then anyone on record.
+	// Names repeat, so each is matched to the dog at the shelter on the playgroup's day.
 	// Rebuilt when the dog list changes, so names are coloured once the dogs have loaded
 	// (the template calls it, and Svelte only re-renders on what it can see change).
 	function makeMatcher(all: Dog[]) {
-		const candidates = all.filter((d) => !d.permanentFoster && !d.isIncoming);
-		const active = candidates.filter((d) => d.status === 'active');
-		return (name: string) => {
-			const dog = matchDogByName(name, active) ?? matchDogByName(name, candidates);
-			return { name, dog, state: dog ? (dog.status === 'active' ? 'matched' : 'archived') : 'unmatched' };
+		const candidates = all.filter((d) => !d.permanentFoster);
+		return (when: Date) => (name: string) => {
+			const dog = matchDogOnDate(name, candidates, when);
+			const here = dog && (wasInShelterOn(dog, when) || dog.status === 'active');
+			return { name, dog, state: dog ? (here ? 'matched' : 'archived') : 'unmatched' };
 		};
 	}
 	$: matchName = makeMatcher(dogs);
@@ -197,7 +197,8 @@
 	async function confirmPlaygroup(item: Item & { kind: 'playgroup' }, withEdit: boolean) {
 		const p = item.playgroup;
 		const draft = withEdit && playgroupDraft ? playgroupDraft : null;
-		const matches = p.dogNames.filter((n) => !draft?.removed.includes(n)).map(matchName);
+		const date = draft ? dayFromInput(draft.date) : pendingPostedAt(p);
+		const matches = p.dogNames.filter((n) => !draft?.removed.includes(n)).map(matchName(date));
 		if (matches.length < 2) {
 			toast.error('A playgroup needs at least 2 dogs.');
 			return;
@@ -206,7 +207,7 @@
 		try {
 			await addPlaygroupSession(
 				{
-					date: draft ? dayFromInput(draft.date) : pendingPostedAt(p),
+					date,
 					groupName: draft?.groupName.trim() ?? '',
 					dogIds: matches.filter((m) => m.dog).map((m) => m.dog!.id),
 					dogNames: matches.map((m) => m.name),
@@ -352,7 +353,7 @@
 						{/if}
 					{:else}
 						{@const p = item.playgroup}
-						{@const matches = p.dogNames.map(matchName)}
+						{@const matches = p.dogNames.map(matchName(pendingPostedAt(p)))}
 						{#if !editing}
 							<p class="check-reading">
 								<span class="check-reads">Reads as:</span>
