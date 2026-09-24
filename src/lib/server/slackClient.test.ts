@@ -31,6 +31,24 @@ describe('channelHistory', () => {
 		expect(messages.map((m) => m.ts).sort()).toEqual(['1', '1.5', '2', '3']);
 	});
 
+	it('skips the rest of the threads when Slack keeps rate-limiting, instead of failing', async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('fetch', async (url: URL | string) => {
+			const method = new URL(String(url)).pathname.split('/').pop();
+			const body =
+				method === 'conversations.history'
+					? { ok: true, messages: [{ ts: '2', text: 'a', user: 'u', reply_count: 1 }, { ts: '1', text: 'b', user: 'u', reply_count: 1 }] }
+					: { ok: false, error: 'ratelimited' };
+			return { json: async () => body, headers: new Headers({ 'retry-after': '1' }) } as Response;
+		});
+		const run = channelHistory('t', 'C', new Date(0), 15, true);
+		await vi.runAllTimersAsync();
+		const { messages, threadsSkipped } = await run;
+		vi.useRealTimers();
+		expect(messages.map((m) => m.ts)).toEqual(['2', '1']);
+		expect(threadsSkipped).toBe(2);
+	});
+
 	it('leaves replies out unless asked', async () => {
 		fakeSlack({
 			'conversations.history': () => ({ messages: [{ ts: '1', text: 'x', reply_count: 1 }] }),
