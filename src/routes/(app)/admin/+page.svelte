@@ -138,9 +138,9 @@
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
 
-	// #dog-staff backfill: past surgery lists, baths, yard time and feedings (thread
-	// replies included), read and written the way the live Slack poll does. Dry run first;
-	// every row starts ticked except uncertain feeding readings.
+	// #dog-staff backfill: past surgery lists, baths and yard time (thread replies
+	// included), read and written the way the live Slack poll does. Dry run first; every
+	// row starts ticked. Feedings are not backfilled.
 	type StaffKind = 'surgery' | 'bath' | 'yard' | 'feeding';
 	type StaffRow = { key: string; kind: StaffKind; at: string; author: string; text: string; summary: string; uncertain: string[] };
 	type StaffResult = {
@@ -153,9 +153,9 @@
 		skipped?: string;
 	};
 	const STAFF_KIND_LABELS: Record<StaffKind, string> = { feeding: 'Feedings', surgery: 'Surgery lists', bath: 'Baths', yard: 'Yard time' };
-	const STAFF_KIND_ORDER: StaffKind[] = ['feeding', 'surgery', 'bath', 'yard'];
+	const STAFF_KIND_ORDER: StaffKind[] = ['surgery', 'bath', 'yard'];
 	let staffSince = '2026-03-01';
-	let staffKinds: StaffKind[] = ['feeding', 'surgery', 'bath', 'yard'];
+	let staffKinds: StaffKind[] = ['surgery', 'bath', 'yard'];
 	let staffBusy = false;
 	let staffWasDryRun = true;
 	let staffResult: StaffResult | null = null;
@@ -182,7 +182,7 @@
 			else if (dryRun) staffKeep = (staffResult?.rows ?? []).filter((r) => r.uncertain.length === 0).map((r) => r.key);
 			else {
 				const w = staffResult?.written;
-				toast.success(`Logged ${w?.feeding ?? 0} feedings, ${w?.bath ?? 0} baths, ${w?.yard ?? 0} yard times, ${w?.surgery ?? 0} surgery lists.`);
+				toast.success(`Logged ${w?.bath ?? 0} baths, ${w?.yard ?? 0} yard times, ${w?.surgery ?? 0} surgery lists.`);
 			}
 		} catch (e) {
 			toast.error('Backfill failed: ' + (e instanceof Error ? e.message : String(e)));
@@ -742,6 +742,11 @@
 				{/if}
 			</section>
 
+		</div>
+
+		<details class="admin-more">
+			<summary>Users ({users.length})</summary>
+			<div class="admin-grid">
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
@@ -846,7 +851,8 @@
 					</div>
 				{/if}
 			</section>
-		</div>
+			</div>
+		</details>
 
 		<details class="admin-more">
 			<summary>Cleanup tools</summary>
@@ -945,10 +951,9 @@
 						<h3 class="section-title">Backfill #dog-staff from Slack</h3>
 						<p class="section-copy">
 							Reads #dog-staff, thread replies included, from the date below and logs what it finds the
-							way the live Slack poll does: surgery lists, baths, yard time and feedings. Anything already
+							way the live Slack poll does: surgery lists, baths and yard time. Anything already
 							logged is left alone, and last-bath / last-yard dates only move forward. <strong>Dry run
-							first — nothing is logged until you apply, and only ticked rows.</strong> Feeding readings
-							the app is unsure of start unticked, with the reason.
+							first — nothing is logged until you apply, and only ticked rows.</strong>
 						</p>
 					</div>
 				</div>
@@ -972,10 +977,10 @@
 							{#if staffWasDryRun}
 								{staffResult.scanned} messages and thread replies since {formatDate(staffSince)}:
 								<strong>{staffResult.rows.length}</strong> to log.
-								Already logged: {staffResult.alreadyLogged.feeding} feedings, {staffResult.alreadyLogged.bath} baths,
+								Already logged: {staffResult.alreadyLogged.bath} baths,
 								{staffResult.alreadyLogged.yard} yard, {staffResult.alreadyLogged.surgery} surgery lists.
 							{:else}
-								Logged {staffResult.written.feeding} feedings, {staffResult.written.bath} baths,
+								Logged {staffResult.written.bath} baths,
 								{staffResult.written.yard} yard times, {staffResult.written.surgery} surgery lists.
 							{/if}
 							{#if staffResult.truncated}
