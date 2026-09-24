@@ -11,10 +11,8 @@
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
 	import { checkDeparture, type AsmDeparture } from '$lib/utils/departureCheck';
-	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
-	import type { PendingSurgery } from '$lib/types';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -88,35 +86,6 @@
 			groupBusy = false;
 		}
 	}
-
-	let pendingSurgeries: PendingSurgery[] = [];
-	let surgeryBusyId: string | null = null;
-	let surgeryError = '';
-
-	async function loadPendingSurgeries() {
-		surgeryError = '';
-		try {
-			pendingSurgeries = await listRecentSurgeryLists();
-		} catch (error) {
-			console.error(error);
-			surgeryError = error instanceof Error ? error.message : 'Could not load the surgery lists.';
-		}
-	}
-
-	async function undoSurgery(pending: PendingSurgery) {
-		surgeryBusyId = pending.id;
-		try {
-			const n = await undoSurgeryList(pending);
-			pendingSurgeries = pendingSurgeries.filter((p) => p.id !== pending.id);
-			toast.success(`Cleared surgery on ${n} dog${n === 1 ? '' : 's'}.`);
-		} catch (error) {
-			console.error(error);
-			toast.error('Could not undo that list.');
-		} finally {
-			surgeryBusyId = null;
-		}
-	}
-
 
 	let users: EditableUser[] = [];
 	let usersLoaded = false;
@@ -588,7 +557,6 @@
 
 	$: if ($authReady && $authProfile?.role === 'admin' && !pendingLoaded) {
 		pendingLoaded = true;
-		void loadPendingSurgeries();
 		void loadDogGroups();
 	}
 	let pendingLoaded = false;
@@ -881,55 +849,8 @@
 		</div>
 
 		<details class="admin-more">
-			<summary>Surgery lists and cleanup tools</summary>
+			<summary>Cleanup tools</summary>
 			<div class="admin-grid">
-			<section class="admin-card">
-				<div class="card-header">
-					<div>
-						<p class="section-kicker">From Slack</p>
-						<h3 class="section-title">Surgery lists from Slack</h3>
-						<p class="section-copy">
-							The morning "do not feed" list, read as the day's surgery dogs and
-							<strong>applied as soon as it arrives</strong> — it lands shortly before the feed,
-							so waiting on a click could mean a fasting dog gets fed. Each dog is stamped with
-							the message it came from. Undo clears a list again.
-						</p>
-					</div>
-					<button class="action-btn" type="button" on:click={loadPendingSurgeries}>Refresh</button>
-				</div>
-
-				{#if surgeryError}
-					<p class="error-note">Could not load the surgery list: {surgeryError}</p>
-				{:else if pendingSurgeries.length === 0}
-					<p class="empty-note">No surgery lists yet.</p>
-				{:else}
-					<ul class="pending-list">
-						{#each pendingSurgeries as pending (pending.id)}
-							<li class="pending-item">
-								<p class="pending-meta">
-									<strong>{pending.author}</strong>
-									<span>{formatDateTime(pending.postedAt)}</span>
-								</p>
-								<blockquote class="pending-quote">{pending.rawText}</blockquote>
-								<p class="pending-implied">
-									Marked for surgery: <strong>{pending.dogs.map((d) => d.dogName).join(', ')}</strong>
-								</p>
-								<div class="pending-actions">
-									<button
-										class="ghost-btn"
-										type="button"
-										on:click={() => undoSurgery(pending)}
-										disabled={surgeryBusyId === pending.id}
-									>
-										{surgeryBusyId === pending.id ? 'Clearing…' : 'Undo'}
-									</button>
-								</div>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</section>
-
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
@@ -1689,23 +1610,8 @@
 		font-size: 0.78rem;
 		color: #6b6459;
 	}
-	.pending-quote {
-		margin: 0;
-		padding-left: 11px;
-		border-left: 2px solid var(--line, #d8d2c4);
-		font-size: 0.94rem;
-		line-height: 1.5;
-	}
 	.pending-amount {
 		color: #6b6459;
-	}
-	.pending-implied {
-		margin: 0;
-		font-size: 0.82rem;
-		color: #6b6459;
-		padding: 7px 10px;
-		background: #f2efe8;
-		border-radius: 3px;
 	}
 	.group-form {
 		display: flex;
