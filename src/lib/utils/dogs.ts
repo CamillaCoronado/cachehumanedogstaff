@@ -1,4 +1,5 @@
 import type { Dog } from '$lib/types';
+import { toDate } from '$lib/utils/dates';
 
 function normalizeName(name: string): string {
 	return name.toLowerCase().replace(/[^a-z]/g, '');
@@ -36,4 +37,31 @@ export function matchDogByName(name: string, candidates: Dog[]): Dog | null {
 		return dn.startsWith(normalized) || normalized.startsWith(dn);
 	});
 	return prefixMatches.length === 1 ? prefixMatches[0] : null;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether the dog was at the shelter on this date, from its intake and departure dates
+ * (a day's slack either side). A departure before the latest intake belongs to an earlier
+ * stay, and an active dog has not left.
+ */
+export function wasInShelterOn(dog: Dog, when: Date): boolean {
+	const from = toDate(dog.intakeDate)?.getTime() ?? null;
+	let to = toDate(dog.leftShelterDate)?.getTime() ?? null;
+	if (to !== null && ((from !== null && to < from) || dog.status === 'active')) to = null;
+	const at = when.getTime();
+	return (from === null || at >= from - DAY_MS) && (to === null || at <= to + DAY_MS);
+}
+
+/**
+ * A name as it was meant on a given day. Names repeat, so the dog at the shelter that day
+ * wins; then a dog here now; then anyone on record.
+ */
+export function matchDogOnDate(name: string, candidates: Dog[], when: Date): Dog | null {
+	return (
+		matchDogByName(name, candidates.filter((d) => wasInShelterOn(d, when))) ??
+		matchDogByName(name, candidates.filter((d) => d.status === 'active')) ??
+		matchDogByName(name, candidates)
+	);
 }

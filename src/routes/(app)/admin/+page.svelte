@@ -6,7 +6,7 @@
 	import type { Dog, UserProfile, UserRole } from '$lib/types';
 	import { formatDate, formatDateTime, toDate } from '$lib/utils/dates';
 	import { listDogs, mergeDogs, updateDog } from '$lib/data/dogs';
-	import { matchDogByName } from '$lib/utils/dogs';
+	import { matchDogOnDate, wasInShelterOn } from '$lib/utils/dogs';
 	import CheckList from '$lib/components/admin/CheckList.svelte';
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
@@ -297,10 +297,13 @@
 
 	const nameKey = (name: string) => name.toLowerCase();
 
-	function pgNameState(name: string): 'matched' | 'archived' | 'unmatched' {
-		const active = allDogs.filter((d) => d.status === 'active');
-		const dog = matchDogByName(name, active) ?? matchDogByName(name, allDogs);
-		return dog ? (dog.status === 'active' ? 'matched' : 'archived') : 'unmatched';
+	const slackDate = (ts: string) => new Date(Number(ts) * 1000);
+
+	// Names repeat, so each is matched to the dog at the shelter when the message was posted.
+	function pgNameState(name: string, when: Date): 'matched' | 'archived' | 'unmatched' {
+		const dog = matchDogOnDate(name, allDogs, when);
+		if (!dog) return 'unmatched';
+		return wasInShelterOn(dog, when) || dog.status === 'active' ? 'matched' : 'archived';
 	}
 
 	// Read by the template, so it has to be reactive state rather than a function call:
@@ -314,7 +317,9 @@
 
 	// Same for the colour of each name, which depends on the dog list.
 	$: pgStates = new Map(
-		(pgResult?.samples ?? []).flatMap((s) => s.dogNames).map((n) => [nameKey(n), allDogs.length ? pgNameState(n) : 'unmatched'])
+		(pgResult?.samples ?? []).flatMap((s) =>
+			s.dogNames.map((n) => [`${s.slackTs}|${nameKey(n)}`, allDogs.length ? pgNameState(n, slackDate(s.slackTs)) : 'unmatched'])
+		)
 	);
 
 	function pgToggleName(ts: string, name: string) {
@@ -355,7 +360,7 @@
 		const counts = new Map<string, { name: string; count: number }>();
 		for (const s of pgResult?.samples ?? []) {
 			for (const n of s.dogNames) {
-				if (allDogs.length === 0 || pgNameState(n) !== 'unmatched') continue;
+				if (allDogs.length === 0 || pgNameState(n, slackDate(s.slackTs)) !== 'unmatched') continue;
 				const entry = counts.get(nameKey(n)) ?? { name: n, count: 0 };
 				entry.count++;
 				counts.set(nameKey(n), entry);
@@ -1190,7 +1195,7 @@
 											{#each s.dogNames as n (n)}
 												<button
 													type="button"
-													class={`pg-pill ${pgIsRemoved(pgRemovedSet, s.slackTs, n) ? 'pill-excluded' : `pill-${pgStates.get(nameKey(n)) ?? 'unmatched'}`}`}
+													class={`pg-pill ${pgIsRemoved(pgRemovedSet, s.slackTs, n) ? 'pill-excluded' : `pill-${pgStates.get(`${s.slackTs}|${nameKey(n)}`) ?? 'unmatched'}`}`}
 													on:click={() => pgToggleName(s.slackTs, n)}
 													disabled={skipped}
 													title={pgIsRemoved(pgRemovedSet, s.slackTs, n) ? 'Click to put back' : 'Click to remove'}

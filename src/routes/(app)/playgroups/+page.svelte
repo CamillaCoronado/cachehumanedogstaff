@@ -29,7 +29,7 @@
 		isPuppy,
 		readinessLabel
 	} from '$lib/utils/playgroupRecommendations';
-	import { matchDogByName } from '$lib/utils/dogs';
+	import { matchDogOnDate, wasInShelterOn } from '$lib/utils/dogs';
 	import { canAccessPlaygroups, canEditPlaygroups, resolveRole } from '$lib/utils/permissions';
 	import type { Dog, DogPlayStyle, PlaygroupOutcome, PlaygroupSession, UserRole } from '$lib/types';
 	import { energyLabel, dogCompatLabel } from '$lib/utils/labels';
@@ -245,12 +245,13 @@
 		loading = false;
 	}
 
-	function matchImportDogs(names: string[]) {
-		const active = dogs.filter((d) => d.status === 'active' && !d.permanentFoster && !d.isIncoming);
-		const all = dogs.filter((d) => !d.permanentFoster && !d.isIncoming);
+	// Names repeat, so each is matched to the dog at the shelter on the playgroup's day.
+	function matchImportDogs(names: string[], day: string) {
+		const when = parseInputDate(day);
+		const all = dogs.filter((d) => !d.permanentFoster);
 		return names.map((name) => {
-			const dog = matchDogByName(name, active) ?? matchDogByName(name, all);
-			return { name, dog, isActive: dog ? dog.status === 'active' : false };
+			const dog = matchDogOnDate(name, all, when);
+			return { name, dog, isActive: dog ? wasInShelterOn(dog, when) || dog.status === 'active' : false };
 		});
 	}
 
@@ -285,7 +286,7 @@
 
 	async function saveImportSession() {
 		if (!importParsed) return;
-		const allMatches = matchImportDogs(importParsed.dogNames);
+		const allMatches = matchImportDogs(importParsed.dogNames, importDate);
 		const matches = allMatches.filter((m) => !importExcludedNames.includes(m.name));
 		if (matches.length < 2) {
 			toast.error('At least 2 dogs required.');
@@ -551,7 +552,7 @@
 							Parse
 						</button>
 					{:else}
-						{@const pasteMatches = matchImportDogs(importParsed.dogNames)}
+						{@const pasteMatches = matchImportDogs(importParsed.dogNames, importDate)}
 						<div class="slack-confirm-head">
 							<p class="slack-confirm-title typewriter">Preview</p>
 							<button class="slack-back-btn typewriter" type="button" on:click={clearImport}>Edit message</button>
