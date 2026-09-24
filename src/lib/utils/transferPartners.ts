@@ -227,7 +227,7 @@ export function analyzeTransferPartners(dogs: Dog[], today = new Date()): Partne
 
 	const rows: PartnerRow[] = [];
 	for (const [partner, list] of groups) {
-		const current = list.filter((d) => d.status === 'active');
+		const current = list.filter((d) => d.status === 'active' && !d.permanentFoster);
 		const adopted = list.filter((d) => d.status === 'adopted');
 		const transferredOut = list.filter((d) => d.status === 'transferred');
 		const euthanized = list.filter((d) => d.status === 'euthanized');

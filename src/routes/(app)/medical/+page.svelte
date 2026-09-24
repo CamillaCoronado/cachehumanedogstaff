@@ -11,7 +11,8 @@
 	import TreatmentEditor from '$lib/components/medical/TreatmentEditor.svelte';
 	const today = new Date();
 
-	$: dogs = $dogsStore;
+	// Permanent fosters live with their foster family, so they are only on the Dogs page.
+	$: dogs = $dogsStore.filter((d) => !d.permanentFoster);
 	$: loading = !$dogsLoaded;
 
 	// Surgery form
