@@ -80,6 +80,7 @@ const FIELD_LABELS: Record<string, string> = {
 	energyLevel: 'Energy',
 	photoUrl: 'Photo',
 	inFoster: 'Foster',
+	permanentFoster: 'Permanent foster',
 	isolationStatus: 'Isolation',
 	status: 'Status',
 	asmShelterCode: 'Shelter code',
