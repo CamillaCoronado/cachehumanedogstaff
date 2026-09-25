@@ -50,6 +50,12 @@ export function wasInShelterOn(dog: Dog, when: Date): boolean {
 	const from = toDate(dog.intakeDate)?.getTime() ?? null;
 	let to = toDate(dog.leftShelterDate)?.getTime() ?? null;
 	if (to !== null && ((from !== null && to < from) || dog.status === 'active')) to = null;
+	// A permanent foster left the shelter when it went to its foster home.
+	if (dog.permanentFoster) {
+		const left = toDate(dog.inFosterSince ?? null)?.getTime() ?? null;
+		if (left === null) return false;
+		to = left;
+	}
 	const at = when.getTime();
 	return (from === null || at >= from - DAY_MS) && (to === null || at <= to + DAY_MS);
 }

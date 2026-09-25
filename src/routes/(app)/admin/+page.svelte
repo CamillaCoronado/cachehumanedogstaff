@@ -11,10 +11,8 @@
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
 	import { checkDeparture, type AsmDeparture } from '$lib/utils/departureCheck';
-	import { listRecentSurgeryLists, undoSurgeryList } from '$lib/data/pendingSurgeries';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
-	import type { PendingSurgery } from '$lib/types';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -89,35 +87,6 @@
 		}
 	}
 
-	let pendingSurgeries: PendingSurgery[] = [];
-	let surgeryBusyId: string | null = null;
-	let surgeryError = '';
-
-	async function loadPendingSurgeries() {
-		surgeryError = '';
-		try {
-			pendingSurgeries = await listRecentSurgeryLists();
-		} catch (error) {
-			console.error(error);
-			surgeryError = error instanceof Error ? error.message : 'Could not load the surgery lists.';
-		}
-	}
-
-	async function undoSurgery(pending: PendingSurgery) {
-		surgeryBusyId = pending.id;
-		try {
-			const n = await undoSurgeryList(pending);
-			pendingSurgeries = pendingSurgeries.filter((p) => p.id !== pending.id);
-			toast.success(`Cleared surgery on ${n} dog${n === 1 ? '' : 's'}.`);
-		} catch (error) {
-			console.error(error);
-			toast.error('Could not undo that list.');
-		} finally {
-			surgeryBusyId = null;
-		}
-	}
-
-
 	let users: EditableUser[] = [];
 	let usersLoaded = false;
 	let usersLoading = false;
@@ -169,9 +138,9 @@
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
 
-	// #dog-staff backfill: past surgery lists, baths, yard time and feedings (thread
-	// replies included), read and written the way the live Slack poll does. Dry run first;
-	// every row starts ticked except uncertain feeding readings.
+	// #dog-staff backfill: past baths and yard time (thread replies included), read and
+	// written the way the live Slack poll does. Dry run first; every row starts ticked.
+	// Feedings and surgery lists are not backfilled.
 	type StaffKind = 'surgery' | 'bath' | 'yard' | 'feeding';
 	type StaffRow = { key: string; kind: StaffKind; at: string; author: string; text: string; summary: string; uncertain: string[] };
 	type StaffResult = {
@@ -184,9 +153,9 @@
 		skipped?: string;
 	};
 	const STAFF_KIND_LABELS: Record<StaffKind, string> = { feeding: 'Feedings', surgery: 'Surgery lists', bath: 'Baths', yard: 'Yard time' };
-	const STAFF_KIND_ORDER: StaffKind[] = ['feeding', 'surgery', 'bath', 'yard'];
+	const STAFF_KIND_ORDER: StaffKind[] = ['bath', 'yard'];
 	let staffSince = '2026-03-01';
-	let staffKinds: StaffKind[] = ['feeding', 'surgery', 'bath', 'yard'];
+	let staffKinds: StaffKind[] = ['bath', 'yard'];
 	let staffBusy = false;
 	let staffWasDryRun = true;
 	let staffResult: StaffResult | null = null;
@@ -213,7 +182,7 @@
 			else if (dryRun) staffKeep = (staffResult?.rows ?? []).filter((r) => r.uncertain.length === 0).map((r) => r.key);
 			else {
 				const w = staffResult?.written;
-				toast.success(`Logged ${w?.feeding ?? 0} feedings, ${w?.bath ?? 0} baths, ${w?.yard ?? 0} yard times, ${w?.surgery ?? 0} surgery lists.`);
+				toast.success(`Logged ${w?.bath ?? 0} baths, ${w?.yard ?? 0} yard times.`);
 			}
 		} catch (e) {
 			toast.error('Backfill failed: ' + (e instanceof Error ? e.message : String(e)));
@@ -588,7 +557,6 @@
 
 	$: if ($authReady && $authProfile?.role === 'admin' && !pendingLoaded) {
 		pendingLoaded = true;
-		void loadPendingSurgeries();
 		void loadDogGroups();
 	}
 	let pendingLoaded = false;
@@ -774,6 +742,11 @@
 				{/if}
 			</section>
 
+		</div>
+
+		<details class="admin-more">
+			<summary>Users ({users.length})</summary>
+			<div class="admin-grid">
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
@@ -878,58 +851,12 @@
 					</div>
 				{/if}
 			</section>
-		</div>
+			</div>
+		</details>
 
 		<details class="admin-more">
-			<summary>Surgery lists and cleanup tools</summary>
+			<summary>Cleanup tools</summary>
 			<div class="admin-grid">
-			<section class="admin-card">
-				<div class="card-header">
-					<div>
-						<p class="section-kicker">From Slack</p>
-						<h3 class="section-title">Surgery lists from Slack</h3>
-						<p class="section-copy">
-							The morning "do not feed" list, read as the day's surgery dogs and
-							<strong>applied as soon as it arrives</strong> — it lands shortly before the feed,
-							so waiting on a click could mean a fasting dog gets fed. Each dog is stamped with
-							the message it came from. Undo clears a list again.
-						</p>
-					</div>
-					<button class="action-btn" type="button" on:click={loadPendingSurgeries}>Refresh</button>
-				</div>
-
-				{#if surgeryError}
-					<p class="error-note">Could not load the surgery list: {surgeryError}</p>
-				{:else if pendingSurgeries.length === 0}
-					<p class="empty-note">No surgery lists yet.</p>
-				{:else}
-					<ul class="pending-list">
-						{#each pendingSurgeries as pending (pending.id)}
-							<li class="pending-item">
-								<p class="pending-meta">
-									<strong>{pending.author}</strong>
-									<span>{formatDateTime(pending.postedAt)}</span>
-								</p>
-								<blockquote class="pending-quote">{pending.rawText}</blockquote>
-								<p class="pending-implied">
-									Marked for surgery: <strong>{pending.dogs.map((d) => d.dogName).join(', ')}</strong>
-								</p>
-								<div class="pending-actions">
-									<button
-										class="ghost-btn"
-										type="button"
-										on:click={() => undoSurgery(pending)}
-										disabled={surgeryBusyId === pending.id}
-									>
-										{surgeryBusyId === pending.id ? 'Clearing…' : 'Undo'}
-									</button>
-								</div>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</section>
-
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
@@ -1024,10 +951,9 @@
 						<h3 class="section-title">Backfill #dog-staff from Slack</h3>
 						<p class="section-copy">
 							Reads #dog-staff, thread replies included, from the date below and logs what it finds the
-							way the live Slack poll does: surgery lists, baths, yard time and feedings. Anything already
+							way the live Slack poll does: baths and yard time. Anything already
 							logged is left alone, and last-bath / last-yard dates only move forward. <strong>Dry run
-							first — nothing is logged until you apply, and only ticked rows.</strong> Feeding readings
-							the app is unsure of start unticked, with the reason.
+							first — nothing is logged until you apply, and only ticked rows.</strong>
 						</p>
 					</div>
 				</div>
@@ -1051,11 +977,11 @@
 							{#if staffWasDryRun}
 								{staffResult.scanned} messages and thread replies since {formatDate(staffSince)}:
 								<strong>{staffResult.rows.length}</strong> to log.
-								Already logged: {staffResult.alreadyLogged.feeding} feedings, {staffResult.alreadyLogged.bath} baths,
-								{staffResult.alreadyLogged.yard} yard, {staffResult.alreadyLogged.surgery} surgery lists.
+								Already logged: {staffResult.alreadyLogged.bath} baths,
+								{staffResult.alreadyLogged.yard} yard.
 							{:else}
-								Logged {staffResult.written.feeding} feedings, {staffResult.written.bath} baths,
-								{staffResult.written.yard} yard times, {staffResult.written.surgery} surgery lists.
+								Logged {staffResult.written.bath} baths,
+								{staffResult.written.yard} yard times.
 							{/if}
 							{#if staffResult.truncated}
 								Over 3,000 messages in that range: only the newest were read, so the earliest were
@@ -1689,23 +1615,8 @@
 		font-size: 0.78rem;
 		color: #6b6459;
 	}
-	.pending-quote {
-		margin: 0;
-		padding-left: 11px;
-		border-left: 2px solid var(--line, #d8d2c4);
-		font-size: 0.94rem;
-		line-height: 1.5;
-	}
 	.pending-amount {
 		color: #6b6459;
-	}
-	.pending-implied {
-		margin: 0;
-		font-size: 0.82rem;
-		color: #6b6459;
-		padding: 7px 10px;
-		background: #f2efe8;
-		border-radius: 3px;
 	}
 	.group-form {
 		display: flex;

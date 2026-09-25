@@ -4,14 +4,14 @@ import type { DateValue } from '$lib/types';
 import { db } from '$lib/firebase/config';
 import { toDate } from '$lib/utils/dates';
 
-export type SyncEventType = 'adoption' | 'foster' | 'transfer' | 'incoming';
+export type SyncEventType = 'adoption' | 'permanentFoster' | 'foster' | 'transfer' | 'incoming';
 
 /**
  * The order celebrations play in, so a sync's four events always queue the same way
  * instead of however Firestore happened to return them — they share a timestamp, so
  * without this the sequence is arbitrary.
  */
-export const SYNC_EVENT_ORDER: SyncEventType[] = ['adoption', 'foster', 'incoming', 'transfer'];
+export const SYNC_EVENT_ORDER: SyncEventType[] = ['adoption', 'permanentFoster', 'foster', 'incoming', 'transfer'];
 
 export interface SyncEvent {
 	id: string;
@@ -30,7 +30,10 @@ const LOOKBACK_DAYS = 14;
 /** Mirrors the overlay grouping: one event per type per sync, listing every dog in it. */
 const TYPE_FILTERS: Record<SyncEventType, (change: SyncChange) => boolean> = {
 	adoption: (c) => c.isArchived,
-	foster: (c) => c.fields.some((f) => f === 'Foster (yes)'),
+	// Celebrated like an adoption. A dog going to permanent foster usually turns "in
+	// foster" on in the same sync; it gets this one, not the plain foster one too.
+	permanentFoster: (c) => c.fields.includes('Permanent foster (yes)'),
+	foster: (c) => c.fields.includes('Foster (yes)') && !c.fields.includes('Permanent foster (yes)'),
 	transfer: (c) => c.isTransferredOut,
 	incoming: (c) => c.isNew
 };

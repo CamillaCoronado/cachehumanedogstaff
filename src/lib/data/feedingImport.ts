@@ -153,6 +153,12 @@ export function buildDogIndex(dogs: DogRecord[], groups: DogGroupRecord[] = []):
 		// dog left and came back, and only the intake date moved. Treating it as current
 		// hides the dog from every report since.
 		if (to !== null && ((from !== null && to < from) || dog.status === 'active')) to = null;
+		// A permanent foster left the shelter when it went to its foster home; with no
+		// date for that, there is no telling when it was here, so it is left out.
+		if (dog.permanentFoster) {
+			if (!dog.inFosterSince) continue;
+			to = new Date(dog.inFosterSince).getTime();
+		}
 
 		// Isolation dogs are fed by the clinic, so they are not part of "everyone else".
 		// This one is current-state only — nothing records when an isolation began — but

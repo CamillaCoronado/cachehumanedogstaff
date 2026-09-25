@@ -14,7 +14,7 @@
 		try {
 			const all = await listDogs();
 			dogs = all
-				.filter((d) => d.status === 'active' && !d.inFoster && isDayTripEligible(d))
+				.filter((d) => d.status === 'active' && !d.inFoster && !d.permanentFoster && isDayTripEligible(d))
 				.sort((a, b) => a.name.localeCompare(b.name));
 		} catch (e) {
 			console.error(e);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDogIndex, feedingDate, feedingLogId, planEditedFeedings, planFeedingsDetailed, planYardTime, shelterDay } from './feedingImport';
+import { buildDogIndex, feedingDate, feedingLogId, planEditedFeedings, planFeedingsDetailed, planYardTime, rosterOn, shelterDay } from './feedingImport';
 
 const index = buildDogIndex([
 	{ id: 'buck', name: 'Buck', status: 'active', intakeDate: '2026-01-01T12:00:00Z', hasSecondMeal: true },
@@ -154,5 +154,20 @@ describe('planYardTime — all dogs', () => {
 
 	it('honours the carve-out', () => {
 		expect(logged('all dogs went out except for Rex')).toEqual(['dior', 'dot']);
+	});
+});
+
+describe('permanent fosters', () => {
+	const arcanine = { id: '9', name: 'Arcanine', status: 'active', permanentFoster: true, intakeDate: '2026-03-01', inFosterSince: '2026-06-01' };
+
+	it('count as here only until they went to their foster home', () => {
+		const index = buildDogIndex([arcanine]);
+		expect(rosterOn(index, new Date('2026-04-01T18:00:00Z'))).toContain('Arcanine');
+		expect(rosterOn(index, new Date('2026-09-01T18:00:00Z'))).not.toContain('Arcanine');
+	});
+
+	it('are left out when there is no foster date', () => {
+		const index = buildDogIndex([{ ...arcanine, inFosterSince: null }]);
+		expect(rosterOn(index, new Date('2026-04-01T18:00:00Z'))).not.toContain('Arcanine');
 	});
 });

@@ -76,7 +76,7 @@
 	import { getDog } from '$lib/data/dogs';
 	import type { DateValue, Dog } from '$lib/types';
 	import { confetti } from '@neoconfetti/svelte';
-	type OverlayItem = { type: 'adoption' | 'foster' | 'transfer' | 'incoming' | 'returned'; dogs: Dog[]; eventAt?: Date };
+	type OverlayItem = { type: 'adoption' | 'permanentFoster' | 'foster' | 'transfer' | 'incoming' | 'returned'; dogs: Dog[]; eventAt?: Date };
 	let overlayQueue: OverlayItem[] = [];
 	let currentOverlay: OverlayItem | null = null;
 
@@ -602,9 +602,12 @@
 	</div>
 {/if}
 
-{#if currentOverlay?.type === 'adoption'}
+{#if currentOverlay?.type === 'adoption' || currentOverlay?.type === 'permanentFoster'}
 	<div class="adoption-overlay" use:portal role="presentation" on:click={advanceOverlay}>
 		<div class="adoption-celebration">
+			{#if currentOverlay.type === 'permanentFoster'}
+				<p class="adoption-heading">Permanent foster! 🏡</p>
+			{/if}
 			<div class="confetti-anchor" use:confetti={{ particleCount: 150, force: 0.7, stageHeight: 900 }}></div>
 			<div class="adoption-dogs-row">
 				{#each currentOverlay.dogs as dog}
@@ -618,7 +621,13 @@
 					</div>
 				{/each}
 			</div>
-			<p class="adoption-message">{currentOverlay.dogs.length === 1 ? 'Found their forever home!' : `${currentOverlay.dogs.length} dogs found their forever homes!`} 🎉</p>
+			<p class="adoption-message">
+				{#if currentOverlay.type === 'permanentFoster'}
+					{currentOverlay.dogs.length === 1 ? 'Staying with their foster family for good!' : `${currentOverlay.dogs.length} dogs staying with their foster families for good!`} 🎉
+				{:else}
+					{currentOverlay.dogs.length === 1 ? 'Found their forever home!' : `${currentOverlay.dogs.length} dogs found their forever homes!`} 🎉
+				{/if}
+			</p>
 			<button class="adoption-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
 		</div>
 	</div>
@@ -1924,6 +1933,16 @@
 	text-transform: uppercase;
 	color: #fff;
 	line-height: 1;
+}
+
+.adoption-heading {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: clamp(1.4rem, 5vw, 2rem);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #fff;
+	line-height: 1.1;
 }
 
 .adoption-message {
