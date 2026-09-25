@@ -47,7 +47,8 @@ export function getDailyMovements(dogs: Dog[], day: Date): DailyMovements {
 		) {
 			returned.push(dog);
 		}
-		if (dog.inFoster && isSameCalendarDay(dog.inFosterSince ?? null, day)) toFoster.push(dog);
+		// Permanent fosters are only shown on the Dogs page, and get their own pop-up.
+		if (dog.inFoster && !dog.permanentFoster && isSameCalendarDay(dog.inFosterSince ?? null, day)) toFoster.push(dog);
 
 		if (dog.status === 'adopted' || dog.status === 'transferred' || dog.status === 'euthanized') {
 			// Departures count strictly by leftShelterDate (the sync always sets it
