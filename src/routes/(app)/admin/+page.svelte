@@ -138,9 +138,9 @@
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
 
-	// #dog-staff backfill: past surgery lists, baths and yard time (thread replies
-	// included), read and written the way the live Slack poll does. Dry run first; every
-	// row starts ticked. Feedings are not backfilled.
+	// #dog-staff backfill: past baths and yard time (thread replies included), read and
+	// written the way the live Slack poll does. Dry run first; every row starts ticked.
+	// Feedings and surgery lists are not backfilled.
 	type StaffKind = 'surgery' | 'bath' | 'yard' | 'feeding';
 	type StaffRow = { key: string; kind: StaffKind; at: string; author: string; text: string; summary: string; uncertain: string[] };
 	type StaffResult = {
@@ -153,9 +153,9 @@
 		skipped?: string;
 	};
 	const STAFF_KIND_LABELS: Record<StaffKind, string> = { feeding: 'Feedings', surgery: 'Surgery lists', bath: 'Baths', yard: 'Yard time' };
-	const STAFF_KIND_ORDER: StaffKind[] = ['surgery', 'bath', 'yard'];
+	const STAFF_KIND_ORDER: StaffKind[] = ['bath', 'yard'];
 	let staffSince = '2026-03-01';
-	let staffKinds: StaffKind[] = ['surgery', 'bath', 'yard'];
+	let staffKinds: StaffKind[] = ['bath', 'yard'];
 	let staffBusy = false;
 	let staffWasDryRun = true;
 	let staffResult: StaffResult | null = null;
@@ -182,7 +182,7 @@
 			else if (dryRun) staffKeep = (staffResult?.rows ?? []).filter((r) => r.uncertain.length === 0).map((r) => r.key);
 			else {
 				const w = staffResult?.written;
-				toast.success(`Logged ${w?.bath ?? 0} baths, ${w?.yard ?? 0} yard times, ${w?.surgery ?? 0} surgery lists.`);
+				toast.success(`Logged ${w?.bath ?? 0} baths, ${w?.yard ?? 0} yard times.`);
 			}
 		} catch (e) {
 			toast.error('Backfill failed: ' + (e instanceof Error ? e.message : String(e)));
@@ -951,7 +951,7 @@
 						<h3 class="section-title">Backfill #dog-staff from Slack</h3>
 						<p class="section-copy">
 							Reads #dog-staff, thread replies included, from the date below and logs what it finds the
-							way the live Slack poll does: surgery lists, baths and yard time. Anything already
+							way the live Slack poll does: baths and yard time. Anything already
 							logged is left alone, and last-bath / last-yard dates only move forward. <strong>Dry run
 							first — nothing is logged until you apply, and only ticked rows.</strong>
 						</p>
@@ -978,10 +978,10 @@
 								{staffResult.scanned} messages and thread replies since {formatDate(staffSince)}:
 								<strong>{staffResult.rows.length}</strong> to log.
 								Already logged: {staffResult.alreadyLogged.bath} baths,
-								{staffResult.alreadyLogged.yard} yard, {staffResult.alreadyLogged.surgery} surgery lists.
+								{staffResult.alreadyLogged.yard} yard.
 							{:else}
 								Logged {staffResult.written.bath} baths,
-								{staffResult.written.yard} yard times, {staffResult.written.surgery} surgery lists.
+								{staffResult.written.yard} yard times.
 							{/if}
 							{#if staffResult.truncated}
 								Over 3,000 messages in that range: only the newest were read, so the earliest were
