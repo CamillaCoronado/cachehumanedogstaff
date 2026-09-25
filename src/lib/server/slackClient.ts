@@ -54,6 +54,18 @@ export interface HistoryMessage {
 	thread_ts?: string;
 }
 
+/**
+ * Message kinds that carry a report. A plain message has no subtype; a post with a photo
+ * is `file_share`, a thread reply also sent to the channel is `thread_broadcast`, and a
+ * Slack workflow or form posts as `bot_message`. Dropping those lost every report written
+ * with a picture or through a workflow. Everything else (joins, topic changes, pins…) is
+ * housekeeping, not a report. This app never posts to Slack, so no bot post is its own.
+ */
+const REPORT_SUBTYPES = new Set(['file_share', 'thread_broadcast', 'bot_message', 'me_message']);
+
+export const isReport = (m: HistoryMessage) =>
+	(m.subtype === undefined || REPORT_SUBTYPES.has(m.subtype)) && Boolean(String(m.text ?? '').trim());
+
 /** Most threads read in one run, so a long range stays inside the time limit. */
 const MAX_THREADS = 150;
 /** Time a backfill may spend reading threads before it leaves the rest unread. */
@@ -135,7 +147,7 @@ export async function channelHistory(
 		// A reply also sent to the channel shows up in both places; keep it once.
 		if (seen.has(m.ts)) return false;
 		seen.add(m.ts);
-		return m.subtype === undefined && m.bot_id === undefined && String(m.text ?? '').trim();
+		return isReport(m);
 	});
 	return { messages, truncated: Boolean(cursor), threadsSkipped };
 }
@@ -145,8 +157,7 @@ const THREAD_LOOKBACK_DAYS = 3;
 /** Most threads a live poll re-reads in one go. */
 const MAX_LIVE_THREADS = 50;
 
-const isFromPerson = (m: HistoryMessage) =>
-	m.subtype === undefined && m.bot_id === undefined && Boolean(String(m.text ?? '').trim());
+
 
 /**
  * What the live polls read each run: everything posted after `lastTs` — new messages,
@@ -194,7 +205,7 @@ export async function newChannelMessages(
 		.filter((m) => {
 			if (seen.has(m.ts)) return false;
 			seen.add(m.ts);
-			return isFromPerson(m);
+			return isReport(m);
 		})
 		.sort((a, b) => Number(b.ts) - Number(a.ts));
 }
