@@ -1053,6 +1053,9 @@
 
 	.feeding-body {
 		display: grid;
+		/* One column that never grows past the screen: a wide child used to stretch it
+		   and push the list, the report and the exceptions off the right edge. */
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.72rem;
 		padding: 0.72rem;
 	}
@@ -1276,12 +1279,16 @@
 
 	.feeding-section-actions {
 		display: inline-flex;
+		flex-wrap: wrap;
+		max-width: 100%;
 		align-items: center;
 		gap: 0.34rem;
 	}
 
 	.feeding-route-control {
 		display: inline-flex;
+		min-width: 0;
+		max-width: 100%;
 		align-items: center;
 		gap: 0.28rem;
 	}
@@ -1295,6 +1302,8 @@
 	}
 
 	.feeding-route-select {
+		min-width: 0;
+		max-width: 100%;
 		min-height: 1.9rem;
 		border: 1px solid #d5e0ea;
 		border-radius: 0.22rem;
@@ -1543,6 +1552,7 @@
 
 	.feeding-low-appetite-title {
 		margin: 0;
+		min-width: 0;
 		font-size: 0.56rem;
 		letter-spacing: 0.09em;
 		text-transform: uppercase;
@@ -1579,6 +1589,7 @@
 		font-size: 0.72rem;
 		line-height: 1.5;
 		white-space: pre-wrap;
+		overflow-wrap: anywhere;
 		color: #3f2f14;
 	}
 
@@ -1647,7 +1658,7 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: #8a5a1c;
-		white-space: nowrap;
+		text-align: right;
 	}
 
 	.feeding-exception-surgery { color: #c5221f; font-weight: 700; }
