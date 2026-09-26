@@ -171,3 +171,11 @@ describe('permanent fosters', () => {
 		expect(rosterOn(index, new Date('2026-04-01T18:00:00Z'))).not.toContain('Arcanine');
 	});
 });
+
+describe('permanent foster marked in the app', () => {
+	it('counts the same as ASM\'s flag', () => {
+		const dot = { id: '7', name: 'Dot', status: 'active', permanentFosterManual: true, intakeDate: '2026-03-01', inFosterSince: '2026-09-20' };
+		const index = buildDogIndex([dot]);
+		expect(rosterOn(index, new Date('2026-09-25T18:00:00Z'))).not.toContain('Dot');
+	});
+});

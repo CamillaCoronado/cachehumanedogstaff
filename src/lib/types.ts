@@ -199,7 +199,10 @@ export interface Dog {
 	evaluationNotes?: string | null;
 	notAdoptable?: boolean;
 	notAdoptableReason?: string | null;
+	/** Permanent foster: ASM's flag, or marked by hand in the app (permanentFosterManual). */
 	permanentFoster?: boolean;
+	/** Set in the app; the ASM sync never writes it, so it cannot be undone by a sync. */
+	permanentFosterManual?: boolean;
 	isIncoming?: boolean;
 	asmId?: number | null;
 	asmShelterCode?: string;
