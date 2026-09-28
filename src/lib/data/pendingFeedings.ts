@@ -41,6 +41,7 @@ async function currentDogIndex() {
 			asmShelterCode: d.asmShelterCode ?? null,
 			inFoster: d.inFoster,
 			permanentFoster: d.permanentFoster,
+			permanentFosterManual: d.permanentFosterManual,
 			inFosterSince: toIso(d.inFosterSince),
 			shelterSince: toIso(d.shelterSince),
 			fosterReturnedAt: toIso(d.fosterReturnedAt),

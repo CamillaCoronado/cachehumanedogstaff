@@ -1269,6 +1269,28 @@
 					{/each}
 				</select>
 			</div>
+			<div class="form-field">
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						class="form-checkbox"
+						disabled={disabled || (value.permanentFoster && !value.permanentFosterManual)}
+						checked={value.permanentFoster ?? false}
+						on:change={(e) => {
+							const on = e.currentTarget.checked;
+							value = { ...value, permanentFosterManual: on, permanentFoster: on };
+						}}
+					/>
+					<span class="text-sm" style="color: var(--marker-black);">Permanent foster</span>
+				</label>
+				<p class="text-xs" style="color: var(--ink-soft);">
+					{#if value.permanentFoster && !value.permanentFosterManual}
+						Marked in ASM.
+					{:else}
+						Set here, not in ASM — the sync will not change it. Only shown on the Dogs page.
+					{/if}
+				</p>
+			</div>
 		</div>
 	</details>
 

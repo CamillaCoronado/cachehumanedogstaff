@@ -49,6 +49,22 @@ describe('channelHistory', () => {
 		expect(threadsSkipped).toBe(2);
 	});
 
+	it('keeps photo posts, channel-broadcast replies and workflow posts, drops housekeeping', async () => {
+		fakeSlack({
+			'conversations.history': () => ({
+				messages: [
+					{ ts: '5', text: 'Rex in, Dot in', user: 'u', subtype: 'file_share' },
+					{ ts: '4', text: 'Birdie in', user: 'u', subtype: 'thread_broadcast' },
+					{ ts: '3', text: 'Playgroup: Rosie in', bot_id: 'B1', subtype: 'bot_message' },
+					{ ts: '2', text: '<@u> has joined the channel', user: 'u', subtype: 'channel_join' },
+					{ ts: '1', text: 'Zane in', user: 'u' }
+				]
+			})
+		});
+		const { messages } = await channelHistory('t', 'C', new Date(0));
+		expect(messages.map((m) => m.ts)).toEqual(['5', '4', '3', '1']);
+	});
+
 	it('leaves replies out unless asked', async () => {
 		fakeSlack({
 			'conversations.history': () => ({ messages: [{ ts: '1', text: 'x', reply_count: 1 }] }),

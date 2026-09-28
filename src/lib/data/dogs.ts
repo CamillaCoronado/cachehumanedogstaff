@@ -124,6 +124,10 @@ interface StoredDog {
 	dayTripNotes: string | null;
 	handlingLevel?: DogHandlingLevel;
 	inFoster: boolean;
+	/** Written by the ASM sync only. */
+	permanentFoster?: boolean;
+	/** Written by the app only. */
+	permanentFosterManual?: boolean;
 	inFosterSince?: string | null;
 	shelterSince?: string | null;
 	fosterReturnedAt?: string | null;
@@ -454,6 +458,9 @@ function serializeDog(dog: Dog): StoredDog {
 		dayTripNotes: dog.dayTripNotes,
 		handlingLevel: dog.handlingLevel ?? 'volunteer',
 		inFoster: dog.inFoster ?? false,
+		// permanentFoster is left out on purpose: the ASM sync owns it. The app's own mark is
+		// permanentFosterManual, which the sync never touches.
+		permanentFosterManual: dog.permanentFosterManual ?? false,
 		inFosterSince: toDateString(dog.inFosterSince) ?? null,
 		shelterSince: toDateString(dog.shelterSince) ?? null,
 		fosterReturnedAt: toDateString(dog.fosterReturnedAt) ?? null,
@@ -654,6 +661,10 @@ function deserializeDog(stored: StoredDog): Dog {
 		dayTripNotes: normalizedDayTripNotes.length > 0 ? normalizedDayTripNotes : null,
 		handlingLevel: effectiveHandlingLevel,
 		inFoster: stored.inFoster ?? false,
+		// Either ASM says so or someone marked it in the app. This was never read before,
+		// so every "leave out permanent fosters" check saw false.
+		permanentFoster: Boolean(stored.permanentFoster || stored.permanentFosterManual),
+		permanentFosterManual: stored.permanentFosterManual ?? false,
 		inFosterSince: stored.inFosterSince ? toDate(stored.inFosterSince) : null,
 		shelterSince: stored.shelterSince ? toDate(stored.shelterSince) : null,
 		fosterReturnedAt: stored.fosterReturnedAt ? toDate(stored.fosterReturnedAt) : null,

@@ -52,6 +52,8 @@ export interface DogRecord {
 	// Feeding page, so "everyone else" here means the same set it means there.
 	inFoster?: boolean;
 	permanentFoster?: boolean;
+	/** Marked in the app; counts the same as ASM's flag. */
+	permanentFosterManual?: boolean;
 	inFosterSince?: string | null;
 	shelterSince?: string | null;
 	/** When the dog last came back from foster (shelterSince no longer moves for it). */
@@ -155,7 +157,7 @@ export function buildDogIndex(dogs: DogRecord[], groups: DogGroupRecord[] = []):
 		if (to !== null && ((from !== null && to < from) || dog.status === 'active')) to = null;
 		// A permanent foster left the shelter when it went to its foster home; with no
 		// date for that, there is no telling when it was here, so it is left out.
-		if (dog.permanentFoster) {
+		if (dog.permanentFoster || dog.permanentFosterManual) {
 			if (!dog.inFosterSince) continue;
 			to = new Date(dog.inFosterSince).getTime();
 		}
@@ -168,7 +170,7 @@ export function buildDogIndex(dogs: DogRecord[], groups: DogGroupRecord[] = []):
 		// requiring 'active' would drop every dog since adopted and leave a message from
 		// February implying a meal for only the handful still here today. Whether a dog
 		// was at the shelter on a given date is what the dates are for.
-		const feedable = !dog.permanentFoster && (dog.isolationStatus ?? 'none') === 'none';
+		const feedable = !(dog.permanentFoster || dog.permanentFosterManual) && (dog.isolationStatus ?? 'none') === 'none';
 
 		// Foster is dated, so it can be applied to the day in question rather than to now:
 		// a dog in foster today was still being fed here before it left, and one that went

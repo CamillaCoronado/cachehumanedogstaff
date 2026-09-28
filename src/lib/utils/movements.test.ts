@@ -62,6 +62,11 @@ describe('getDailyMovements', () => {
 		expect(m.toFoster.map((d) => d.name)).toEqual(['Fosterling']);
 	});
 
+	it('leaves a permanent foster out of the to-foster movements', () => {
+		const dog = makeDog({ name: 'Arcanine', inFoster: true, permanentFoster: true, inFosterSince: todayMorning });
+		expect(getDailyMovements([dog], today).toFoster).toEqual([]);
+	});
+
 	it('counts departures strictly by leftShelterDate, with their outcome', () => {
 		const adopted = makeDog({ name: 'Lucky', status: 'adopted', leftShelterDate: todayMorning });
 		const transferred = makeDog({ name: 'Mover', status: 'transferred', leftShelterDate: todayMorning });

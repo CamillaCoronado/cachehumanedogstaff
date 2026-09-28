@@ -19,9 +19,9 @@ export function createFirestoreDeps(db: Firestore): PipelineDeps {
 
 		async fetchRoster() {
 			// Active, in-shelter dogs only — the phone line is for daily operations.
-			const snapshot = await db.collection('dogs').where('status', '==', 'active').select('name', 'permanentFoster').get();
+			const snapshot = await db.collection('dogs').where('status', '==', 'active').select('name', 'permanentFoster', 'permanentFosterManual').get();
 			return snapshot.docs
-				.filter((d) => !d.data().permanentFoster)
+				.filter((d) => !d.data().permanentFoster && !d.data().permanentFosterManual)
 				.map((d) => ({ id: d.id, name: (d.data().name as string) ?? '' }))
 				.filter((d) => d.name);
 		},
