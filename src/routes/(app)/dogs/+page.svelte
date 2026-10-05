@@ -98,7 +98,7 @@ const today = new Date();
 			viewMode === 'archived' ? dog.status !== 'active' :
 			dog.status === 'active'
 		)
-		.filter((dog) => fosterOnly ? dog.inFoster : true)
+		.filter((dog) => fosterOnly ? dog.inFoster && !dog.permanentFoster : true)
 		.filter((dog) => incomingOnly ? dog.isIncoming : true)
 		.filter((dog) => hideIncoming ? !dog.isIncoming : true)
 		// Confirmed yes, or an untested puppy (only puppies are assumed friendly). Those
