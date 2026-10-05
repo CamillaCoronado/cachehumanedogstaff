@@ -47,6 +47,7 @@ const today = new Date();
 	let search = '';
 	let viewMode: 'active' | 'all' | 'archived' = 'active';
 	let fosterOnly = false;
+	let permanentFosterOnly = false;
 	let incomingOnly = false;
 	let hideIncoming = false;
 	let filterGoodWithDogs = false;
@@ -93,12 +94,14 @@ const today = new Date();
 	$: fosterCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && dog.inFoster && !dog.isIncoming).length;
 	$: incomingCount = dogs.filter((dog) => dog.status === 'active' && !dog.permanentFoster && dog.isIncoming).length;
 	$: filteredDogs = dogs
+		// Permanent fosters are treated as archived, and only show under their own filter.
+		.filter((dog) => permanentFosterOnly ? dog.permanentFoster : !dog.permanentFoster)
 		.filter((dog) =>
-			viewMode === 'all' ? true :
+			permanentFosterOnly || viewMode === 'all' ? true :
 			viewMode === 'archived' ? dog.status !== 'active' :
 			dog.status === 'active'
 		)
-		.filter((dog) => fosterOnly ? dog.inFoster && !dog.permanentFoster : true)
+		.filter((dog) => fosterOnly ? dog.inFoster : true)
 		.filter((dog) => incomingOnly ? dog.isIncoming : true)
 		.filter((dog) => hideIncoming ? !dog.isIncoming : true)
 		// Confirmed yes, or an untested puppy (only puppies are assumed friendly). Those
@@ -511,9 +514,15 @@ const today = new Date();
 				<div class="archived-filter-group">
 					<button
 						class={`sort-chip ${fosterOnly ? 'sort-chip-active' : ''}`}
-						on:click={() => (fosterOnly = !fosterOnly)}
+						on:click={() => { fosterOnly = !fosterOnly; if (fosterOnly) permanentFosterOnly = false; }}
 					>
 						foster only
+					</button>
+					<button
+						class={`sort-chip ${permanentFosterOnly ? 'sort-chip-active' : ''}`}
+						on:click={() => { permanentFosterOnly = !permanentFosterOnly; if (permanentFosterOnly) fosterOnly = false; }}
+					>
+						permanent foster
 					</button>
 					<button
 						class={`sort-chip ${incomingOnly ? 'sort-chip-active' : ''}`}
@@ -603,7 +612,7 @@ const today = new Date();
 						{@const lastPlaygroupDate = lastPlaygroupByDogId[dog.id] ?? null}
 						{@const cardPendingItems = pendingItems(dog, tripEligibility, lastPlaygroupDate, today)}
 						<div
-							class={`dog-card dog-card-clickable ${dog.isOutOnDayTrip ? 'dog-card-trip' : ''} ${dog.inFoster ? 'dog-card-foster' : ''} ${dog.isIncoming ? 'dog-card-incoming' : ''} ${dog.status !== 'active' ? 'dog-card-archived' : ''}`}
+							class={`dog-card dog-card-clickable ${dog.isOutOnDayTrip ? 'dog-card-trip' : ''} ${dog.inFoster && !dog.permanentFoster ? 'dog-card-foster' : ''} ${dog.isIncoming ? 'dog-card-incoming' : ''} ${dog.status !== 'active' || dog.permanentFoster ? 'dog-card-archived' : ''}`}
 							role="link"
 							tabindex="0"
 							aria-label={`Open ${dog.name} profile`}
@@ -634,7 +643,9 @@ const today = new Date();
 											<p class="dog-kennel typewriter">kennel: {dog.outdoorKennelAssignment || 'unassigned'}</p>
 										{/if}
 									</div>
-									{#if dog.status !== 'active'}
+									{#if dog.permanentFoster}
+										<span class="days-tag days-tag-archived typewriter">Permanent Foster</span>
+									{:else if dog.status !== 'active'}
 										<span class="days-tag days-tag-archived typewriter">Adopted</span>
 									{:else}
 										<span class="days-tag typewriter">{daysSince(dog.intakeDate, today) ?? 0} days</span>
@@ -769,13 +780,15 @@ const today = new Date();
 									{#if dog.isOutOnDayTrip}
 										<span class="status-pill status-pill-blue">Out Right Now</span>
 									{/if}
-									{#if dog.inFoster}
+									{#if dog.inFoster && !dog.permanentFoster}
 										<span class="status-pill status-pill-foster">In Foster</span>
 									{/if}
 								</div>
 
 								<div class="dog-actions">
-									{#if dog.status !== 'active'}
+									{#if dog.permanentFoster}
+										<!-- Treated as archived: no trip or return-to-shelter actions. -->
+									{:else if dog.status !== 'active'}
 										<button
 											class="action-btn action-btn-return"
 											on:click|stopPropagation={() => handleReturnDog(dog)}
