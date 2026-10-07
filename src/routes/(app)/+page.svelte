@@ -4,8 +4,7 @@
 	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, updateDog } from '$lib/data/dogs';
 	import { ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
-	import { canEditDogs, resolveRole } from '$lib/utils/permissions';
-	import { localRole } from '$lib/stores/role';
+	import { canEditDogs } from '$lib/utils/permissions';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
 	import { logPhotoRender } from '$lib/utils/photoLog';
 	import { resolveDogPhotoUrl } from '$lib/utils/photoUrl';
@@ -13,7 +12,7 @@
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { daysSince, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import { buildLastPlaygroupMap } from '$lib/utils/attention';
-	import { dogAttention, tripEligibilityFor, type AttentionKind } from '$lib/utils/dogAttention';
+	import { dogAttention, type AttentionKind } from '$lib/utils/dogAttention';
 	import { getDailyMovements, type DailyMovements } from '$lib/utils/movements';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import { subscribeHandoff, saveHandoff, type ShiftHandoff } from '$lib/data/handoff';
@@ -21,7 +20,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { syncVersion } from '$lib/stores/sync';
-	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession, UserRole } from '$lib/types';
+	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
 
 	type TodayActionId = 'feeding' | 'cleaning' | 'movement' | 'slack';
 	type ActionBusyMap = Record<TodayActionId, boolean>;
@@ -411,8 +410,7 @@
 					{ id: 'movement', label: 'Bring Dogs In @ 4:15', done: movementDone },
 					{ id: 'slack', label: 'Slack Update (PM)', done: slackDone }
 				];
-	$: viewerRole = resolveRole($authProfile, $localRole as UserRole);
-	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs, viewerRole);
+	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs);
 
 
 	function hasFeedingLogForShift(dogId: string, mealTime: MealTime) {
@@ -546,15 +544,11 @@
 
 	// The same rules the dog cards use (dogAttention), for every dog at the shelter —
 	// transfers still marked Incoming included.
-	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[], viewerRole: UserRole): AttentionItem[] {
+	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
 		const lastPlaygroup = buildLastPlaygroupMap(sessions);
 		const items: AttentionItem[] = [];
 		for (const dog of activeDogs) {
-			const flags = dogAttention(dog, {
-				today,
-				lastPlaygroupDate: lastPlaygroup[dog.id] ?? null,
-				tripEligibility: tripEligibilityFor(dog, viewerRole, today)
-			});
+			const flags = dogAttention(dog, { today, lastPlaygroupDate: lastPlaygroup[dog.id] ?? null });
 			if (flags.length === 0) continue;
 			items.push({
 				dogId: dog.id,
@@ -1726,9 +1720,7 @@
 		color: #3a6090;
 	}
 
-	.attention-tag-enrichment,
-	.attention-tag-daytrip,
-	.attention-tag-playgroup {
+	.attention-tag-enrichment {
 		background: rgba(90, 150, 90, 0.14);
 		color: #3a6e3a;
 	}

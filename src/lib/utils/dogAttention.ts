@@ -1,16 +1,6 @@
 import type { Dog, UserRole } from '$lib/types';
-import { checkDayTripEligibility, daysSince, sinceReturn } from '$lib/utils/dates';
-import {
-	clockStart,
-	enrichmentOverdueDays,
-	getBathStatus,
-	getDayTripGapDays,
-	isBathDue,
-	isPlaygroupEligible,
-	needsDogTest,
-	DAYTRIP_OVERDUE_DAYS,
-	PLAYGROUP_OVERDUE_DAYS
-} from '$lib/utils/attention';
+import { checkDayTripEligibility, daysSince } from '$lib/utils/dates';
+import { clockStart, enrichmentOverdueDays, getBathStatus, isBathDue, needsDogTest } from '$lib/utils/attention';
 
 /**
  * Every rule for what a dog needs doing, in one place. The dog card and the dashboard's
@@ -45,7 +35,7 @@ export function tripEligibilityFor(dog: Dog, role: UserRole | null | undefined, 
 	);
 }
 
-export type AttentionKind = 'bath' | 'enrichment' | 'daytrip' | 'playgroup' | 'dogtest';
+export type AttentionKind = 'bath' | 'enrichment' | 'dogtest';
 
 export interface AttentionFlag {
 	kind: AttentionKind;
@@ -65,8 +55,6 @@ export interface AttentionContext {
 	today: Date;
 	/** Most recent non-cancelled playgroup, from any stay. */
 	lastPlaygroupDate: Date | null;
-	/** Day-trip eligibility as the viewer sees it (handling rules depend on role). */
-	tripEligibility: TripEligibility;
 }
 
 /**
@@ -88,7 +76,7 @@ export function missingEvaluations(dog: Dog) {
 const dayWord = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
 
 export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
-	const { today, lastPlaygroupDate, tripEligibility } = ctx;
+	const { today, lastPlaygroupDate } = ctx;
 	const flags: AttentionFlag[] = [];
 	// Foster dogs are cared for elsewhere, and isolation dogs by the clinic: neither is
 	// on the shelter's to-do list. Incoming dogs are — transfers arrive through Incoming.
@@ -128,23 +116,8 @@ export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
 		});
 	}
 
-	if (!dog.isOutOnDayTrip && !dog.awaitingEvaluation && tripEligibility.eligible) {
-		const gap = getDayTripGapDays(dog, today);
-		if (gap === null) {
-			flags.push({ kind: 'daytrip', label: 'No day trip logged yet.', short: 'no day trip yet', days: arrivedDays, priority: 68, tone: 'info' });
-		} else if (gap >= DAYTRIP_OVERDUE_DAYS) {
-			flags.push({ kind: 'daytrip', label: `${gap} days since last day trip — overdue.`, short: `day trip · ${gap}d`, days: gap, priority: 66, tone: 'info' });
-		}
-	}
-
-	if (isPlaygroupEligible(dog, today)) {
-		const gap = daysSince(sinceReturn(lastPlaygroupDate, clockStart(dog)), today);
-		if (gap === null) {
-			flags.push({ kind: 'playgroup', label: 'No playgroup logged yet.', short: 'no playgroup yet', days: arrivedDays, priority: 63, tone: 'info' });
-		} else if (gap >= PLAYGROUP_OVERDUE_DAYS) {
-			flags.push({ kind: 'playgroup', label: `${gap} days since last playgroup — overdue.`, short: `playgroup · ${gap}d`, days: gap, priority: 62, tone: 'info' });
-		}
-	}
+	// Day trips, playgroups and yard time are one need, not three: the enrichment flag
+	// above covers all of them, so there is no separate day-trip or playgroup flag.
 
 	if (needsDogTest(dog, lastPlaygroupDate !== null, today)) {
 		flags.push({

@@ -90,6 +90,17 @@ describe('parseYardMessage', () => {
 		expect(parse('Sally on bed rest take out for potty breaks').dogNames).toEqual([]);
 	});
 
+	it('reads one-on-one time with the dog named after the verb', () => {
+		expect(parse('I worked with Sally today').dogNames).toEqual(['Sally']);
+		expect(parse('worked with Jack and Mia for 20 min. Pickles was barking').dogNames).toEqual(['Jack', 'Mia']);
+		expect(parse('worked with Jack and Mia for 20 min').durationMinutes).toBe(20);
+		expect(parse('took Luna out for a bit').dogNames).toEqual(['Luna']);
+		// Asking, or planning, is not a report.
+		expect(parse('Can someone work with Sally?').dogNames).toEqual([]);
+		expect(parse('someone should take Sally out').dogNames).toEqual([]);
+		expect(parse('I worked with the new volunteer today').dogNames).toEqual([]);
+	});
+
 	it('returns nothing for a message that is not about the yard', () => {
 		expect(parse('Straggler was adopted!').dogNames).toEqual([]);
 		expect(parse('Mia didn’t eat').dogNames).toEqual([]);

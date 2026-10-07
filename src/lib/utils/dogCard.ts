@@ -135,7 +135,7 @@ export function pendingItems(
 
 	// Everything the dog needs doing comes from the shared rules, the same ones the
 	// dashboard's Needs attention list uses.
-	for (const flag of dogAttention(dog, { today, lastPlaygroupDate, tripEligibility })) {
+	for (const flag of dogAttention(dog, { today, lastPlaygroupDate })) {
 		items.push({ label: flag.label, tone: flag.tone, priority: flag.priority, ...(flag.action ? { action: flag.action } : {}) });
 	}
 
