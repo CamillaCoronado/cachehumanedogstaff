@@ -40,6 +40,15 @@ const WENT_OUT =
 const ESCAPED =
 	/\bout\s+of\s+(?:the\s+|h(?:er|is)\s+|their\s+)?(?:outside\s+|inside\s+|back\s+)?(?:kennel|gate|canal|run|crate)\b|\bgate\s+was\s+still\s+latched\b/i;
 
+/**
+ * One-on-one time, reported with the dog named after the verb: "I worked with Miles
+ * today", "took Miles out for a bit". Same enrichment as the yard, just said differently.
+ * Past tense only, so "can someone work with Miles" and "I'll take Miles out" are not
+ * reports.
+ */
+const WORKED_WITH = /\bworked\s+with\b/i;
+const TOOK_OUT = /\btook\s+(.{1,60}?)\s+out(?:side)?\b/i;
+
 /** Dogs left out of a blanket: "all dogs went out except for punch". */
 const EXCEPT = /\bexcept\s+(?:for\s+)?|\bbut\s+(?:not\s+)?|\bother\s+than\s+/i;
 
@@ -146,7 +155,7 @@ export function parseYardMessage(text: string, knownDogNames: string[] = []): Pa
 
 	// Named the yard, or just said the dogs went out.
 	const marker = YARD_TIME.exec(text) ?? WENT_OUT.exec(text);
-	if (!marker) return empty;
+	if (!marker) return oneOnOne(text, knownDogNames) ?? empty;
 
 	// A dog out of its kennel is an escape; the day it happened is not enrichment.
 	if (ESCAPED.test(text)) return empty;
@@ -178,4 +187,24 @@ export function parseYardMessage(text: string, knownDogNames: string[] = []): Pa
 	if (dogNames.length === 0 && !HAPPENED.test(before)) return empty;
 
 	return { dogNames, allDogs: false, durationMinutes, negated: false, exceptNames: [] };
+}
+
+/** "I worked with Miles today", "took Miles out": the dog is named after the verb. */
+function oneOnOne(text: string, knownDogNames: string[]): ParsedYardMessage | null {
+	if (ESCAPED.test(text) || NEGATED.test(text) || NOT_A_REPORT.test(text) || text.includes('?')) return null;
+	const roster = buildRoster(knownDogNames);
+	let fragment: string | null = null;
+	const worked = WORKED_WITH.exec(text);
+	if (worked) {
+		// Up to the end of that sentence: "worked with Miles today. Rex was barking" is Miles.
+		fragment = text.slice(worked.index + worked[0].length).split(/[.!\n]/)[0];
+	} else {
+		const took = TOOK_OUT.exec(text);
+		if (took) fragment = took[1];
+	}
+	if (fragment === null) return null;
+	const dogNames = namesIn(fragment, roster);
+	if (dogNames.length === 0) return null;
+	const duration = DURATION.exec(text);
+	return { dogNames, allDogs: false, durationMinutes: duration ? Number(duration[1]) : null, negated: false, exceptNames: [] };
 }
