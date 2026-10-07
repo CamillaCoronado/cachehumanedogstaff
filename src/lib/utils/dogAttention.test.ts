@@ -35,7 +35,7 @@ function makeDog(overrides: Partial<Dog> = {}): Dog {
 }
 
 const kinds = (dog: Dog, lastPlaygroupDate: Date | null = new Date(2026, 5, 11)) =>
-	dogAttention(dog, { today, lastPlaygroupDate, tripEligibility: eligible }).map((f) => f.kind).sort();
+	dogAttention(dog, { today, lastPlaygroupDate }).map((f) => f.kind).sort();
 
 describe('dogAttention', () => {
 	it('flags nothing for a dog that is up to date', () => {
@@ -53,19 +53,20 @@ describe('dogAttention', () => {
 		expect(kinds(makeDog({ ...due, status: 'adopted' }))).toEqual([]);
 	});
 
-	it('applies every rule: enrichment, day trip, dog test (no other evaluations)', () => {
+	it('applies every rule: enrichment, dog test (no other evaluations)', () => {
 		const dog = makeDog({
 			goodWithDogs: 'unknown',
 			lastDayTripDate: new Date(2026, 4, 20),
 			lastYardDate: null
 		});
-		// No playgroup ever, trip 23 days ago, unknown with dogs.
-		expect(kinds(dog, null)).toEqual(['daytrip', 'dogtest', 'enrichment']);
+		// No playgroup ever, trip 23 days ago, unknown with dogs. Day trips and playgroups
+		// have no flag of their own: enrichment covers them.
+		expect(kinds(dog, null)).toEqual(['dogtest', 'enrichment']);
 	});
 
 	it('is exactly what the dog card lists as to-dos', () => {
 		const dog = makeDog({ lastBathDate: null, goodWithCats: 'unknown', lastDayTripDate: new Date(2026, 4, 20) });
-		const flags = dogAttention(dog, { today, lastPlaygroupDate: null, tripEligibility: eligible });
+		const flags = dogAttention(dog, { today, lastPlaygroupDate: null });
 		const card = pendingItems(dog, eligible, null, today).map((i) => i.label);
 		for (const f of flags) expect(card).toContain(f.label);
 	});
@@ -75,7 +76,7 @@ describe('bath for transfers', () => {
 	it('flags a transfer that moved off Incoming without a bath', () => {
 		// shelterSince is stamped when a dog leaves Incoming; it is not a bath.
 		const dior = makeDog({ intakeDate: new Date(2026, 5, 5), shelterSince: new Date(2026, 5, 8), lastBathDate: null });
-		const bath = dogAttention(dior, { today, lastPlaygroupDate: new Date(2026, 5, 11), tripEligibility: eligible }).find((f) => f.kind === 'bath');
+		const bath = dogAttention(dior, { today, lastPlaygroupDate: new Date(2026, 5, 11) }).find((f) => f.kind === 'bath');
 		expect(bath?.short).toContain('new intake');
 	});
 
@@ -97,11 +98,10 @@ describe('bath for transfers', () => {
 			lastYardDate: null,
 			fosterReturnedAt: new Date(2026, 5, 9)
 		});
-		const flags = dogAttention(back, { today, lastPlaygroupDate: new Date(2026, 5, 11), tripEligibility: eligible });
-		// Fresh clocks: 3 days since return is not overdue, and the pre-foster trip no
-		// longer counts, so it reads "no day trip yet" rather than months overdue.
+		const flags = dogAttention(back, { today, lastPlaygroupDate: new Date(2026, 5, 11) });
+		// Fresh clocks: 3 days since return is not overdue, even though the last day
+		// trip was months ago, before the foster.
 		expect(flags.map((f) => f.kind)).not.toContain('enrichment');
-		expect(flags.find((f) => f.kind === 'daytrip')?.short).toBe('no day trip yet');
 	});
 
 	it('uses the later of a real bath and a foster return', () => {
