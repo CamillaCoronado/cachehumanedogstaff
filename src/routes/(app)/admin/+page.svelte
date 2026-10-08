@@ -13,6 +13,7 @@
 	import { checkDeparture, type AsmDeparture } from '$lib/utils/departureCheck';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
+	import { adoptionStays, turnaroundByMonth, turnaroundWindows } from '$lib/utils/adoptionTurnaround';
 
 	type EditableUser = UserProfile & {
 		draftDisplayName: string;
@@ -132,6 +133,16 @@
 		void listDogs().then((dogs) => {
 			allDogs = dogs.sort((a, b) => a.name.localeCompare(b.name));
 		});
+	}
+
+	$: stays = adoptionStays(allDogs);
+	$: turnaround = turnaroundWindows(stays);
+	$: turnaroundMonths = turnaroundByMonth(stays);
+
+	function formatDays(days: number | null) {
+		if (days === null) return '—';
+		const rounded = Math.round(days * 10) / 10;
+		return `${rounded} day${rounded === 1 ? '' : 's'}`;
 	}
 
 	$: mergeKeepDog = allDogs.find((d) => d.id === mergeKeepId) ?? null;
@@ -686,6 +697,54 @@
 			<div class="admin-wide">
 				<CheckList bind:this={checkList} dogs={allDogs} profile={$authProfile} />
 			</div>
+
+			<section class="admin-card admin-wide">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Stats</p>
+						<h3 class="section-title">Adoption turnaround</h3>
+						<p class="section-copy">
+							Days from a dog's latest intake to its adoption, grouped by adoption date. Foster
+							time counts; a dog adopted, returned and adopted again counts its last stay only.
+						</p>
+					</div>
+				</div>
+
+				{#if !allDogsLoaded || allDogs.length === 0}
+					<p class="empty-note">Loading dogs…</p>
+				{:else}
+					<div class="stat-tiles">
+						{#each turnaround as w (w.label)}
+							<div class="stat-tile">
+								<p class="stat-label">{w.label}</p>
+								<p class="stat-value">{formatDays(w.medianDays)}</p>
+								<p class="stat-sub">
+									median · avg {formatDays(w.averageDays)} · {w.count} adoption{w.count === 1 ? '' : 's'}
+								</p>
+							</div>
+						{/each}
+					</div>
+
+					<details class="stat-months">
+						<summary>By month</summary>
+						<table class="stat-table">
+							<thead>
+								<tr><th scope="col">Month</th><th scope="col">Adoptions</th><th scope="col">Median</th><th scope="col">Average</th></tr>
+							</thead>
+							<tbody>
+								{#each turnaroundMonths as m (m.month.getTime())}
+									<tr>
+										<th scope="row">{m.month.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</th>
+										<td>{m.count}</td>
+										<td>{formatDays(m.medianDays)}</td>
+										<td>{formatDays(m.averageDays)}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</details>
+				{/if}
+			</section>
 
 			<section class="admin-card">
 				<div class="card-header">
@@ -1318,6 +1377,73 @@
 	.admin-wide {
 		grid-column: 1 / -1;
 		min-width: 0;
+	}
+
+	.stat-tiles {
+		display: grid;
+		gap: 0.75rem;
+		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+		margin-top: 0.9rem;
+	}
+
+	.stat-tile {
+		padding: 0.8rem 0.9rem;
+		border: 1px solid #d3dfeb;
+		border-radius: 0.8rem;
+		background: var(--board-sheen);
+		font-family: var(--font-ui);
+	}
+
+	.stat-label,
+	.stat-sub {
+		margin: 0;
+		font-size: 0.8rem;
+		color: #526b81;
+	}
+
+	.stat-value {
+		margin: 0.2rem 0;
+		font-size: 1.6rem;
+		font-weight: 700;
+		color: var(--ink-main);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.stat-months {
+		margin-top: 0.9rem;
+		font-family: var(--font-ui);
+		font-size: 0.86rem;
+	}
+
+	.stat-months summary {
+		cursor: pointer;
+		color: var(--marker-blue);
+		font-weight: 600;
+	}
+
+	.stat-table {
+		width: 100%;
+		margin-top: 0.5rem;
+		border-collapse: collapse;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.stat-table th,
+	.stat-table td {
+		padding: 0.35rem 0.5rem;
+		border-bottom: 1px solid #e3ebf3;
+		text-align: right;
+		color: var(--ink-main);
+	}
+
+	.stat-table th:first-child {
+		text-align: left;
+		font-weight: 600;
+	}
+
+	.stat-table thead th {
+		color: #526b81;
+		font-weight: 600;
 	}
 
 	.admin-more {
