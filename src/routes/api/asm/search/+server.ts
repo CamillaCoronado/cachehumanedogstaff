@@ -1,6 +1,9 @@
 import { json, error } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import type { RequestEvent } from '@sveltejs/kit';
+import { getAdminAuth } from '$lib/firebase/admin';
+import { asmBase, loadAsmDogs } from '$lib/server/asmAnimals';
+
+export const config = { maxDuration: 60 };
 
 const MOVEMENT_LABELS: Record<number, string> = {
 	0: 'in shelter',
@@ -12,47 +15,52 @@ const MOVEMENT_LABELS: Record<number, string> = {
 	6: 'stolen',
 	7: 'released',
 	8: 'moved to retailer',
-	9: 'reserved',
+	9: 'reserved'
 };
 
-export async function GET({ url }: RequestEvent) {
-	const { ASM_URL, ASM_ACCOUNT, ASM_USER, ASM_PASS } = env;
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
 
-	if (!ASM_URL || !ASM_ACCOUNT || !ASM_USER || !ASM_PASS) {
-		throw error(503, 'ASM credentials not configured');
-	}
-
-	const q = url.searchParams.get('q')?.trim();
-	if (!q) throw error(400, 'Missing query param: q');
-
-	let res: Response;
+/**
+ * Finds dogs in ASM by name, for any number of names at once (`?q=Rex&q=Dragon`). ASM has
+ * no search, so this reads its lists — on the shelter, adopted in the last three years,
+ * recent changes, and the departures report — and matches names here. Signed-in users only.
+ */
+export async function GET({ url, request }: RequestEvent) {
+	const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+	if (!token) throw error(401, 'Missing auth token');
 	try {
-		res = await fetch(
-			`${ASM_URL}/asmservice?method=json_find_animals&q=${encodeURIComponent(q)}&account=${encodeURIComponent(ASM_ACCOUNT)}&username=${encodeURIComponent(ASM_USER)}&password=${encodeURIComponent(ASM_PASS)}`
-		);
-	} catch (e) {
-		throw error(502, `ASM network error: ${e instanceof Error ? e.message : String(e)}`);
-	}
-
-	if (!res.ok) throw error(502, `ASM search failed: ${res.status}`);
-
-	let data: unknown[];
-	try {
-		data = await res.json();
+		await getAdminAuth().verifyIdToken(token);
 	} catch {
-		throw error(502, 'ASM returned non-JSON');
+		throw error(401, 'Invalid auth token');
 	}
 
-	const animals = (Array.isArray(data) ? data : []).map((a: Record<string, unknown>) => ({
-		id: a.ID,
-		name: a.ANIMALNAME,
-		shelterCode: a.SHELTERCODE,
-		breed: a.BREEDNAME,
-		status: a.DECEASEDDATE
-			? 'deceased'
-			: MOVEMENT_LABELS[a.ACTIVEMOVEMENTTYPE as number] ?? 'unknown',
-		activeMovermentType: a.ACTIVEMOVEMENTTYPE,
-	}));
+	const base = asmBase();
+	if (!base) throw error(503, 'ASM credentials not configured');
 
-	return json(animals);
+	const names = url.searchParams.getAll('q').map((q) => q.trim()).filter(Boolean);
+	if (names.length === 0) throw error(400, 'Missing query param: q');
+
+	const t = new Date();
+	const from = `${t.getFullYear() - 3}-01-01`;
+	let dogs;
+	try {
+		dogs = (await loadAsmDogs(base, from, { shelter: true })).dogs;
+	} catch (e) {
+		throw error(502, `ASM lists failed: ${e instanceof Error ? e.message : String(e)}`);
+	}
+
+	const results: Record<string, { id: number; name: string; shelterCode: string; breed: string; status: string }[]> = {};
+	for (const q of names) {
+		const want = norm(q);
+		results[q] = dogs
+			.filter((d) => want && norm(d.name) && (norm(d.name).includes(want) || want.includes(norm(d.name))))
+			.map((d) => ({
+				id: d.id,
+				name: d.name,
+				shelterCode: d.shelterCode,
+				breed: d.breed,
+				status: d.deceasedDate ? 'deceased' : (MOVEMENT_LABELS[d.movementType ?? 0] ?? 'unknown')
+			}));
+	}
+	return json(results);
 }
