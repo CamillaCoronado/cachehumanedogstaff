@@ -104,7 +104,7 @@ const sameDrug = (a: unknown, b: unknown) => {
 	return Boolean(x && y) && (x.includes(y) || y.includes(x));
 };
 
-export const DEFAULT_FORTIFLORA_DAYS = 7;
+export const DEFAULT_FORTIFLORA_DAYS = 3;
 
 /**
  * One dog's writes for a post's actions on that dog. Additive only: nothing already on

@@ -74,7 +74,7 @@ describe('planSlackMedical', () => {
 	it('starts FortiFlora unless a course is already running', () => {
 		expect(plan({}, [act({ type: 'fortiflora', days: null })]).patch).toEqual({
 			fortifloraDate: '2026-10-08T18:00:00.000Z',
-			fortifloraDays: 7,
+			fortifloraDays: 3,
 			fortifloraTime: 'both'
 		});
 		expect(plan({ fortifloraDate: '2026-10-05T18:00:00.000Z', fortifloraDays: 14 }, [act({ type: 'fortiflora' })]).patch).toBeNull();
