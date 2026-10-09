@@ -145,7 +145,7 @@ export function storedDay(v: unknown): string | null {
 }
 
 /** Midday on the shelter's clock as stored, so the day reads the same everywhere in the US. */
-const storedNoon = (day: string | null) => (day ? `${day}T18:00:00.000Z` : null);
+export const storedNoon = (day: string | null) => (day ? `${day}T18:00:00.000Z` : null);
 
 type Doc = Record<string, unknown>;
 type StoredTreatment = {

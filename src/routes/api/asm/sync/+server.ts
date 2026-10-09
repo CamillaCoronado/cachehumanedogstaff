@@ -7,6 +7,7 @@ import { syncMedicalFromASM, type MedicalSyncResult } from '$lib/server/asmMedic
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
+import { pollSlackMedical } from '$lib/server/slackMedicalPoll';
 import { recordSyncLog, syncLogSince } from '$lib/server/syncLog';
 
 /**
@@ -94,6 +95,12 @@ export async function POST({ request }: RequestEvent) {
 		await pollSlackPlaygroups();
 	} catch (e) {
 		console.error('[slack playgroups]', e);
+	}
+	// After the ASM medical pass, so a drug ASM already has isn't added again from Slack.
+	try {
+		await pollSlackMedical();
+	} catch (e) {
+		console.error('[slack medical]', e);
 	}
 
 	// Return the changes themselves, not just a count — the sync log panel lists them.
