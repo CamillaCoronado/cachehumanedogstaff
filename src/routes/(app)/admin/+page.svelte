@@ -11,6 +11,8 @@
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
 	import { checkDeparture, findByCode, intakeYear, matchFromFeed, sameNameDogs, type AsmFeedAnimal } from '$lib/utils/departureCheck';
+	import { checkMedical, type AsmRegimen, type MedicalFix } from '$lib/utils/medicalCheck';
+	import { createId } from '$lib/utils/storage';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
 	import { adoptionStays, turnaroundByMonth, turnaroundWindows } from '$lib/utils/adoptionTurnaround';
@@ -647,6 +649,84 @@
 		}
 	}
 
+	// Treatments from ASM: every active dog's ASM medical regimens against its treatments on
+	// the Medical page. Reads only until applied, and only ticked rows are saved.
+	let medRunning = false;
+	let medRan = false;
+	let medApplying = false;
+	let medFixes: MedicalFix[] = [];
+	let medSelected: string[] = [];
+	let medUnmatched: AsmRegimen[] = [];
+	let medProgress = '';
+	const medKey = (f: MedicalFix) => `${f.dog.id}:${f.regimen.regimenId}`;
+
+	async function runMedicalDryRun() {
+		medRunning = true;
+		medRan = false;
+		medFixes = [];
+		medSelected = [];
+		medUnmatched = [];
+		try {
+			medProgress = 'Reading ASM’s medical book…';
+			const token = await $authUser?.getIdToken();
+			const res = await fetch('/api/asm/medical-check', {
+				method: 'POST',
+				headers: { authorization: `Bearer ${token}` }
+			});
+			if (!res.ok) throw new Error(`ASM lookup failed (${res.status}): ${(await res.text()).slice(0, 160)}`);
+			const { regimens } = (await res.json()) as { regimens: AsmRegimen[] };
+			const result = checkMedical(await listDogs(), regimens, () => createId('tx'));
+			medFixes = result.fixes;
+			medUnmatched = result.unmatched;
+			// Courses with no end in ASM (monthly preventatives, mostly) start unticked: they
+			// would sit on the Medical page until someone removes them.
+			medSelected = medFixes.filter((f) => !f.openEnded).map(medKey);
+			medProgress = `Checked ${regimens.length} active ASM regimen${regimens.length === 1 ? '' : 's'}.`;
+			medRan = true;
+		} catch (e) {
+			toast.error('Dry run failed: ' + (e instanceof Error ? e.message : String(e)));
+			medProgress = '';
+		} finally {
+			medRunning = false;
+		}
+	}
+
+	function toggleMedical(k: string) {
+		medSelected = medSelected.includes(k) ? medSelected.filter((x) => x !== k) : [...medSelected, k];
+	}
+
+	async function applyMedicalFixes() {
+		if (medApplying) return;
+		const chosen = medFixes.filter((f) => medSelected.includes(medKey(f)));
+		if (chosen.length === 0) return;
+		medApplying = true;
+		let applied = 0;
+		try {
+			// One write per dog, read fresh, so two rows for one dog don't undo each other.
+			const byDog = new Map<string, MedicalFix[]>();
+			for (const f of chosen) byDog.set(f.dog.id, [...(byDog.get(f.dog.id) ?? []), f]);
+			const fresh = new Map((await listDogs()).map((d) => [d.id, d]));
+			for (const [dogId, fixes] of byDog) {
+				let treatments = [...(fresh.get(dogId)?.treatments ?? [])];
+				for (const f of fixes) {
+					treatments =
+						f.kind === 'fill' && treatments.some((t) => t.id === f.treatment.id)
+							? treatments.map((t) => (t.id === f.treatment.id ? f.treatment : t))
+							: [...treatments, f.treatment];
+				}
+				await updateDog(dogId, { treatments });
+				applied += fixes.length;
+			}
+			medFixes = medFixes.filter((f) => !medSelected.includes(medKey(f)));
+			medSelected = [];
+			toast.success(`Filled in ${applied} treatment${applied === 1 ? '' : 's'} from ASM.`);
+		} catch (e) {
+			toast.error(`Stopped after ${applied} — ` + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			medApplying = false;
+		}
+	}
+
 	async function runMerge() {
 		if (!mergeValid || merging) return;
 		merging = true;
@@ -1157,6 +1237,55 @@
 							{backfillApplying ? 'Applying…' : `Apply all ${backfillUnknown.filter((u) => u.manualDate).length} filled date${backfillUnknown.filter((u) => u.manualDate).length === 1 ? '' : 's'}`}
 						</button>
 					{/if}
+				{/if}
+			</section>
+
+			<section class="admin-card panel-steel">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Treatments from ASM</h3>
+						<p class="section-copy">Fill in the Medical page's treatments using ASM.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>Reads every active medical regimen in ASM's medical book (a course with a dose still to give) and compares it with each active dog's treatments. A regimen the dog has no treatment for is added, with ASM's start date, the day of its last dose as the end, and its dosage and timing as notes. A treatment the app already has (same name) only gets its blank start, end or notes filled; nothing typed in the app is changed. Courses with no end in ASM start unticked, since they would stay on the Medical page until removed. <strong>Nothing changes until you apply, and only ticked rows.</strong></p></details>
+					</div>
+					<button class="action-btn" type="button" on:click={runMedicalDryRun} disabled={medRunning}>
+						{medRunning ? 'Checking…' : 'Dry run'}
+					</button>
+				</div>
+				{#if medProgress}
+					<p class="status-meta">{medProgress}</p>
+				{/if}
+				{#if medRan && medFixes.length === 0}
+					<p class="empty-note">Every ASM treatment is already on the Medical page — nothing to fill in.</p>
+				{/if}
+				{#if medFixes.length > 0}
+					<div class="status-row-plain">
+						<span class="status-meta">{medFixes.length} treatment{medFixes.length === 1 ? '' : 's'} ASM can fill in:</span>
+					</div>
+					<ul class="user-list">
+						{#each medFixes as fix (medKey(fix))}
+							<li class="user-row">
+								<label class="user-main fr-row">
+									<input type="checkbox" checked={medSelected.includes(medKey(fix))} on:change={() => toggleMedical(medKey(fix))} />
+									<span>
+										<span class="suspect-name">{fix.dog.name}</span>
+										<span class="suspect-detail">{fix.detail}{fix.openEnded ? ' Ongoing in ASM, so it stays until removed.' : ''}</span>
+									</span>
+								</label>
+							</li>
+						{/each}
+					</ul>
+					<button class="action-btn backfill-apply" type="button" on:click={applyMedicalFixes} disabled={medApplying || medSelected.length === 0}>
+						{medApplying ? 'Applying…' : `Apply ${medSelected.length} treatment${medSelected.length === 1 ? '' : 's'}`}
+					</button>
+				{/if}
+				{#if medUnmatched.length > 0}
+					<div class="status-row-plain">
+						<span class="status-meta">
+							{medUnmatched.length} ASM regimen{medUnmatched.length === 1 ? '' : 's'} for dogs not active in the app (permanent fosters, or dogs not linked to ASM), left alone:
+							{[...new Set(medUnmatched.map((r) => `${r.animalName} (${r.shelterCode || r.animalId})`))].join(', ')}
+						</span>
+					</div>
 				{/if}
 			</section>
 

@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import type { AsmRegimen } from '$lib/utils/medicalCheck';
 
 /**
  * ASM's service API has no animal search (there is no json_find_animals; unknown methods
@@ -219,30 +220,35 @@ export async function searchAsmWebsite(q: string): Promise<AsmDog[]> {
 	return (await searchAsmWebsiteWithSummary(q)).dogs;
 }
 
-/** One website search, rows with upper-cased keys. */
-async function webSearch(params: URLSearchParams): Promise<{ rows: Record<string, unknown>[]; keys: string[] }> {
-	const run = (s: WebSession) => webFetch(s, `/animal_find_results?${params}`);
+/**
+ * One signed-in website page as JSON (ASM's pages answer in JSON when asked with
+ * json=true). An expired session comes back as the sign-in page, so it signs in again once.
+ */
+async function webJson(path: string, what: string): Promise<unknown> {
 	let s = await webSignIn();
-	let res = await run(s);
+	let res = await webFetch(s, path);
 	let text = await res.text();
 	if (!res.ok || !text.trim().startsWith('{')) {
-		// Probably an expired session sent back to the sign-in page: sign in again once.
 		webSession = null;
 		s = await webSignIn();
-		res = await run(s);
+		res = await webFetch(s, path);
 		text = await res.text();
 	}
-	if (!res.ok) throw new Error(`ASM website search returned ${res.status}`);
-	let data: { rows?: unknown };
+	if (!res.ok) throw new Error(`ASM website ${what} returned ${res.status}`);
 	try {
-		data = JSON.parse(text);
+		return JSON.parse(text);
 	} catch {
-		throw new Error(`ASM website search didn't return JSON: ${text.slice(0, 120)}`);
+		throw new Error(`ASM website ${what} didn't return JSON: ${text.slice(0, 120)}`);
 	}
+}
+
+const upperKeys = (r: Record<string, unknown>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toUpperCase(), v]));
+
+/** One website search, rows with upper-cased keys. */
+async function webSearch(params: URLSearchParams): Promise<{ rows: Record<string, unknown>[]; keys: string[] }> {
+	const data = (await webJson(`/animal_find_results?${params}`, 'search')) as { rows?: unknown } | null;
 	return {
-		rows: (Array.isArray(data.rows) ? (data.rows as Record<string, unknown>[]) : []).map((r) =>
-			Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toUpperCase(), v]))
-		),
+		rows: (Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : []).map(upperKeys),
 		keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 8) : []
 	};
 }
@@ -277,4 +283,47 @@ export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: As
 			keys: found.keys
 		}
 	};
+}
+
+/**
+ * Every active medical regimen with a dose still to give, from ASM's medical book (the
+ * website's Medical screen: doses due between a year back and a year ahead, for animals
+ * on the shelter or in foster). The service API has no medical method, so this signs in
+ * to the website like the search does; the ASM user needs view-medical rights.
+ */
+export async function loadAsmRegimens(): Promise<AsmRegimen[]> {
+	const pages = await Promise.all(
+		['m365', 'p365'].map(async (offset) => {
+			const data = (await webJson(`/medical?json=true&offset=${offset}`, 'medical book')) as { rows?: unknown } | null;
+			return (Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : []).map(upperKeys);
+		})
+	);
+	const byId = new Map<number, AsmRegimen>();
+	for (const r of pages.flat()) {
+		const regimenId = Number(r.REGIMENID ?? r.ID);
+		const animalId = Number(r.ANIMALID);
+		// Dogs only; the medical book has every species.
+		if (!regimenId || !animalId || Number(r.STATUS ?? 0) !== 0 || !isDogRow(r)) continue;
+		const due = day(r.DATEREQUIRED);
+		const prev = byId.get(regimenId);
+		byId.set(regimenId, {
+			regimenId,
+			animalId,
+			shelterCode: String(r.SHELTERCODE ?? ''),
+			shortCode: String(r.SHORTCODE ?? ''),
+			animalName: String(r.ANIMALNAME ?? ''),
+			treatmentName: String(r.TREATMENTNAME ?? '').trim(),
+			dosage: String(r.DOSAGE ?? '').trim(),
+			frequency: String(r.NAMEDFREQUENCY ?? '').trim(),
+			comments: String(r.REGIMENCOMMENTS ?? r.COMMENTS ?? '').trim(),
+			startDate: day(r.STARTDATE),
+			nextDue: [prev?.nextDue, due].filter((d): d is string => Boolean(d)).sort()[0] ?? null,
+			remaining: Number(r.TREATMENTSREMAINING) || 0,
+			perPeriod: Number(r.TIMINGRULE) || 0,
+			unit: Number(r.TIMINGRULEFREQUENCY) || 0,
+			every: Number(r.TIMINGRULENOFREQUENCIES) || 1,
+			openEnded: Number(r.TREATMENTRULE) === 1
+		});
+	}
+	return [...byId.values()];
 }

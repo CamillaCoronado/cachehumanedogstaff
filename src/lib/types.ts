@@ -31,6 +31,8 @@ export interface Treatment {
 	notes?: string | null;
 	startDate?: DateValue | null;
 	endDate?: DateValue | null;
+	/** The ASM medical regimen this was filled in from, so a later check doesn't offer it again. */
+	asmRegimenId?: number | null;
 }
 
 export type DogStatus = 'active' | 'adopted' | 'transferred' | 'euthanized';
