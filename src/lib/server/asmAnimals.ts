@@ -3,8 +3,9 @@ import { env } from '$env/dynamic/private';
 /**
  * ASM's service API has no animal search (there is no json_find_animals; unknown methods
  * fail with "Invalid method"). What it does have are lists: animals on the shelter,
- * adoptions between two dates, records changed in the last month, and saved reports.
- * Everything that needs to find an animal reads these and matches locally.
+ * adoptions between two dates, and records changed in the last month. Everything that
+ * needs to find an animal reads these and matches locally, and falls back to searching
+ * ASM's website (searchAsmWebsite) for what they don't show.
  */
 
 /** A dog as ASM's lists describe it. */
@@ -20,13 +21,6 @@ export interface AsmDog {
 	movementDate: string | null;
 	deceasedDate: string | null;
 }
-
-/**
- * Title of a saved ASM report listing dogs that left or died, with ID, SHELTERCODE,
- * SHORTCODE, ANIMALNAME, DECEASEDDATE, ACTIVEMOVEMENTTYPE and ACTIVEMOVEMENTDATE columns.
- * It is the only way to reach a death older than about a month.
- */
-export const DEFAULT_DEPARTURES_REPORT = 'App departures';
 
 export function asmBase(): string | null {
 	const { ASM_URL, ASM_ACCOUNT, ASM_USER, ASM_PASS } = env;
@@ -59,16 +53,14 @@ async function asmGet(base: string, params: string): Promise<Record<string, unkn
 
 export interface AsmDogsResult {
 	dogs: AsmDog[];
-	report: { title: string; rows: number; problem: string | null };
 }
 
 /**
  * Every dog ASM's lists can show: adoptions since `from` (asked a year at a time — ASM caps
- * a response at 1000 rows), recent changes, the departures report, and, with
- * `shelter: true`, the dogs on the shelter now. Only the adoptions are required to load.
+ * a response at 1000 rows), recent changes, and, with `shelter: true`, the dogs on the
+ * shelter now. Only the adoptions are required to load.
  */
 export async function loadAsmDogs(base: string, from: string, opts: { shelter?: boolean } = {}): Promise<AsmDogsResult> {
-	const reportTitle = env.ASM_DEPARTURES_REPORT || DEFAULT_DEPARTURES_REPORT;
 	const today = ymd(new Date());
 	const windows: string[] = [];
 	for (let start = from; start < today; ) {
@@ -80,20 +72,15 @@ export async function loadAsmDogs(base: string, from: string, opts: { shelter?: 
 	if (windows.length === 0) windows.push(`method=json_adopted_animals&fromdate=${from}&todate=${today}`);
 
 	const none = [] as Record<string, unknown>[];
-	const [adopted, changes, shelter, report] = await Promise.all([
+	const [adopted, changes, shelter] = await Promise.all([
 		Promise.all(windows.map((w) => asmGet(base, w))).then((chunks) => chunks.flat()),
 		asmGet(base, 'method=json_recent_changes').catch(() => none),
-		opts.shelter ? asmGet(base, 'method=json_shelter_animals').catch(() => none) : Promise.resolve(none),
-		asmGet(base, `method=json_report&title=${encodeURIComponent(reportTitle)}`).then(
-			(rows) => ({ rows, problem: null as string | null }),
-			(e: Error) => ({ rows: none, problem: e.message })
-		)
+		opts.shelter ? asmGet(base, 'method=json_shelter_animals').catch(() => none) : Promise.resolve(none)
 	]);
 
 	const byId = new Map<string, AsmDog>();
-	const add = (a: Record<string, unknown>, dogsOnly: boolean) => {
-		// The report is expected to be dogs only; the lists carry every species.
-		if (!dogsOnly && String(a.SPECIESNAME ?? '').toLowerCase() !== 'dog') return;
+	const add = (a: Record<string, unknown>) => {
+		if (String(a.SPECIESNAME ?? '').toLowerCase() !== 'dog') return;
 		const id = String(a.ID ?? '');
 		if (!id) return;
 		const type = Number(a.ACTIVEMOVEMENTTYPE);
@@ -109,13 +96,115 @@ export async function loadAsmDogs(base: string, from: string, opts: { shelter?: 
 			deceasedDate: day(a.DECEASEDDATE) ?? prev?.deceasedDate ?? null
 		});
 	};
-	for (const a of adopted) add(a, false);
-	for (const a of shelter) add(a, false);
-	for (const a of changes) add(a, false);
-	for (const a of report.rows) add(a, true);
+	for (const a of adopted) add(a);
+	for (const a of shelter) add(a);
+	for (const a of changes) add(a);
 
+	return { dogs: [...byId.values()] };
+}
+
+/** Turns one ASM row (upper-cased keys) into an AsmDog, or null for another species. */
+function toAsmDog(a: Record<string, unknown>): AsmDog | null {
+	const species = String(a.SPECIESNAME ?? '').toLowerCase();
+	if (species && species !== 'dog') return null;
+	const id = Number(a.ID);
+	if (!Number.isFinite(id) || id <= 0) return null;
+	const type = Number(a.ACTIVEMOVEMENTTYPE);
 	return {
-		dogs: [...byId.values()],
-		report: { title: reportTitle, rows: report.rows.length, problem: report.problem }
+		id,
+		shelterCode: String(a.SHELTERCODE ?? ''),
+		shortCode: String(a.SHORTCODE ?? ''),
+		name: String(a.ANIMALNAME ?? ''),
+		breed: String(a.BREEDNAME ?? ''),
+		movementType: Number.isFinite(type) && type > 0 ? type : null,
+		movementDate: day(a.ACTIVEMOVEMENTDATE),
+		deceasedDate: day(a.DECEASEDDATE)
 	};
+}
+
+/**
+ * ASM's website — the one staff sign in to — can search every animal, deceased ones
+ * included, and answers in JSON when asked with json=true. The service API can't, so
+ * for a dog its lists don't show (a death older than a month), the server signs in to
+ * the website with the same ASM account (approved by an admin) and searches there.
+ */
+type WebSession = { origin: string; cookies: Map<string, string>; at: number };
+let webSession: WebSession | null = null;
+const SESSION_MS = 20 * 60 * 1000;
+
+const cookieHeader = (s: WebSession) => [...s.cookies].map(([k, v]) => `${k}=${v}`).join('; ');
+
+/** One request that keeps ASM's cookies across its redirects (the hosted site routes sign-ins). */
+async function webFetch(s: WebSession, path: string, init: RequestInit = {}): Promise<Response> {
+	let url = new URL(path, s.origin).toString();
+	let req: RequestInit = init;
+	for (let hop = 0; hop < 6; hop++) {
+		const res = await fetch(url, {
+			...req,
+			redirect: 'manual',
+			headers: { ...((req.headers as Record<string, string>) ?? {}), cookie: cookieHeader(s) }
+		});
+		for (const c of res.headers.getSetCookie?.() ?? []) {
+			const [pair] = c.split(';');
+			const eq = pair.indexOf('=');
+			if (eq > 0) s.cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+		}
+		const location = res.headers.get('location');
+		if (res.status < 300 || res.status >= 400 || !location) return res;
+		const next = new URL(location, url);
+		s.origin = next.origin;
+		url = next.toString();
+		req = { method: 'GET' };
+	}
+	throw new Error('ASM website redirected too many times');
+}
+
+async function webSignIn(): Promise<WebSession> {
+	if (webSession && Date.now() - webSession.at < SESSION_MS) return webSession;
+	const { ASM_URL, ASM_WEB_URL, ASM_ACCOUNT, ASM_USER, ASM_PASS } = env;
+	const origin = ASM_WEB_URL || ASM_URL;
+	if (!origin || !ASM_ACCOUNT || !ASM_USER || !ASM_PASS) throw new Error('ASM credentials not configured');
+	const s: WebSession = { origin: new URL(origin).origin, cookies: new Map(), at: Date.now() };
+	const res = await webFetch(s, '/login', {
+		method: 'POST',
+		headers: { 'content-type': 'application/x-www-form-urlencoded' },
+		body: new URLSearchParams({ database: ASM_ACCOUNT, username: ASM_USER, password: ASM_PASS }).toString()
+	});
+	const text = (await res.text()).trim();
+	const problems: Record<string, string> = {
+		FAIL: 'ASM rejected the username or password',
+		BADIP: 'ASM does not allow sign-ins from this server’s address',
+		ASK2FA: 'the ASM user has two-factor sign-in turned on',
+		BAD2FA: 'the ASM user has two-factor sign-in turned on'
+	};
+	if (problems[text]) throw new Error(`Couldn't sign in to the ASM website: ${problems[text]}`);
+	if (!res.ok) throw new Error(`Couldn't sign in to the ASM website (${res.status})`);
+	webSession = s;
+	return s;
+}
+
+/** Searches every animal in ASM, deceased included, the way the search box on its website does. */
+export async function searchAsmWebsite(q: string): Promise<AsmDog[]> {
+	const run = (s: WebSession) => webFetch(s, `/animal_find_results?mode=SIMPLE&json=true&q=${encodeURIComponent(q)}`);
+	let s = await webSignIn();
+	let res = await run(s);
+	let text = await res.text();
+	if (!res.ok || !text.trim().startsWith('{')) {
+		// Probably an expired session sent back to the sign-in page: sign in again once.
+		webSession = null;
+		s = await webSignIn();
+		res = await run(s);
+		text = await res.text();
+	}
+	if (!res.ok) throw new Error(`ASM website search returned ${res.status}`);
+	let data: { rows?: unknown };
+	try {
+		data = JSON.parse(text);
+	} catch {
+		throw new Error(`ASM website search didn't return JSON: ${text.slice(0, 120)}`);
+	}
+	const rows = Array.isArray(data.rows) ? (data.rows as Record<string, unknown>[]) : [];
+	return rows
+		.map((r) => toAsmDog(Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toUpperCase(), v]))))
+		.filter((d): d is AsmDog => d !== null);
 }

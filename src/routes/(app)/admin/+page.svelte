@@ -108,14 +108,6 @@
 	let backfillFixingId: string | null = null;
 	/** What ASM returned on the last dry run, so a typed shelter code is matched without asking again. */
 	let asmFeed: AsmFeedAnimal[] = [];
-	let asmReport: { title: string; rows: number; problem: string | null } | null = null;
-	const REPORT_SQL = `SELECT a.ID, a.ShelterCode, a.ShortCode, a.AnimalName, a.DeceasedDate,
-       a.ActiveMovementType, a.ActiveMovementDate
-FROM animal a
-INNER JOIN species s ON s.ID = a.SpeciesID
-WHERE s.SpeciesName = 'Dog'
-  AND (a.DeceasedDate IS NOT NULL OR a.ActiveMovementDate IS NOT NULL)
-ORDER BY a.ID DESC`;
 
 	async function loadAsmFeed() {
 		const token = await $authUser?.getIdToken();
@@ -125,14 +117,32 @@ ORDER BY a.ID DESC`;
 			body: JSON.stringify({ from: `${new Date().getFullYear()}-01-01` })
 		});
 		if (!res.ok) throw new Error(`ASM lookup failed (${res.status}): ${(await res.text()).slice(0, 160)}`);
-		const data = (await res.json()) as { animals: AsmFeedAnimal[]; report: typeof asmReport };
+		const data = (await res.json()) as { animals: AsmFeedAnimal[] };
 		asmFeed = data.animals;
-		asmReport = data.report;
 	}
 
-	$: notFoundReason = asmReport?.problem
-		? `Not in this year's ASM adoptions or recent changes, and the "${asmReport.title}" report in ASM could not be read (${asmReport.problem}).`
-		: `Not in this year's ASM adoptions, recent changes, or the "${asmReport?.title ?? 'App departures'}" report.`;
+	/** Looks queries (shelter codes or names) up on ASM's website, which covers every animal. */
+	let asmSearchProblem: string | null = null;
+	async function searchAsm(queries: string[]): Promise<AsmFeedAnimal[]> {
+		const token = await $authUser?.getIdToken();
+		const out: AsmFeedAnimal[] = [];
+		for (let i = 0; i < queries.length; i += 25) {
+			const res = await fetch('/api/asm/departure-check', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+				body: JSON.stringify({ search: queries.slice(i, i + 25) })
+			});
+			if (!res.ok) throw new Error(`ASM search failed (${res.status}): ${(await res.text()).slice(0, 160)}`);
+			const data = (await res.json()) as { animals: AsmFeedAnimal[]; problem: string | null };
+			out.push(...data.animals);
+			if (data.problem) asmSearchProblem = data.problem;
+		}
+		return out;
+	}
+
+	$: notFoundReason = asmSearchProblem
+		? `Couldn't search ASM: ${asmSearchProblem}`
+		: 'ASM has no dog with this shelter code or name.';
 
 	// Merge dogs
 	let allDogs: Dog[] = [];
@@ -448,7 +458,18 @@ ORDER BY a.ID DESC`;
 				(d) => d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized'
 			);
 			backfillProgress = 'Loading departures from ASM…';
+			asmSearchProblem = null;
 			await loadAsmFeed();
+			// Anything ASM's lists don't show (a death older than a month, mostly) is searched
+			// for on ASM's website by shelter code, or by name when there is no code.
+			const missing = dogs.filter((d) => !matchFromFeed(d, asmFeed));
+			if (missing.length > 0) {
+				backfillProgress = `Searching ASM for ${missing.length} more dog${missing.length === 1 ? '' : 's'}…`;
+				const extra = await searchAsm(missing.map((d) => d.asmShelterCode?.trim() || d.name));
+				const known = new Set(asmFeed.map((a) => a.id));
+				asmFeed = [...asmFeed, ...extra.filter((a) => !known.has(a.id))];
+			}
+			if (asmSearchProblem) toast.error(`Couldn't search ASM's website: ${asmSearchProblem}`, { duration: 9000 });
 			for (const dog of dogs) {
 				const dep = matchFromFeed(dog, asmFeed) ?? { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: notFoundReason };
 				const result = checkDeparture(dog, dep);
@@ -540,7 +561,14 @@ ORDER BY a.ID DESC`;
 		backfillFixingId = entry.dog.id;
 		try {
 			if (asmFeed.length === 0) await loadAsmFeed();
-			const dep = findByCode(code, asmFeed) ?? { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: notFoundReason };
+			let dep = findByCode(code, asmFeed);
+			if (!dep) {
+				asmSearchProblem = null;
+				const extra = await searchAsm([code]);
+				asmFeed = [...asmFeed, ...extra];
+				dep = findByCode(code, extra);
+			}
+			dep ??= { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: notFoundReason };
 			const result = checkDeparture(entry.dog, dep);
 			if (result.kind === 'fix') {
 				backfillMatched = [
@@ -992,7 +1020,7 @@ ORDER BY a.ID DESC`;
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Departure dates and outcomes from ASM</h3>
 						<p class="section-copy">Fix departure dates and outcomes using ASM.</p>
-						<details class="how-it-works"><summary>How it works</summary><p>Checks every adopted, transferred and deceased dog against ASM — its last movement and date, or its death — and lists each one where the app differs: a wrong date (usually the day the sync noticed rather than the day the dog left) or a wrong outcome. <strong>Nothing changes until you apply, and only ticked dogs.</strong> Reads this year's adoptions, ASM's recent changes, and the departures report from ASM.</p></details>
+						<details class="how-it-works"><summary>How it works</summary><p>Checks every adopted, transferred and deceased dog against ASM — its last movement and date, or its death — and lists each one where the app differs: a wrong date (usually the day the sync noticed rather than the day the dog left) or a wrong outcome. <strong>Nothing changes until you apply, and only ticked dogs.</strong> Reads this year's adoptions and ASM's recent changes, and searches ASM for any dog those don't show.</p></details>
 					</div>
 					<button class="action-btn" type="button" on:click={runBackfillDryRun} disabled={backfillRunning}>
 						{backfillRunning ? 'Checking…' : 'Dry run'}
@@ -1000,19 +1028,6 @@ ORDER BY a.ID DESC`;
 				</div>
 				{#if backfillProgress}
 					<p class="status-meta">{backfillProgress}</p>
-				{/if}
-				{#if asmReport?.problem}
-					<div class="report-setup">
-						<p>
-							<strong>Older deaths need a report in ASM.</strong> ASM only shares adoptions and the last month's
-							changes, so a dog euthanized before that can't be found until this report exists. In ASM, go to
-							Reports → Edit Reports, add a report titled <code>{asmReport.title}</code>, and use this SQL:
-						</p>
-						<pre>{REPORT_SQL}</pre>
-						<p class="report-setup-error">ASM said: {asmReport.problem}</p>
-					</div>
-				{:else if asmReport}
-					<p class="status-meta">Read {asmReport.rows} dogs from the “{asmReport.title}” report in ASM.</p>
 				{/if}
 				{#if backfillRan && backfillMatched.length === 0 && backfillUnknown.length === 0 && backfillStillHere.length === 0}
 					<p class="empty-note">Every archived dog matches ASM — nothing to fix.</p>
@@ -1698,36 +1713,6 @@ ORDER BY a.ID DESC`;
 	.stat-table thead th {
 		color: #526b81;
 		font-weight: 600;
-	}
-
-	.report-setup {
-		margin-top: 0.7rem;
-		padding: 0.8rem 0.9rem;
-		border: 1px solid #e3cf80;
-		border-radius: 0.7rem;
-		background: #fff8e5;
-		font-family: var(--font-ui);
-		font-size: 0.82rem;
-		color: #4d4210;
-	}
-
-	.report-setup p {
-		margin: 0;
-	}
-
-	.report-setup pre {
-		margin: 0.5rem 0;
-		padding: 0.6rem;
-		overflow-x: auto;
-		border-radius: 0.5rem;
-		background: #ffffff;
-		font-size: 0.74rem;
-		white-space: pre;
-	}
-
-	.report-setup-error {
-		color: #7a6200;
-		font-size: 0.76rem;
 	}
 
 	.admin-card-centered {
