@@ -82,6 +82,7 @@ const FIELD_LABELS: Record<string, string> = {
 	inFoster: 'Foster',
 	permanentFoster: 'Permanent foster',
 	isolationStatus: 'Isolation',
+	isolationReason: 'Isolation reason',
 	status: 'Status',
 	asmShelterCode: 'Shelter code',
 	origin: 'Origin'
@@ -156,6 +157,8 @@ export interface AsmAnimal {
 	WEBSITEMEDIADATE?: string | null;
 	// 1 = permanent foster (will not return to shelter)
 	HASPERMANENTFOSTER: number;
+	/** ASM's Quarantine flag — a bite quarantine here. */
+	ISQUARANTINE?: number;
 	// Non-zero = animal has left shelter. 2 = foster, 1 = adoption, 3 = transfer, etc.
 	ACTIVEMOVEMENTTYPE: number;
 	ACTIVEMOVEMENTDATE: string | null;
@@ -216,8 +219,10 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 	const isPermanentFoster = animal.HASPERMANENTFOSTER === 1;
 	const locationName = (animal.DISPLAYLOCATIONNAME ?? '').toLowerCase();
 	const isIncoming = locationName.includes('incoming');
+	// ASM's Quarantine flag is a bite quarantine: isolated whatever the location says.
+	const quarantined = animal.ISQUARANTINE === 1;
 	const isolationStatus: 'none' | 'iso' =
-		locationName.includes('iso') ? 'iso' : 'none';
+		locationName.includes('iso') || quarantined ? 'iso' : 'none';
 	const photoUrl =
 		Array.isArray(animal.PHOTOURLS) && animal.PHOTOURLS.length > 0
 			? animal.PHOTOURLS[0]
@@ -269,6 +274,8 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		inFosterSince: (inFoster || isPermanentFoster) ? normalizeDateStr(animal.ACTIVEMOVEMENTDATE) : null,
 		isIncoming,
 		isolationStatus,
+		// Only written when ASM has it, so a reason staff gave ("sick") isn't wiped.
+		...(quarantined ? { isolationReason: 'bite_quarantine' as const } : {}),
 		permanentFoster: isPermanentFoster,
 		// A permanent foster is still ours: not adopted, not departed. The permanentFoster
 		// flag keeps them off the shelter's lists (feeding, Needs attention, the floor).

@@ -3,6 +3,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { getAdminAuth, getAdminDb } from '$lib/firebase/admin';
 import { syncAnimalsFromASM } from '$lib/data/asm-sync';
 import { createAdminSyncEnvironment } from '$lib/server/asmSyncEnv';
+import { syncMedicalFromASM } from '$lib/server/asmMedicalSync';
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
@@ -15,6 +16,9 @@ import { recordSyncLog, syncLogSince } from '$lib/server/syncLog';
  */
 const MIN_INTERVAL_MS = 5 * 60 * 1000;
 const LOCK_DOC = 'syncState/lastAsmSync';
+
+// The medical pass signs in to ASM's website and reads its medical book on top of the animal sync.
+export const config = { maxDuration: 60 };
 
 export async function POST({ request }: RequestEvent) {
 	// Any signed-in, approved user may trigger a sync. The writes happen here with admin
@@ -63,6 +67,14 @@ export async function POST({ request }: RequestEvent) {
 	if (result.changes.length > 0) {
 		await recordSyncEventsAdmin(result.changes);
 		await recordSyncLog(result.changes).catch((e) => console.error('[sync log]', e));
+	}
+
+	// The Medical page from ASM's medical book, in the same slot. It signs in to ASM's
+	// website, which can fail on its own; that must not fail the animal sync.
+	try {
+		await syncMedicalFromASM();
+	} catch (e) {
+		console.error('[asm medical]', e);
 	}
 
 	// Same five-minute slot, so feeding reports reach the approval queue within minutes
