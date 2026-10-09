@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog } from '$lib/types';
-import { checkDeparture, findByCode, matchFromFeed, type AsmFeedAnimal } from './departureCheck';
+import { checkDeparture, findByCode, matchFromFeed, sameNameDogs, type AsmFeedAnimal } from './departureCheck';
 
 const dog = (o: Partial<Dog>) => ({ id: '1', name: 'Rex', status: 'adopted', leftShelterDate: new Date(2026, 8, 20, 18), ...o }) as Dog;
 const asm = (o: object) => ({ found: true, movementType: 1, movementDate: '2026-09-20', deceasedDate: null, ...o });
@@ -92,5 +92,15 @@ describe('matchFromFeed', () => {
 
 	it('matches an ASM name with an old name in brackets', () => {
 		expect(matchFromFeed(dragon(), [row({ name: 'Dragon(Rex)' })])).toMatchObject({ matchedByName: 'D2026-1' });
+	});
+
+	it('lists same-name dogs for picking, this year first', () => {
+		const feed = [
+			row({ id: 1, shelterCode: '2019-40570' }),
+			row({ id: 2, shelterCode: '2026-1', intakeDate: '2026-01-10' }),
+			row({ id: 3, shelterCode: '2023-5' }),
+			row({ id: 4, name: 'Rex' })
+		];
+		expect(sameNameDogs(dragon(), feed, 2026).map((a) => a.id)).toEqual([2, 3, 1]);
 	});
 });
