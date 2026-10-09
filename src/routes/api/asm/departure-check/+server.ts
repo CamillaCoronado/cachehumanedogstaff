@@ -14,7 +14,7 @@ const day = (v: unknown) => {
 	return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 };
 
-type DogRef = { id: string; asmId?: number | null; shelterCode?: string | null };
+type DogRef = { id: string; name?: string | null; asmId?: number | null; shelterCode?: string | null };
 
 /**
  * Admin-only: what ASM says happened to each dog — its last movement and date, or its
@@ -40,31 +40,82 @@ export async function POST({ request }: RequestEvent) {
 	const body = (await request.json().catch(() => ({}))) as { dogs?: DogRef[] };
 	const dogs = (Array.isArray(body.dogs) ? body.dogs : []).slice(0, MAX_DOGS);
 
-	const none: AsmDeparture = { found: false, movementType: null, movementDate: null, deceasedDate: null };
+	const miss = (missReason: string): AsmDeparture => ({
+		found: false,
+		movementType: null,
+		movementDate: null,
+		deceasedDate: null,
+		missReason
+	});
+	const toDeparture = (a: Record<string, unknown>, matchedByName: string | null): AsmDeparture => {
+		const type = Number(a.ACTIVEMOVEMENTTYPE);
+		return {
+			found: true,
+			movementType: Number.isFinite(type) && type > 0 ? type : null,
+			movementDate: day(a.ACTIVEMOVEMENTDATE),
+			deceasedDate: day(a.DECEASEDDATE),
+			matchedByName
+		};
+	};
+
+	/** One search, retried once: a failed request must not read as "not in ASM". */
+	const search = async (q: string): Promise<Record<string, unknown>[] | string> => {
+		let last = '';
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				const res = await fetch(`${base}&method=json_find_animals&q=${encodeURIComponent(q)}`);
+				if (!res.ok) {
+					last = `ASM returned ${res.status}`;
+					continue;
+				}
+				const rows = await res.json();
+				return Array.isArray(rows) ? rows : [];
+			} catch (e) {
+				last = e instanceof Error ? e.message : String(e);
+			}
+		}
+		return last || 'ASM lookup failed';
+	};
+
 	const lookup = async (d: DogRef): Promise<[string, AsmDeparture]> => {
-		const q = d.shelterCode || (d.asmId ? String(d.asmId) : '');
-		if (!q) return [d.id, none];
-		try {
-			const res = await fetch(`${base}&method=json_find_animals&q=${encodeURIComponent(q)}`);
-			if (!res.ok) return [d.id, none];
-			const rows = (await res.json()) as Record<string, unknown>[];
-			const a = (Array.isArray(rows) ? rows : []).find(
+		const ids = [...new Set([d.shelterCode, d.asmId ? String(d.asmId) : null].filter((q): q is string => Boolean(q)))];
+		const failures: string[] = [];
+		for (const q of ids) {
+			const rows = await search(q);
+			if (typeof rows === 'string') {
+				failures.push(rows);
+				continue;
+			}
+			const a = rows.find(
 				(r) => (d.asmId && Number(r.ID) === d.asmId) || (d.shelterCode && String(r.SHELTERCODE ?? '') === d.shelterCode)
 			);
-			if (!a) return [d.id, none];
-			const type = Number(a.ACTIVEMOVEMENTTYPE);
-			return [
-				d.id,
-				{
-					found: true,
-					movementType: Number.isFinite(type) && type > 0 ? type : null,
-					movementDate: day(a.ACTIVEMOVEMENTDATE),
-					deceasedDate: day(a.DECEASEDDATE)
-				}
-			];
-		} catch {
-			return [d.id, none];
+			if (a) return [d.id, toDeparture(a, null)];
 		}
+
+		// The ids missed (or there are none): try the name, but only take a single dog by
+		// that exact name, and flag it so the admin checks it is the same animal.
+		const name = d.name?.trim();
+		if (name) {
+			const rows = await search(name);
+			if (typeof rows === 'string') {
+				failures.push(rows);
+			} else {
+				const dogs = rows.filter(
+					(r) =>
+						String(r.ANIMALNAME ?? '').trim().toLowerCase() === name.toLowerCase() &&
+						String(r.SPECIESNAME ?? 'dog').toLowerCase() === 'dog'
+				);
+				if (dogs.length === 1) return [d.id, toDeparture(dogs[0], String(dogs[0].SHELTERCODE ?? dogs[0].ID ?? '?'))];
+				if (dogs.length > 1) {
+					const codes = dogs.map((r) => String(r.SHELTERCODE ?? r.ID)).join(', ');
+					return [d.id, miss(`ids not found; ${dogs.length} dogs named ${name} in ASM (${codes})`)];
+				}
+			}
+		}
+
+		if (failures.length > 0) return [d.id, miss(`lookup failed: ${failures[0]}`)];
+		if (ids.length === 0) return [d.id, miss('no ASM id or shelter code on record, and no dog by that name')];
+		return [d.id, miss(`ASM has no animal matching ${ids.join(' / ')} or the name`)];
 	};
 
 	// A few at a time: ASM is one small server.

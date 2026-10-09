@@ -11,6 +11,10 @@ export interface AsmDeparture {
 	movementDate: string | null;
 	/** YYYY-MM-DD of death, if any — outranks any movement. */
 	deceasedDate: string | null;
+	/** Found by name alone (the ids missed): the ASM shelter code it matched, to double-check. */
+	matchedByName?: string | null;
+	/** Why it was not found: no ids on record, a failed lookup, or a search that missed. */
+	missReason?: string | null;
 }
 
 const MOVEMENT_LABELS: Record<number, string> = {
@@ -26,10 +30,10 @@ const MOVEMENT_LABELS: Record<number, string> = {
 
 export type DepartureCheck =
 	| { kind: 'ok' }
-	| { kind: 'not-found' }
+	| { kind: 'not-found'; reason: string | null }
 	/** ASM shows the dog on the shelter or in foster, but the app has it archived. */
 	| { kind: 'still-here'; label: string }
-	| { kind: 'fix'; status: Dog['status']; date: string; reason: string };
+	| { kind: 'fix'; status: Dog['status']; date: string; reason: string; byName: boolean };
 
 const localDay = (value: Dog['leftShelterDate']) => {
 	const d = toDate(value ?? null);
@@ -42,7 +46,7 @@ const localDay = (value: Dog['leftShelterDate']) => {
  * closer) and its date is the departure date. Anything that differs is a fix.
  */
 export function checkDeparture(dog: Dog, asm: AsmDeparture): DepartureCheck {
-	if (!asm.found) return { kind: 'not-found' };
+	if (!asm.found) return { kind: 'not-found', reason: asm.missReason ?? null };
 
 	let status: Dog['status'] = dog.status;
 	let date: string | null;
@@ -67,5 +71,6 @@ export function checkDeparture(dog: Dog, asm: AsmDeparture): DepartureCheck {
 	const parts: string[] = [];
 	if (status !== dog.status) parts.push(`${dog.status} → ${status}`);
 	if (currentDay !== date) parts.push(`${currentDay ?? 'no date'} → ${date}`);
-	return { kind: 'fix', status, date, reason: `ASM: ${what}. ${parts.join(', ')}` };
+	const byName = asm.matchedByName ? ` Matched by name only (ASM ${asm.matchedByName}) — check it is the same dog.` : '';
+	return { kind: 'fix', status, date, reason: `ASM: ${what}. ${parts.join(', ')}.${byName}`, byName: Boolean(asm.matchedByName) };
 }

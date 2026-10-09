@@ -28,4 +28,17 @@ describe('checkDeparture', () => {
 		const r = checkDeparture(dog({ leftShelterDate: null }), asm({ movementType: 5, movementDate: '2026-08-01' }));
 		expect(r).toMatchObject({ kind: 'fix', status: 'adopted', date: '2026-08-01' });
 	});
+
+	it('passes on why a dog was not found', () => {
+		expect(checkDeparture(dog({}), { ...asm({}), found: false, missReason: 'lookup failed: ASM returned 503' })).toEqual({
+			kind: 'not-found',
+			reason: 'lookup failed: ASM returned 503'
+		});
+	});
+
+	it('flags a fix found by name only', () => {
+		const r = checkDeparture(dog({}), asm({ deceasedDate: '2026-09-18', matchedByName: 'D2025-14' }));
+		expect(r).toMatchObject({ kind: 'fix', status: 'euthanized', byName: true });
+		if (r.kind === 'fix') expect(r.reason).toContain('D2025-14');
+	});
 });

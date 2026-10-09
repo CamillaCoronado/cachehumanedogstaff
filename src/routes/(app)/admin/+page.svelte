@@ -95,8 +95,8 @@
 	let savingUserId: string | null = null;
 
 	// One-time backfill: archived dogs missing a departure date
-	type DateFix = { dog: Dog; date: string; source: string; status: Dog['status'] };
-	type DateUnknown = { dog: Dog; manualDate: string };
+	type DateFix = { dog: Dog; date: string; source: string; status: Dog['status']; byName: boolean };
+	type DateUnknown = { dog: Dog; manualDate: string; reason: string | null };
 	let backfillRunning = false;
 	let backfillRan = false;
 	let backfillMatched: DateFix[] = [];
@@ -400,7 +400,9 @@
 				(d) => d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized'
 			);
 			const token = await $authUser?.getIdToken();
-			const BATCH = 25;
+			// Each dog can take a few ASM searches now (both ids, then its name), so keep
+			// batches small enough to finish inside the server's time limit.
+			const BATCH = 10;
 			for (let i = 0; i < dogs.length; i += BATCH) {
 				backfillProgress = `Checked ${i} of ${dogs.length} in ASM…`;
 				const batch = dogs.slice(i, i + BATCH);
@@ -410,6 +412,7 @@
 					body: JSON.stringify({
 						dogs: batch.map((d) => ({
 							id: d.id,
+							name: d.name,
 							asmId: d.asmId ?? (/^\d+$/.test(d.id) ? Number(d.id) : null),
 							shelterCode: d.asmShelterCode ?? null
 						}))
@@ -420,7 +423,7 @@
 				for (const dog of batch) {
 					const result = checkDeparture(dog, found[dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null });
 					if (result.kind === 'fix') {
-						backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status }];
+						backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status, byName: result.byName }];
 					} else if (result.kind === 'still-here') {
 						backfillStillHere = [...backfillStillHere, { dog, label: result.label }];
 					} else if (result.kind === 'not-found' && !toDate(dog.leftShelterDate)) {
@@ -430,12 +433,13 @@
 						const approx = archivedAt
 							? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
 							: '';
-						backfillUnknown = [...backfillUnknown, { dog, manualDate: approx }];
+						backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason }];
 					}
 				}
 			}
 			backfillMatched.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
-			backfillSelected = backfillMatched.map((f) => f.dog.id);
+			// Name-only matches start unticked: someone should confirm it is the same dog.
+			backfillSelected = backfillMatched.filter((f) => !f.byName).map((f) => f.dog.id);
 			backfillUnknown.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
 			backfillProgress = `Checked all ${dogs.length} archived dogs in ASM.`;
 			backfillRan = true;
@@ -972,7 +976,7 @@
 				{#if backfillUnknown.length > 0}
 					<div class="status-row-plain">
 						<span class="status-meta">
-							{backfillUnknown.length} dog{backfillUnknown.length === 1 ? '' : 's'} with no exact date in ASM.
+							{backfillUnknown.length} dog{backfillUnknown.length === 1 ? '' : 's'} not matched in ASM, so no date from there (the reason is under each name).
 							Pre-filled dates are the day the sync archived the dog (usually within a day of the real departure) — adjust any, then set individually or all at once.
 						</span>
 					</div>
@@ -982,6 +986,7 @@
 								<div class="user-main">
 									<p class="suspect-name">{entry.dog.name}</p>
 									<p class="suspect-detail">{entry.dog.status} · {entry.manualDate ? 'approximate date from archive time' : 'no date on record — set by hand'}</p>
+									{#if entry.reason}<p class="suspect-detail">{entry.reason}</p>{/if}
 								</div>
 								<div class="repair-actions">
 									<input type="date" class="field-input backfill-date-input" bind:value={entry.manualDate} />
