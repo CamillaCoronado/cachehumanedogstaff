@@ -10,7 +10,7 @@
 	import CheckList from '$lib/components/admin/CheckList.svelte';
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
-	import { checkDeparture, matchFromFeed, type AsmDeparture, type AsmFeedAnimal } from '$lib/utils/departureCheck';
+	import { checkDeparture, findByCode, matchFromFeed, type AsmFeedAnimal } from '$lib/utils/departureCheck';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
 	import { adoptionStays, turnaroundByMonth, turnaroundWindows } from '$lib/utils/adoptionTurnaround';
@@ -106,6 +106,33 @@
 	let backfillUnknown: DateUnknown[] = [];
 	let backfillApplying = false;
 	let backfillFixingId: string | null = null;
+	/** What ASM returned on the last dry run, so a typed shelter code is matched without asking again. */
+	let asmFeed: AsmFeedAnimal[] = [];
+	let asmReport: { title: string; rows: number; problem: string | null } | null = null;
+	const REPORT_SQL = `SELECT a.ID, a.ShelterCode, a.ShortCode, a.AnimalName, a.DeceasedDate,
+       a.ActiveMovementType, a.ActiveMovementDate
+FROM animal a
+INNER JOIN species s ON s.ID = a.SpeciesID
+WHERE s.SpeciesName = 'Dog'
+  AND (a.DeceasedDate IS NOT NULL OR a.ActiveMovementDate IS NOT NULL)
+ORDER BY a.ID DESC`;
+
+	async function loadAsmFeed() {
+		const token = await $authUser?.getIdToken();
+		const res = await fetch('/api/asm/departure-check', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+			body: JSON.stringify({ from: `${new Date().getFullYear()}-01-01` })
+		});
+		if (!res.ok) throw new Error(`ASM lookup failed (${res.status}): ${(await res.text()).slice(0, 160)}`);
+		const data = (await res.json()) as { animals: AsmFeedAnimal[]; report: typeof asmReport };
+		asmFeed = data.animals;
+		asmReport = data.report;
+	}
+
+	$: notFoundReason = asmReport?.problem
+		? `Not in this year's ASM adoptions or recent changes, and the "${asmReport.title}" report in ASM could not be read (${asmReport.problem}).`
+		: `Not in this year's ASM adoptions, recent changes, or the "${asmReport?.title ?? 'App departures'}" report.`;
 
 	// Merge dogs
 	let allDogs: Dog[] = [];
@@ -420,14 +447,10 @@
 			const dogs = (await listDogs()).filter(
 				(d) => d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized'
 			);
-			const token = await $authUser?.getIdToken();
-			const post = (body: unknown) =>
-				fetch('/api/asm/departure-check', {
-					method: 'POST',
-					headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-					body: JSON.stringify(body)
-				});
-			const sort = (dog: Dog, dep: AsmDeparture) => {
+			backfillProgress = 'Loading departures from ASM…';
+			await loadAsmFeed();
+			for (const dog of dogs) {
+				const dep = matchFromFeed(dog, asmFeed) ?? { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: notFoundReason };
 				const result = checkDeparture(dog, dep);
 				if (result.kind === 'fix') {
 					backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status, byName: result.byName }];
@@ -441,45 +464,6 @@
 						? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
 						: '';
 					backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason, code: dog.asmShelterCode ?? '' }];
-				}
-			};
-
-			// First this year's adoptions and recent deaths from ASM in one request, matched
-			// here by id, shelter code or name. Only dogs that misses go to the per-dog search.
-			backfillProgress = 'Loading this year’s ASM adoptions…';
-			let left = dogs;
-			try {
-				const res = await post({ feed: { from: `${new Date().getFullYear()}-01-01` } });
-				if (!res.ok) throw new Error(`ASM feed failed (${res.status})`);
-				const { animals } = (await res.json()) as { animals: AsmFeedAnimal[] };
-				left = [];
-				for (const dog of dogs) {
-					const dep = matchFromFeed(dog, animals);
-					if (dep) sort(dog, dep);
-					else left.push(dog);
-				}
-			} catch (e) {
-				toast.error((e instanceof Error ? e.message : String(e)) + ' — searching dog by dog instead.');
-			}
-
-			// Each dog can take a few ASM searches (both ids, then its name), so keep
-			// batches small enough to finish inside the server's time limit.
-			const BATCH = 10;
-			for (let i = 0; i < left.length; i += BATCH) {
-				backfillProgress = `Searched ${i} of ${left.length} remaining dogs in ASM…`;
-				const batch = left.slice(i, i + BATCH);
-				const res = await post({
-					dogs: batch.map((d) => ({
-						id: d.id,
-						name: d.name,
-						asmId: d.asmId ?? (/^\d+$/.test(d.id) ? Number(d.id) : null),
-						shelterCode: d.asmShelterCode ?? null
-					}))
-				});
-				if (!res.ok) throw new Error(`ASM lookup failed (${res.status})`);
-				const found: Record<string, AsmDeparture> = await res.json();
-				for (const dog of batch) {
-					sort(dog, found[dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null });
 				}
 			}
 			backfillMatched.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
@@ -555,15 +539,8 @@
 		}
 		backfillFixingId = entry.dog.id;
 		try {
-			const token = await $authUser?.getIdToken();
-			const res = await fetch('/api/asm/departure-check', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-				body: JSON.stringify({ dogs: [{ id: entry.dog.id, shelterCode: code }] })
-			});
-			if (!res.ok) throw new Error(`ASM lookup failed (${res.status})`);
-			const found: Record<string, AsmDeparture> = await res.json();
-			const dep = found[entry.dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null };
+			if (asmFeed.length === 0) await loadAsmFeed();
+			const dep = findByCode(code, asmFeed) ?? { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: notFoundReason };
 			const result = checkDeparture(entry.dog, dep);
 			if (result.kind === 'fix') {
 				backfillMatched = [
@@ -579,7 +556,7 @@
 				toast.error(`ASM has ${code}, but no departure or death date on it.`);
 			} else {
 				backfillUnknown = backfillUnknown.map((u) => (u.dog.id === entry.dog.id ? { ...u, reason: result.reason } : u));
-				toast.error(`No animal with shelter code ${code} in ASM.`);
+				toast.error(`${code}: ${result.reason ?? notFoundReason}`, { duration: 9000 });
 			}
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : String(e));
@@ -1015,7 +992,7 @@
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Departure dates and outcomes from ASM</h3>
 						<p class="section-copy">Fix departure dates and outcomes using ASM.</p>
-						<details class="how-it-works"><summary>How it works</summary><p>Checks every adopted, transferred and deceased dog against ASM — its last movement and date, or its death — and lists each one where the app differs: a wrong date (usually the day the sync noticed rather than the day the dog left) or a wrong outcome. <strong>Nothing changes until you apply, and only ticked dogs.</strong> Asks ASM a few dogs at a time, so it takes a little while.</p></details>
+						<details class="how-it-works"><summary>How it works</summary><p>Checks every adopted, transferred and deceased dog against ASM — its last movement and date, or its death — and lists each one where the app differs: a wrong date (usually the day the sync noticed rather than the day the dog left) or a wrong outcome. <strong>Nothing changes until you apply, and only ticked dogs.</strong> Reads this year's adoptions, ASM's recent changes, and the departures report from ASM.</p></details>
 					</div>
 					<button class="action-btn" type="button" on:click={runBackfillDryRun} disabled={backfillRunning}>
 						{backfillRunning ? 'Checking…' : 'Dry run'}
@@ -1023,6 +1000,19 @@
 				</div>
 				{#if backfillProgress}
 					<p class="status-meta">{backfillProgress}</p>
+				{/if}
+				{#if asmReport?.problem}
+					<div class="report-setup">
+						<p>
+							<strong>Older deaths need a report in ASM.</strong> ASM only shares adoptions and the last month's
+							changes, so a dog euthanized before that can't be found until this report exists. In ASM, go to
+							Reports → Edit Reports, add a report titled <code>{asmReport.title}</code>, and use this SQL:
+						</p>
+						<pre>{REPORT_SQL}</pre>
+						<p class="report-setup-error">ASM said: {asmReport.problem}</p>
+					</div>
+				{:else if asmReport}
+					<p class="status-meta">Read {asmReport.rows} dogs from the “{asmReport.title}” report in ASM.</p>
 				{/if}
 				{#if backfillRan && backfillMatched.length === 0 && backfillUnknown.length === 0 && backfillStillHere.length === 0}
 					<p class="empty-note">Every archived dog matches ASM — nothing to fix.</p>
@@ -1707,6 +1697,36 @@
 	.stat-table thead th {
 		color: #526b81;
 		font-weight: 600;
+	}
+
+	.report-setup {
+		margin-top: 0.7rem;
+		padding: 0.8rem 0.9rem;
+		border: 1px solid #e3cf80;
+		border-radius: 0.7rem;
+		background: #fff8e5;
+		font-family: var(--font-ui);
+		font-size: 0.82rem;
+		color: #4d4210;
+	}
+
+	.report-setup p {
+		margin: 0;
+	}
+
+	.report-setup pre {
+		margin: 0.5rem 0;
+		padding: 0.6rem;
+		overflow-x: auto;
+		border-radius: 0.5rem;
+		background: #ffffff;
+		font-size: 0.74rem;
+		white-space: pre;
+	}
+
+	.report-setup-error {
+		color: #7a6200;
+		font-size: 0.76rem;
 	}
 
 	.admin-card-centered {

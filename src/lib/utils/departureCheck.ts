@@ -21,10 +21,23 @@ export interface AsmDeparture {
 export interface AsmFeedAnimal {
 	id: number;
 	shelterCode: string;
+	/** ASM's short code, the other code shown on an animal's record. */
+	shortCode: string;
 	name: string;
 	movementType: number | null;
 	movementDate: string | null;
 	deceasedDate: string | null;
+}
+
+const sameCode = (a: AsmFeedAnimal, code: string) => {
+	const c = code.trim().toUpperCase();
+	return Boolean(c) && (a.shelterCode.trim().toUpperCase() === c || a.shortCode.trim().toUpperCase() === c);
+};
+
+/** The feed animal with this shelter code or short code, typed in by hand. */
+export function findByCode(code: string, feed: AsmFeedAnimal[]): AsmDeparture | null {
+	const a = feed.find((x) => sameCode(x, code));
+	return a ? { found: true, movementType: a.movementType, movementDate: a.movementDate, deceasedDate: a.deceasedDate } : null;
 }
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -36,7 +49,7 @@ const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
  */
 export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | null {
 	const asmId = dog.asmId ?? (/^\d+$/.test(dog.id) ? Number(dog.id) : null);
-	const code = (dog.asmShelterCode ?? '').trim().toUpperCase();
+	const code = dog.asmShelterCode ?? '';
 	const toDeparture = (a: AsmFeedAnimal, matchedByName: string | null): AsmDeparture => ({
 		found: true,
 		movementType: a.movementType,
@@ -44,7 +57,7 @@ export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | n
 		deceasedDate: a.deceasedDate,
 		matchedByName
 	});
-	const direct = feed.find((a) => (asmId !== null && a.id === asmId) || (code && a.shelterCode.trim().toUpperCase() === code));
+	const direct = feed.find((a) => (asmId !== null && a.id === asmId) || sameCode(a, code));
 	if (direct) return toDeparture(direct, null);
 
 	const name = dog.name.trim().toLowerCase();
