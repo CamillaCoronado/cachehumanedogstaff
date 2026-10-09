@@ -149,7 +149,7 @@ interface StoredDog {
 	sickHold?: boolean;
 	sickHoldReason?: string | null;
 	sickHoldSince?: string | null;
-	sickHoldFromAsm?: boolean;
+	sickSuggestDismissed?: string | null;
 	sickMonitor?: boolean;
 	sickMonitorReason?: string | null;
 	sickMonitorSince?: string | null;
@@ -486,7 +486,7 @@ function serializeDog(dog: Dog): StoredDog {
 		sickHold: dog.sickHold ?? false,
 		sickHoldReason: dog.sickHold ? (dog.sickHoldReason ?? null) : null,
 		sickHoldSince: dog.sickHold ? (toDateString(dog.sickHoldSince) ?? null) : null,
-		sickHoldFromAsm: dog.sickHold ? (dog.sickHoldFromAsm ?? false) : false,
+		sickSuggestDismissed: dog.sickSuggestDismissed ?? null,
 		sickMonitor: dog.sickMonitor ?? false,
 		sickMonitorReason: dog.sickMonitor ? (dog.sickMonitorReason ?? null) : null,
 		sickMonitorSince: dog.sickMonitor ? (toDateString(dog.sickMonitorSince) ?? null) : null,
@@ -697,7 +697,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		sickHold: stored.sickHold ?? false,
 		sickHoldReason: stored.sickHold ? (stored.sickHoldReason ?? null) : null,
 		sickHoldSince: stored.sickHold && stored.sickHoldSince ? toDate(stored.sickHoldSince) : null,
-		sickHoldFromAsm: stored.sickHold ? (stored.sickHoldFromAsm ?? false) : false,
+		sickSuggestDismissed: stored.sickSuggestDismissed ?? null,
 		sickMonitor: stored.sickMonitor ?? false,
 		sickMonitorReason: stored.sickMonitor ? (stored.sickMonitorReason ?? null) : null,
 		sickMonitorSince: stored.sickMonitor && stored.sickMonitorSince ? toDate(stored.sickMonitorSince) : null,

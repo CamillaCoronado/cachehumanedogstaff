@@ -61,9 +61,10 @@ export function regimenKind(name: string, openEnded: boolean): RegimenKind {
 }
 
 /**
- * Treatments that mean a dog could spread what it has, and what to call it. Matched on
- * the regimen's name, dosage and comments, so "Doxycycline — URI" and "URI meds" both
- * count. Routine dewormers don't: fenbendazole alone isn't here, giardia is.
+ * Treatments that suggest a dog could spread what it has, and what to call it. Matched on
+ * the treatment's name, reason and notes (ASM's dosage and comments land in the notes), so
+ * "Doxycycline" and "Clavamox — for kennel cough" both count. Routine dewormers don't:
+ * fenbendazole alone isn't here, giardia is.
  */
 export const CONTAGIOUS: { label: string; match: RegExp }[] = [
 	{ label: 'URI', match: /\buri\b|upper resp|kennel cough|\bcirdc\b|bordetella|canine flu|influenza|doxycycline|\bdoxy\b/i },
@@ -75,10 +76,19 @@ export const CONTAGIOUS: { label: string; match: RegExp }[] = [
 	{ label: 'mange', match: /sarcoptic|scabies/i }
 ];
 
-/** What a regimen says the dog could spread, or null. */
-export function contagionOf(r: Pick<AsmRegimen, 'treatmentName' | 'dosage' | 'comments'>): string | null {
-	const text = [r.treatmentName, r.dosage, r.comments].join(' ');
-	return CONTAGIOUS.find((c) => c.match.test(text))?.label ?? null;
+/** What a treatment's text says the dog could spread, or null. */
+export function contagionOf(...text: (string | null | undefined)[]): string | null {
+	const all = text.filter(Boolean).join(' ');
+	return CONTAGIOUS.find((c) => c.match.test(all))?.label ?? null;
+}
+
+/**
+ * What a dog's treatments say it could spread ("URI, giardia"), or null. The Medical page
+ * suggests marking such a dog sick; it never marks it on its own.
+ */
+export function dogContagion(treatments: { name: string; condition?: string | null; notes?: string | null }[]): string | null {
+	const found = [...new Set(treatments.map((t) => contagionOf(t.name, t.condition, t.notes)).filter((c): c is string => Boolean(c)))].sort();
+	return found.length > 0 ? found.join(', ') : null;
 }
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -184,7 +194,7 @@ const byDue = (a: AsmRegimen, b: AsmRegimen) => (a.nextDue ?? '9999').localeComp
  * The fields to write on one dog so its Medical page matches ASM, or null when nothing
  * changes. `regimens` are the dog's active ones; `given`, its doses given lately.
  */
-export function planDogMedical(doc: Doc, regimens: AsmRegimen[], given: AsmGivenDose[], today: string, newId: () => string, nowIso = new Date().toISOString()): Doc | null {
+export function planDogMedical(doc: Doc, regimens: AsmRegimen[], given: AsmGivenDose[], today: string, newId: () => string): Doc | null {
 	const patch: Doc = {};
 	const kind = (r: { treatmentName: string; openEnded: boolean }) => regimenKind(r.treatmentName, r.openEnded);
 
@@ -253,32 +263,6 @@ export function planDogMedical(doc: Doc, regimens: AsmRegimen[], given: AsmGiven
 	}
 	if (surgeryDay && surgeryDay < today && !doneDays.some((d) => d >= surgeryDay! && d <= today)) {
 		Object.assign(patch, { surgeryDate: null, surgeryRestDays: null, surgeryAsmRegimenId: null });
-	}
-
-	// Sick: a dog on a contagious treatment in ASM goes on sick hold (red zone, staff-only,
-	// no playgroups or day trips) with what it has as the reason. When ASM's last one ends
-	// the sync lifts the hold it set. A hold staff set by hand is left alone either way.
-	const spreading = [...new Set(txRegimens.map(contagionOf).filter((c): c is string => Boolean(c)))].sort();
-	if (spreading.length > 0) {
-		const reason = spreading.join(', ');
-		if (!doc.sickHold) {
-			Object.assign(patch, {
-				sickHold: true,
-				sickHoldReason: reason,
-				sickHoldSince: nowIso,
-				sickHoldFromAsm: true,
-				// Sick and monitor don't go together; monitor is for after.
-				sickMonitor: false,
-				sickMonitorReason: null,
-				sickMonitorSince: null
-			});
-		} else if (doc.sickHoldFromAsm && doc.sickHoldReason !== reason) {
-			patch.sickHoldReason = reason;
-		}
-	} else if (doc.sickHold && doc.sickHoldFromAsm) {
-		Object.assign(patch, { sickHold: false, sickHoldReason: null, sickHoldSince: null, sickHoldFromAsm: false, enrichmentResetDate: nowIso });
-		const fleasAfter = 'hasFleas' in patch ? patch.hasFleas : doc.hasFleas;
-		if (!fleasAfter && doc.handlingLevelBeforeHold) Object.assign(patch, { handlingLevel: doc.handlingLevelBeforeHold, handlingLevelBeforeHold: null });
 	}
 
 	return Object.keys(patch).length > 0 ? patch : null;
