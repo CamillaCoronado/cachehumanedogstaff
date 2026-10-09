@@ -225,6 +225,9 @@ export interface Dog {
 	sickHold?: boolean;
 	sickHoldReason?: string | null;
 	sickHoldSince?: DateValue | null;
+	/** Set by the ASM sync from a contagious treatment, so the sync clears it when ASM's
+	 *  treatment ends; a hold staff set by hand is never cleared by the sync. */
+	sickHoldFromAsm?: boolean;
 	/** Watch state — the step before treatment: the dog is being observed for symptoms
 	 *  (or re-observed after finishing treatment/an outbreak). Purely informational (no
 	 *  handling/playgroup/adoption effects). Mutually exclusive with sickHold, and

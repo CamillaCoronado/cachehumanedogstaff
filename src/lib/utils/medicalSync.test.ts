@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lastDoseDate, planDogMedical, planMedicalSync, regimenKind, storedDay, type AsmGivenDose, type AsmRegimen } from './medicalSync';
+import { contagionOf, lastDoseDate, planDogMedical, planMedicalSync, regimenKind, storedDay, type AsmGivenDose, type AsmRegimen } from './medicalSync';
 
 const reg = (o: Partial<AsmRegimen>): AsmRegimen => ({
 	regimenId: 10,
@@ -76,7 +76,7 @@ describe('treatments', () => {
 
 	it('writes nothing when the app already matches ASM', () => {
 		const first = plan({}, [reg({})])!;
-		expect(plan({ treatments: first.treatments }, [reg({})])).toBeNull();
+		expect(plan({ treatments: first.treatments, sickHold: true, sickHoldFromAsm: true, sickHoldReason: 'URI' }, [reg({})])).toBeNull();
 	});
 
 	it('keeps surgery, FortiFlora and flea regimens off the treatment list', () => {
@@ -152,5 +152,46 @@ describe('planMedicalSync', () => {
 		const regimens = [reg({}), reg({ regimenId: 11, animalId: 999, shelterCode: '2026D0099' }), reg({ regimenId: 12, animalId: 501 }), reg({ regimenId: 13, animalId: 502 })];
 		const writes = planMedicalSync(docs, { regimens, given: [] }, TODAY, () => 'x');
 		expect(writes.map((w) => w.id)).toEqual(['500', 'app1']);
+	});
+});
+
+describe('sick', () => {
+	const NOW = '2026-10-09T20:00:00.000Z';
+	const sick = (doc: Record<string, unknown>, regimens: AsmRegimen[] = []) =>
+		planDogMedical({ status: 'active', treatments: [], ...doc }, regimens, [], TODAY, () => 'new-id', NOW);
+
+	it('puts a dog on a contagious treatment on sick hold, named for what it has', () => {
+		expect(sick({ sickMonitor: true }, [reg({}), reg({ regimenId: 11, treatmentName: 'Metronidazole' })])).toMatchObject({
+			sickHold: true,
+			sickHoldReason: 'URI, giardia',
+			sickHoldSince: NOW,
+			sickHoldFromAsm: true,
+			sickMonitor: false
+		});
+	});
+
+	it('reads what the treatment is for from its comments too', () => {
+		expect(contagionOf({ treatmentName: 'Clavamox', dosage: '', comments: 'for kennel cough' })).toBe('URI');
+		expect(contagionOf({ treatmentName: 'Clavamox', dosage: '', comments: 'skin infection' })).toBeNull();
+	});
+
+	it('leaves a dog on a non-contagious treatment off sick hold', () => {
+		expect(sick({}, [reg({ treatmentName: 'Carprofen' })])?.sickHold).toBeUndefined();
+	});
+
+	it('lifts the hold ASM set once ASM is done, and restores handling', () => {
+		expect(sick({ sickHold: true, sickHoldFromAsm: true, sickHoldReason: 'URI', handlingLevelBeforeHold: 'volunteer' })).toEqual({
+			sickHold: false,
+			sickHoldReason: null,
+			sickHoldSince: null,
+			sickHoldFromAsm: false,
+			enrichmentResetDate: NOW,
+			handlingLevel: 'volunteer',
+			handlingLevelBeforeHold: null
+		});
+	});
+
+	it('never lifts a hold staff set by hand', () => {
+		expect(sick({ sickHold: true, sickHoldReason: 'vomiting' })).toBeNull();
 	});
 });
