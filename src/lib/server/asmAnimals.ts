@@ -183,8 +183,25 @@ async function webSignIn(): Promise<WebSession> {
 	return s;
 }
 
+/**
+ * What one website search returned, in brief, so a miss can say what ASM actually sent
+ * back instead of a bare "not found".
+ */
+export interface AsmSearchSummary {
+	q: string;
+	rows: number;
+	/** Up to five rows as "code name (species)". */
+	sample: string[];
+	/** Top-level keys of the response, in case the rows are somewhere else. */
+	keys: string[];
+}
+
 /** Searches every animal in ASM, deceased included, the way the search box on its website does. */
 export async function searchAsmWebsite(q: string): Promise<AsmDog[]> {
+	return (await searchAsmWebsiteWithSummary(q)).dogs;
+}
+
+export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: AsmDog[]; summary: AsmSearchSummary }> {
 	const run = (s: WebSession) => webFetch(s, `/animal_find_results?mode=SIMPLE&json=true&q=${encodeURIComponent(q)}`);
 	let s = await webSignIn();
 	let res = await run(s);
@@ -203,8 +220,18 @@ export async function searchAsmWebsite(q: string): Promise<AsmDog[]> {
 	} catch {
 		throw new Error(`ASM website search didn't return JSON: ${text.slice(0, 120)}`);
 	}
-	const rows = Array.isArray(data.rows) ? (data.rows as Record<string, unknown>[]) : [];
-	return rows
-		.map((r) => toAsmDog(Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toUpperCase(), v]))))
-		.filter((d): d is AsmDog => d !== null);
+	const rows = (Array.isArray(data.rows) ? (data.rows as Record<string, unknown>[]) : []).map((r) =>
+		Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toUpperCase(), v]))
+	);
+	return {
+		dogs: rows.map(toAsmDog).filter((d): d is AsmDog => d !== null),
+		summary: {
+			q,
+			rows: rows.length,
+			sample: rows
+				.slice(0, 5)
+				.map((r) => `${r.SHELTERCODE ?? r.CODE ?? '?'} ${r.ANIMALNAME ?? '?'} (${r.SPECIESNAME ?? 'no species'})`),
+			keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 8) : []
+		}
+	};
 }

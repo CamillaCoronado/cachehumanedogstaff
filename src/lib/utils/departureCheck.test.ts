@@ -81,4 +81,8 @@ describe('matchFromFeed', () => {
 		expect(findByCode('14d', [row({})])).toMatchObject({ found: true });
 		expect(findByCode('nope', [row({})])).toBeNull();
 	});
+
+	it('matches an ASM name with an old name in brackets', () => {
+		expect(matchFromFeed(dragon(), [row({ name: 'Dragon(Rex)' })])).toMatchObject({ matchedByName: 'D2026-1' });
+	});
 });

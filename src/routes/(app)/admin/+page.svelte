@@ -123,6 +123,15 @@
 
 	/** Looks queries (shelter codes or names) up on ASM's website, which covers every animal. */
 	let asmSearchProblem: string | null = null;
+	/** What ASM's search sent back for each query, to explain a miss. */
+	const asmSearchSummaries = new Map<string, { q: string; rows: number; sample: string[]; keys: string[] }>();
+	function missReasonFor(q: string): string {
+		if (asmSearchProblem) return `Couldn't search ASM: ${asmSearchProblem}`;
+		const s = asmSearchSummaries.get(q.trim().toUpperCase());
+		if (!s) return 'ASM has no dog with this shelter code or name.';
+		if (s.rows === 0) return `ASM's search for "${s.q}" returned no animals (response had: ${s.keys.join(', ') || 'nothing'}).`;
+		return `ASM's search for "${s.q}" returned ${s.rows} animal${s.rows === 1 ? '' : 's'}, none matching: ${s.sample.join('; ')}.`;
+	}
 	async function searchAsm(queries: string[]): Promise<AsmFeedAnimal[]> {
 		const token = await $authUser?.getIdToken();
 		const out: AsmFeedAnimal[] = [];
@@ -133,9 +142,14 @@
 				body: JSON.stringify({ search: queries.slice(i, i + 25) })
 			});
 			if (!res.ok) throw new Error(`ASM search failed (${res.status}): ${(await res.text()).slice(0, 160)}`);
-			const data = (await res.json()) as { animals: AsmFeedAnimal[]; problem: string | null };
+			const data = (await res.json()) as {
+				animals: AsmFeedAnimal[];
+				problem: string | null;
+				summaries?: { q: string; rows: number; sample: string[]; keys: string[] }[];
+			};
 			out.push(...data.animals);
 			if (data.problem) asmSearchProblem = data.problem;
+			for (const s of data.summaries ?? []) asmSearchSummaries.set(s.q.trim().toUpperCase(), s);
 		}
 		return out;
 	}
@@ -471,7 +485,7 @@
 			}
 			if (asmSearchProblem) toast.error(`Couldn't search ASM's website: ${asmSearchProblem}`, { duration: 9000 });
 			for (const dog of dogs) {
-				const dep = matchFromFeed(dog, asmFeed) ?? { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: notFoundReason };
+				const dep = matchFromFeed(dog, asmFeed) ?? { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: missReasonFor(dog.asmShelterCode?.trim() || dog.name) };
 				const result = checkDeparture(dog, dep);
 				if (result.kind === 'fix') {
 					backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status, byName: result.byName }];
@@ -568,7 +582,7 @@
 				asmFeed = [...asmFeed, ...extra];
 				dep = findByCode(code, extra);
 			}
-			dep ??= { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: notFoundReason };
+			dep ??= { found: false, movementType: null, movementDate: null, deceasedDate: null, missReason: missReasonFor(code) };
 			const result = checkDeparture(entry.dog, dep);
 			if (result.kind === 'fix') {
 				backfillMatched = [
