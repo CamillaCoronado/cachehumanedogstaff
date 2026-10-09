@@ -1021,6 +1021,40 @@ export async function updateDog(id: string, updates: Partial<Dog>) {
 	return getDog(id);
 }
 
+// What any staff member may change on a dog: whether it's sick or on monitor, and the
+// knock-on fields those carry (monitor finishes treatment; a hold sets handling and the
+// enrichment clock). firestore.rules allows non-editor staff to write exactly these keys.
+const SICK_STATUS_KEYS = [
+	'sickHold',
+	'sickHoldReason',
+	'sickHoldSince',
+	'sickMonitor',
+	'sickMonitorReason',
+	'sickMonitorSince',
+	'sickSuggestDismissed',
+	'treatments',
+	'enrichmentResetDate',
+	'handlingLevel',
+	'handlingLevelBeforeHold',
+	'updatedAt'
+] as const;
+
+/**
+ * updateDog for sick/monitor changes, writing only those keys so staff without
+ * dog-edit rights pass the rules. Same transition logic as updateDog.
+ */
+export async function updateDogSickStatus(id: string, updates: Partial<Dog>) {
+	const ref = dogRef(id);
+	if (!ref) return updateDog(id, updates);
+	const current = await getDog(id);
+	if (!current) return null;
+	const merged = applyStatusTransition(current, updates, new Date());
+	const stored = serializeDog(merged) as unknown as Record<string, unknown>;
+	const fields = Object.fromEntries(SICK_STATUS_KEYS.map((k) => [k, stored[k] ?? null]));
+	await setDoc(ref, fields, { merge: true });
+	return merged;
+}
+
 // Batch mark/clear the outbreak "sick hold" across many dogs at once (e.g. a whole
 // transfer group). Reuses updateDog so both the Firestore and localStorage paths and the
 // serialize/merge logic are shared. Setting sick stamps `sickHoldSince`; clearing wipes
@@ -1038,7 +1072,7 @@ export async function setDogsSickHold(ids: string[], sick: boolean, reason?: str
 				sickMonitorSince: null
 			}
 		: { sickHold: false, sickHoldReason: null, sickHoldSince: null };
-	await Promise.all(ids.map((id) => updateDog(id, updates)));
+	await Promise.all(ids.map((id) => updateDogSickStatus(id, updates)));
 }
 
 // Puts dogs on (or takes them off) the post-illness monitor list. Putting a sick-hold
@@ -1055,7 +1089,7 @@ export async function setDogsMonitor(ids: string[], monitor: boolean, reason?: s
 				sickHoldSince: null
 			}
 		: { sickMonitor: false, sickMonitorReason: null, sickMonitorSince: null };
-	await Promise.all(ids.map((id) => updateDog(id, updates)));
+	await Promise.all(ids.map((id) => updateDogSickStatus(id, updates)));
 }
 
 // Re-derives the denormalized bath/yard timers from the dog's logs — the

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { updateDog, setDogsSickHold, setDogsMonitor } from '$lib/data/dogs';
+	import { updateDog, updateDogSickStatus, setDogsSickHold, setDogsMonitor } from '$lib/data/dogs';
 	import { dogs as dogsStore, dogsLoaded, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { createId } from '$lib/utils/storage';
 	import type { Dog, IsolationReason, Treatment } from '$lib/types';
@@ -361,7 +361,7 @@
 		const reason = editingStatusText.trim() || null;
 		cancelEditStatusReason();
 		try {
-			await updateDog(
+			await updateDogSickStatus(
 				dog.id,
 				dog.sickHold ? { sickHoldReason: reason } : { sickMonitorReason: reason }
 			);
@@ -404,7 +404,7 @@
 			} else {
 				const reason =
 					treatmentConditions(dog).join(', ') || treatmentNames(dog) || dog.sickHoldReason || null;
-				if ((dog.treatments?.length ?? 0) > 0) await updateDog(dog.id, { treatments: [] });
+				if ((dog.treatments?.length ?? 0) > 0) await updateDogSickStatus(dog.id, { treatments: [] });
 				await setDogsMonitor([dog.id], true, reason);
 				toast.success(`${dog.name} on monitor.`);
 			}
@@ -441,7 +441,7 @@
 	async function dismissSickSuggestion(dog: Dog, reason: string) {
 		savingSickId = dog.id;
 		try {
-			await updateDog(dog.id, { sickSuggestDismissed: reason });
+			await updateDogSickStatus(dog.id, { sickSuggestDismissed: reason });
 		} catch {
 			toast.error(`Could not update ${dog.name}.`);
 		} finally {
