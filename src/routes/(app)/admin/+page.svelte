@@ -95,8 +95,8 @@
 	let savingUserId: string | null = null;
 
 	// One-time backfill: archived dogs missing a departure date
-	type DateFix = { dog: Dog; date: string; source: string; status: Dog['status']; byName: boolean };
-	type DateUnknown = { dog: Dog; manualDate: string; reason: string | null };
+	type DateFix = { dog: Dog; date: string; source: string; status: Dog['status']; byName: boolean; shelterCode?: string };
+	type DateUnknown = { dog: Dog; manualDate: string; reason: string | null; code: string };
 	let backfillRunning = false;
 	let backfillRan = false;
 	let backfillMatched: DateFix[] = [];
@@ -433,7 +433,7 @@
 						const approx = archivedAt
 							? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
 							: '';
-						backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason }];
+						backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason, code: dog.asmShelterCode ?? '' }];
 					}
 				}
 			}
@@ -464,7 +464,9 @@
 			for (const fix of chosen) {
 				await updateDog(fix.dog.id, {
 					leftShelterDate: toDate(fix.date),
-					...(fix.status !== fix.dog.status ? { status: fix.status } : {})
+					...(fix.status !== fix.dog.status ? { status: fix.status } : {}),
+					// A code typed in by hand is kept, so the next check and the sync find the dog.
+					...(fix.shelterCode ? { asmShelterCode: fix.shelterCode } : {})
 				});
 				applied += 1;
 			}
@@ -495,6 +497,49 @@
 			toast.error(`Stopped after ${applied} — ` + (e instanceof Error ? e.message : String(e)));
 		} finally {
 			backfillApplying = false;
+		}
+	}
+
+	// Looks the dog up in ASM by a shelter code typed in by hand. A hit moves it to the
+	// fixes list above (ticked, since a person named the code); nothing is saved until applied.
+	async function lookupByShelterCode(entry: DateUnknown) {
+		const code = entry.code.trim();
+		if (!code) {
+			toast.error('Type the shelter code from ASM first.');
+			return;
+		}
+		backfillFixingId = entry.dog.id;
+		try {
+			const token = await $authUser?.getIdToken();
+			const res = await fetch('/api/asm/departure-check', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+				body: JSON.stringify({ dogs: [{ id: entry.dog.id, shelterCode: code }] })
+			});
+			if (!res.ok) throw new Error(`ASM lookup failed (${res.status})`);
+			const found: Record<string, AsmDeparture> = await res.json();
+			const dep = found[entry.dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null };
+			const result = checkDeparture(entry.dog, dep);
+			if (result.kind === 'fix') {
+				backfillMatched = [
+					...backfillMatched,
+					{ dog: entry.dog, date: result.date, source: `Shelter code ${code}. ${result.reason}`, status: result.status, byName: false, shelterCode: code }
+				].sort((a, b) => a.dog.name.localeCompare(b.dog.name));
+				backfillSelected = [...backfillSelected, entry.dog.id];
+				backfillUnknown = backfillUnknown.filter((u) => u.dog.id !== entry.dog.id);
+				toast.success(`${entry.dog.name}: found as ${code} — review it in the list above, then apply.`);
+			} else if (result.kind === 'still-here') {
+				toast.error(`ASM has ${code} ${result.label}, not departed.`);
+			} else if (result.kind === 'ok') {
+				toast.error(`ASM has ${code}, but no departure or death date on it.`);
+			} else {
+				backfillUnknown = backfillUnknown.map((u) => (u.dog.id === entry.dog.id ? { ...u, reason: result.reason } : u));
+				toast.error(`No animal with shelter code ${code} in ASM.`);
+			}
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : String(e));
+		} finally {
+			backfillFixingId = null;
 		}
 	}
 
@@ -977,7 +1022,8 @@
 					<div class="status-row-plain">
 						<span class="status-meta">
 							{backfillUnknown.length} dog{backfillUnknown.length === 1 ? '' : 's'} not matched in ASM, so no date from there (the reason is under each name).
-							Pre-filled dates are the day the sync archived the dog (usually within a day of the real departure) — adjust any, then set individually or all at once.
+							Type a dog's shelter code from ASM and press Find in ASM to pull its real date, or use the
+							pre-filled date (the day the sync archived the dog, usually within a day of the real departure) and set individually or all at once.
 						</span>
 					</div>
 					<ul class="user-list">
@@ -989,6 +1035,19 @@
 									{#if entry.reason}<p class="suspect-detail">{entry.reason}</p>{/if}
 								</div>
 								<div class="repair-actions">
+									<input
+										class="field-input backfill-date-input backfill-code-input"
+										placeholder="Shelter code"
+										aria-label={`ASM shelter code for ${entry.dog.name}`}
+										bind:value={entry.code}
+										on:keydown={(e) => e.key === 'Enter' && lookupByShelterCode(entry)}
+									/>
+									<button
+										class="ghost-btn action-btn-small"
+										type="button"
+										disabled={backfillFixingId === entry.dog.id || !entry.code.trim()}
+										on:click={() => lookupByShelterCode(entry)}
+									>{backfillFixingId === entry.dog.id ? 'Finding…' : 'Find in ASM'}</button>
 									<input type="date" class="field-input backfill-date-input" bind:value={entry.manualDate} />
 									<button
 										class="action-btn action-btn-small"
@@ -1644,6 +1703,10 @@
 
 	.backfill-apply {
 		margin-top: 0.7rem;
+	}
+
+	.backfill-date-input.backfill-code-input {
+		width: 7.5rem;
 	}
 
 	.backfill-date-input {
