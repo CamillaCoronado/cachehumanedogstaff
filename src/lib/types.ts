@@ -225,6 +225,9 @@ export interface Dog {
 	sickHold?: boolean;
 	sickHoldReason?: string | null;
 	sickHoldSince?: DateValue | null;
+	/** The contagion ("URI") staff said no to when the Medical page suggested marking this
+	 *  dog sick, so the same suggestion doesn't come back. A new contagion suggests again. */
+	sickSuggestDismissed?: string | null;
 	/** Watch state — the step before treatment: the dog is being observed for symptoms
 	 *  (or re-observed after finishing treatment/an outbreak). Purely informational (no
 	 *  handling/playgroup/adoption effects). Mutually exclusive with sickHold, and

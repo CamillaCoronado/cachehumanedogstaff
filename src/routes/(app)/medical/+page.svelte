@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { updateDog, setDogsSickHold, setDogsMonitor } from '$lib/data/dogs';
+	import { updateDog, updateDogSickStatus, setDogsSickHold, setDogsMonitor } from '$lib/data/dogs';
 	import { dogs as dogsStore, dogsLoaded, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { createId } from '$lib/utils/storage';
 	import type { Dog, IsolationReason, Treatment } from '$lib/types';
@@ -9,6 +9,7 @@
 	import { differenceInDays, startOfDay } from 'date-fns';
 	import toast from 'svelte-french-toast';
 	import TreatmentEditor from '$lib/components/medical/TreatmentEditor.svelte';
+	import { dogContagion } from '$lib/utils/medicalSync';
 	const today = new Date();
 
 	// Permanent fosters live with their foster family, so they are only on the Dogs page.
@@ -360,7 +361,7 @@
 		const reason = editingStatusText.trim() || null;
 		cancelEditStatusReason();
 		try {
-			await updateDog(
+			await updateDogSickStatus(
 				dog.id,
 				dog.sickHold ? { sickHoldReason: reason } : { sickMonitorReason: reason }
 			);
@@ -403,7 +404,7 @@
 			} else {
 				const reason =
 					treatmentConditions(dog).join(', ') || treatmentNames(dog) || dog.sickHoldReason || null;
-				if ((dog.treatments?.length ?? 0) > 0) await updateDog(dog.id, { treatments: [] });
+				if ((dog.treatments?.length ?? 0) > 0) await updateDogSickStatus(dog.id, { treatments: [] });
 				await setDogsMonitor([dog.id], true, reason);
 				toast.success(`${dog.name} on monitor.`);
 			}
@@ -412,6 +413,39 @@
 			toast.error(`Could not update ${dog.name}.`);
 			await refreshDogs();
 		} finally {
+			savingSickId = '';
+		}
+	}
+
+	// A treatment that reads contagious (from ASM or typed here) suggests the sick flag;
+	// staff decide. Dismissing remembers the reason so the same one doesn't nag again.
+	function sickSuggestion(dog: Dog): string | null {
+		if (dog.sickHold) return null;
+		const reason = dogContagion(dog.treatments ?? []);
+		return reason && reason !== dog.sickSuggestDismissed ? reason : null;
+	}
+
+	async function acceptSickSuggestion(dog: Dog, reason: string) {
+		savingSickId = dog.id;
+		try {
+			await setDogsSickHold([dog.id], true, reason);
+			toast.success(`${dog.name} flagged sick.`);
+		} catch {
+			toast.error(`Could not update ${dog.name}.`);
+		} finally {
+			await refreshDogs();
+			savingSickId = '';
+		}
+	}
+
+	async function dismissSickSuggestion(dog: Dog, reason: string) {
+		savingSickId = dog.id;
+		try {
+			await updateDogSickStatus(dog.id, { sickSuggestDismissed: reason });
+		} catch {
+			toast.error(`Could not update ${dog.name}.`);
+		} finally {
+			await refreshDogs();
 			savingSickId = '';
 		}
 	}
@@ -1185,6 +1219,7 @@
 						{#each group.dogs as { dog, stage, treatments } (dog.id)}
 							{@const storedReason = dog.sickHoldReason ?? dog.sickMonitorReason ?? null}
 							{@const conditions = treatmentConditions(dog)}
+							{@const suggestSick = sickSuggestion(dog)}
 							<!-- A status reason that a treatment already names would just repeat below. -->
 							{@const showStatusReason =
 								!!storedReason &&
@@ -1218,6 +1253,23 @@
 										{/if}
 									</div>
 								</div>
+								{#if suggestSick}
+									<div class="med-sick-suggest">
+										<span>Looks contagious ({suggestSick}). Mark sick?</span>
+										<button
+											type="button"
+											class="med-switch med-switch-on-sick"
+											disabled={savingSickId === dog.id}
+											on:click={() => acceptSickSuggestion(dog, suggestSick)}
+										>Mark sick</button>
+										<button
+											type="button"
+											class="med-switch"
+											disabled={savingSickId === dog.id}
+											on:click={() => dismissSickSuggestion(dog, suggestSick)}
+										>Not contagious</button>
+									</div>
+								{/if}
 								<div class="med-row-body">
 									{#if stage !== 'treating'}
 										<div class="med-meta-row">
@@ -2035,6 +2087,20 @@
 		color: #8a7c7c;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	.med-sick-suggest {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.35rem;
+		margin: 0.3rem 0 0.1rem;
+		padding: 0.3rem 0.5rem;
+		border-radius: 8px;
+		background: #fbecec;
+		color: #8a2f2f;
+		font-size: 0.74rem;
+		font-weight: 600;
 	}
 
 	/* Two independent switches: Monitor is a care state, Sick is the outbreak flag. */

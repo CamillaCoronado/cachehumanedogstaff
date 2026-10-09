@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lastDoseDate, planDogMedical, planMedicalSync, regimenKind, storedDay, type AsmGivenDose, type AsmRegimen } from './medicalSync';
+import { contagionOf, dogContagion, lastDoseDate, planDogMedical, planMedicalSync, regimenKind, storedDay, type AsmGivenDose, type AsmRegimen } from './medicalSync';
 
 const reg = (o: Partial<AsmRegimen>): AsmRegimen => ({
 	regimenId: 10,
@@ -152,5 +152,19 @@ describe('planMedicalSync', () => {
 		const regimens = [reg({}), reg({ regimenId: 11, animalId: 999, shelterCode: '2026D0099' }), reg({ regimenId: 12, animalId: 501 }), reg({ regimenId: 13, animalId: 502 })];
 		const writes = planMedicalSync(docs, { regimens, given: [] }, TODAY, () => 'x');
 		expect(writes.map((w) => w.id)).toEqual(['500', 'app1']);
+	});
+});
+
+describe('contagion', () => {
+	it('names what a treatment suggests the dog could spread, from its name, reason or notes', () => {
+		expect(contagionOf('Doxycycline')).toBe('URI');
+		expect(contagionOf('Clavamox', null, 'for kennel cough')).toBe('URI');
+		expect(contagionOf('Clavamox', null, 'skin infection')).toBeNull();
+		expect(dogContagion([{ name: 'Metronidazole' }, { name: 'Doxy' }, { name: 'Carprofen' }])).toBe('URI, giardia');
+		expect(dogContagion([{ name: 'Carprofen' }])).toBeNull();
+	});
+
+	it('never puts a dog on sick hold from the sync', () => {
+		expect(plan({}, [reg({})])?.sickHold).toBeUndefined();
 	});
 });

@@ -60,6 +60,37 @@ export function regimenKind(name: string, openEnded: boolean): RegimenKind {
 	return 'treatment';
 }
 
+/**
+ * Treatments that suggest a dog could spread what it has, and what to call it. Matched on
+ * the treatment's name, reason and notes (ASM's dosage and comments land in the notes), so
+ * "Doxycycline" and "Clavamox — for kennel cough" both count. Routine dewormers don't:
+ * fenbendazole alone isn't here, giardia is.
+ */
+export const CONTAGIOUS: { label: string; match: RegExp }[] = [
+	{ label: 'URI', match: /\buri\b|upper resp|kennel cough|\bcirdc\b|bordetella|canine flu|influenza|doxycycline|\bdoxy\b/i },
+	{ label: 'parvo', match: /parvo/i },
+	{ label: 'distemper', match: /distemper/i },
+	{ label: 'giardia', match: /giardia|metronidazole|flagyl/i },
+	{ label: 'coccidia', match: /coccidi|ponazuril|marquis|albon|sulfadimethoxine/i },
+	{ label: 'ringworm', match: /ringworm|dermatophyt|lime sulfur|terbinafine|itraconazole/i },
+	{ label: 'mange', match: /sarcoptic|scabies/i }
+];
+
+/** What a treatment's text says the dog could spread, or null. */
+export function contagionOf(...text: (string | null | undefined)[]): string | null {
+	const all = text.filter(Boolean).join(' ');
+	return CONTAGIOUS.find((c) => c.match.test(all))?.label ?? null;
+}
+
+/**
+ * What a dog's treatments say it could spread ("URI, giardia"), or null. The Medical page
+ * suggests marking such a dog sick; it never marks it on its own.
+ */
+export function dogContagion(treatments: { name: string; condition?: string | null; notes?: string | null }[]): string | null {
+	const found = [...new Set(treatments.map((t) => contagionOf(t.name, t.condition, t.notes)).filter((c): c is string => Boolean(c)))].sort();
+	return found.length > 0 ? found.join(', ') : null;
+}
+
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const fromYmd = (s: string) => {
 	const [y, m, d] = s.split('-').map(Number);
@@ -114,7 +145,7 @@ export function storedDay(v: unknown): string | null {
 }
 
 /** Midday on the shelter's clock as stored, so the day reads the same everywhere in the US. */
-const storedNoon = (day: string | null) => (day ? `${day}T18:00:00.000Z` : null);
+export const storedNoon = (day: string | null) => (day ? `${day}T18:00:00.000Z` : null);
 
 type Doc = Record<string, unknown>;
 type StoredTreatment = {
