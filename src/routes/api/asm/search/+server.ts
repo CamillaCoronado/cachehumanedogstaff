@@ -23,7 +23,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
 /**
  * Finds dogs in ASM by name, for any number of names at once (`?q=Rex&q=Dragon`). ASM has
  * no search, so this reads its lists — on the shelter, adopted in the last three years,
- * recent changes, and the departures report — and matches names here. Signed-in users only.
+ * and recent changes — and matches names here. Signed-in users only.
  */
 export async function GET({ url, request }: RequestEvent) {
 	const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
