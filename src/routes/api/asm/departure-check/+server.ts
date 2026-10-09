@@ -2,25 +2,23 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getAdminAuth, getAdminDb } from '$lib/firebase/admin';
-import type { AsmDeparture, AsmFeedAnimal } from '$lib/utils/departureCheck';
+import type { AsmFeedAnimal } from '$lib/utils/departureCheck';
 
 export const config = { maxDuration: 60 };
-
-/** Dogs looked up per request; the page sends them in batches this size. */
-const MAX_DOGS = 25;
 
 const day = (v: unknown) => {
 	const m = typeof v === 'string' ? v.match(/(\d{4})[-/](\d{2})[-/](\d{2})/) : null;
 	return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 };
 
-type DogRef = { id: string; name?: string | null; asmId?: number | null; shelterCode?: string | null };
-
 /**
- * Admin-only: what ASM says happened to each dog — its last movement and date, or its
- * death. Looked up one by one with ASM's animal search, which covers every animal, where
- * the adoption and recent-changes feeds only cover adoptions or the last month.
+ * Title of a saved ASM report listing dogs that left or died, with ID, SHELTERCODE,
+ * SHORTCODE, ANIMALNAME, DECEASEDDATE, ACTIVEMOVEMENTTYPE and ACTIVEMOVEMENTDATE columns.
+ * ASM's service has no animal search and no feed of older deaths, so a report is the only
+ * way to reach a dog euthanized more than about a month ago.
  */
+const DEFAULT_REPORT = 'App departures';
+
 export async function POST({ request }: RequestEvent) {
 	const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
 	if (!token) throw error(401, 'Missing auth token');
@@ -37,128 +35,66 @@ export async function POST({ request }: RequestEvent) {
 	if (!ASM_URL || !ASM_ACCOUNT || !ASM_USER || !ASM_PASS) throw error(503, 'ASM credentials not configured');
 	const base = `${ASM_URL}/asmservice?account=${encodeURIComponent(ASM_ACCOUNT)}&username=${encodeURIComponent(ASM_USER)}&password=${encodeURIComponent(ASM_PASS)}`;
 
-	const body = (await request.json().catch(() => ({}))) as { dogs?: DogRef[]; feed?: { from?: string } };
+	const body = (await request.json().catch(() => ({}))) as { from?: string };
+	const from = /^\d{4}-\d{2}-\d{2}$/.test(body.from ?? '') ? body.from! : `${new Date().getFullYear()}-01-01`;
+	const t = new Date();
+	const to = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+	const reportTitle = env.ASM_DEPARTURES_REPORT || DEFAULT_REPORT;
 
-	// Feed mode: every dog ASM adopted out since `from`, plus its recent changes (which
-	// carry deaths from about the last month). One request, matched on the page — the
-	// per-dog search below can fail on ASM's side, and this does not depend on it.
-	if (body.feed) {
-		const from = /^\d{4}-\d{2}-\d{2}$/.test(body.feed.from ?? '') ? body.feed.from! : `${new Date().getFullYear()}-01-01`;
-		const t = new Date();
-		const to = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-		const get = async (params: string) => {
-			const res = await fetch(`${base}&${params}`);
-			if (!res.ok) throw error(502, `ASM returned ${res.status} for ${params.split('&')[0]}`);
-			const rows = await res.json().catch(() => []);
-			return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
-		};
-		const [adopted, changes] = await Promise.all([
-			get(`method=json_adopted_animals&fromdate=${from}&todate=${to}`),
-			get('method=json_recent_changes').catch(() => [] as Record<string, unknown>[])
-		]);
-		const byId = new Map<string, AsmFeedAnimal>();
-		for (const a of [...adopted, ...changes]) {
-			if (String(a.SPECIESNAME ?? '').toLowerCase() !== 'dog') continue;
-			const id = String(a.ID ?? '');
-			if (!id) continue;
-			const type = Number(a.ACTIVEMOVEMENTTYPE);
-			const prev = byId.get(id);
-			byId.set(id, {
-				id: Number(id),
-				shelterCode: String(a.SHELTERCODE ?? prev?.shelterCode ?? ''),
-				name: String(a.ANIMALNAME ?? prev?.name ?? ''),
-				movementType: Number.isFinite(type) && type > 0 ? type : (prev?.movementType ?? null),
-				movementDate: day(a.ACTIVEMOVEMENTDATE) ?? prev?.movementDate ?? null,
-				deceasedDate: day(a.DECEASEDDATE) ?? prev?.deceasedDate ?? null
-			});
+	const get = async (params: string): Promise<Record<string, unknown>[]> => {
+		const res = await fetch(`${base}&${params}`);
+		const text = await res.text();
+		if (!res.ok) throw new Error(`ASM returned ${res.status}${text ? `: ${text.slice(0, 120)}` : ''}`);
+		let rows: unknown;
+		try {
+			rows = JSON.parse(text);
+		} catch {
+			throw new Error(`ASM returned something other than JSON: ${text.slice(0, 120)}`);
 		}
-		return json({ from, animals: [...byId.values()] });
-	}
+		// Report columns come back in whatever case the SQL used; the feeds use upper case.
+		return Array.isArray(rows)
+			? rows.map((r) => Object.fromEntries(Object.entries(r as Record<string, unknown>).map(([k, v]) => [k.toUpperCase(), v])))
+			: [];
+	};
 
-	const dogs = (Array.isArray(body.dogs) ? body.dogs : []).slice(0, MAX_DOGS);
+	// Adoptions since `from`, ASM's recent changes (deaths from about the last month), and
+	// the saved report for everything else. Only the adoptions feed is required.
+	const [adopted, changes, report] = await Promise.all([
+		get(`method=json_adopted_animals&fromdate=${from}&todate=${to}`).catch((e: Error) => {
+			throw error(502, `ASM adoptions feed failed: ${e.message}`);
+		}),
+		get('method=json_recent_changes').catch(() => [] as Record<string, unknown>[]),
+		get(`method=json_report&title=${encodeURIComponent(reportTitle)}`).then(
+			(rows) => ({ rows, problem: null as string | null }),
+			(e: Error) => ({ rows: [] as Record<string, unknown>[], problem: e.message })
+		)
+	]);
 
-	const miss = (missReason: string): AsmDeparture => ({
-		found: false,
-		movementType: null,
-		movementDate: null,
-		deceasedDate: null,
-		missReason
-	});
-	const toDeparture = (a: Record<string, unknown>, matchedByName: string | null): AsmDeparture => {
+	const byId = new Map<string, AsmFeedAnimal>();
+	const add = (a: Record<string, unknown>, fromReport: boolean) => {
+		// The report is expected to be dogs only; the feeds carry every species.
+		if (!fromReport && String(a.SPECIESNAME ?? '').toLowerCase() !== 'dog') return;
+		const id = String(a.ID ?? '');
+		if (!id) return;
 		const type = Number(a.ACTIVEMOVEMENTTYPE);
-		return {
-			found: true,
-			movementType: Number.isFinite(type) && type > 0 ? type : null,
-			movementDate: day(a.ACTIVEMOVEMENTDATE),
-			deceasedDate: day(a.DECEASEDDATE),
-			matchedByName
-		};
+		const prev = byId.get(id);
+		byId.set(id, {
+			id: Number(id),
+			shelterCode: String(a.SHELTERCODE ?? prev?.shelterCode ?? ''),
+			shortCode: String(a.SHORTCODE ?? prev?.shortCode ?? ''),
+			name: String(a.ANIMALNAME ?? prev?.name ?? ''),
+			movementType: Number.isFinite(type) && type > 0 ? type : (prev?.movementType ?? null),
+			movementDate: day(a.ACTIVEMOVEMENTDATE) ?? prev?.movementDate ?? null,
+			deceasedDate: day(a.DECEASEDDATE) ?? prev?.deceasedDate ?? null
+		});
 	};
+	for (const a of adopted) add(a, false);
+	for (const a of changes) add(a, false);
+	for (const a of report.rows) add(a, true);
 
-	/** One search, retried once: a failed request must not read as "not in ASM". */
-	const search = async (q: string): Promise<Record<string, unknown>[] | string> => {
-		let last = '';
-		for (let attempt = 0; attempt < 2; attempt++) {
-			try {
-				const res = await fetch(`${base}&method=json_find_animals&q=${encodeURIComponent(q)}`);
-				if (!res.ok) {
-					last = `ASM returned ${res.status}`;
-					continue;
-				}
-				const rows = await res.json();
-				return Array.isArray(rows) ? rows : [];
-			} catch (e) {
-				last = e instanceof Error ? e.message : String(e);
-			}
-		}
-		return last || 'ASM lookup failed';
-	};
-
-	const lookup = async (d: DogRef): Promise<[string, AsmDeparture]> => {
-		const ids = [...new Set([d.shelterCode, d.asmId ? String(d.asmId) : null].filter((q): q is string => Boolean(q)))];
-		const failures: string[] = [];
-		for (const q of ids) {
-			const rows = await search(q);
-			if (typeof rows === 'string') {
-				failures.push(rows);
-				continue;
-			}
-			const a = rows.find(
-				(r) => (d.asmId && Number(r.ID) === d.asmId) || (d.shelterCode && String(r.SHELTERCODE ?? '').trim().toUpperCase() === d.shelterCode.trim().toUpperCase())
-			);
-			if (a) return [d.id, toDeparture(a, null)];
-		}
-
-		// The ids missed (or there are none): try the name, but only take a single dog by
-		// that exact name, and flag it so the admin checks it is the same animal.
-		const name = d.name?.trim();
-		if (name) {
-			const rows = await search(name);
-			if (typeof rows === 'string') {
-				failures.push(rows);
-			} else {
-				const dogs = rows.filter(
-					(r) =>
-						String(r.ANIMALNAME ?? '').trim().toLowerCase() === name.toLowerCase() &&
-						String(r.SPECIESNAME ?? 'dog').toLowerCase() === 'dog'
-				);
-				if (dogs.length === 1) return [d.id, toDeparture(dogs[0], String(dogs[0].SHELTERCODE ?? dogs[0].ID ?? '?'))];
-				if (dogs.length > 1) {
-					const codes = dogs.map((r) => String(r.SHELTERCODE ?? r.ID)).join(', ');
-					return [d.id, miss(`ids not found; ${dogs.length} dogs named ${name} in ASM (${codes})`)];
-				}
-			}
-		}
-
-		if (failures.length > 0) return [d.id, miss(`lookup failed: ${failures[0]}`)];
-		if (ids.length === 0) return [d.id, miss('no ASM id or shelter code on record, and no dog by that name')];
-		return [d.id, miss(`ASM has no animal matching ${ids.join(' / ')} or the name`)];
-	};
-
-	// A few at a time: ASM is one small server.
-	const out: Record<string, AsmDeparture> = {};
-	for (let i = 0; i < dogs.length; i += 5) {
-		for (const [id, dep] of await Promise.all(dogs.slice(i, i + 5).map(lookup))) out[id] = dep;
-	}
-	return json(out);
+	return json({
+		from,
+		animals: [...byId.values()],
+		report: { title: reportTitle, rows: report.rows.length, problem: report.problem }
+	});
 }

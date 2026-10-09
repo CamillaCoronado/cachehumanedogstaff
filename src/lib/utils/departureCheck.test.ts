@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog } from '$lib/types';
-import { checkDeparture, matchFromFeed, type AsmFeedAnimal } from './departureCheck';
+import { checkDeparture, findByCode, matchFromFeed, type AsmFeedAnimal } from './departureCheck';
 
 const dog = (o: Partial<Dog>) => ({ id: '1', name: 'Rex', status: 'adopted', leftShelterDate: new Date(2026, 8, 20, 18), ...o }) as Dog;
 const asm = (o: object) => ({ found: true, movementType: 1, movementDate: '2026-09-20', deceasedDate: null, ...o });
@@ -47,6 +47,7 @@ describe('matchFromFeed', () => {
 	const row = (o: Partial<AsmFeedAnimal>): AsmFeedAnimal => ({
 		id: 900,
 		shelterCode: 'D2026-1',
+		shortCode: '14D',
 		name: 'Dragon',
 		movementType: null,
 		movementDate: null,
@@ -73,5 +74,11 @@ describe('matchFromFeed', () => {
 
 	it('skips a same-name dog that left before this one came in', () => {
 		expect(matchFromFeed(dragon(), [row({ deceasedDate: '2026-02-01' })])).toBeNull();
+	});
+
+	it('finds a typed code by shelter code or short code', () => {
+		expect(findByCode(' d2026-1 ', [row({})])).toMatchObject({ found: true, deceasedDate: '2026-08-02' });
+		expect(findByCode('14d', [row({})])).toMatchObject({ found: true });
+		expect(findByCode('nope', [row({})])).toBeNull();
 	});
 });
