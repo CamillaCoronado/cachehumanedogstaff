@@ -3,7 +3,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { getAdminAuth, getAdminDb } from '$lib/firebase/admin';
 import { syncAnimalsFromASM } from '$lib/data/asm-sync';
 import { createAdminSyncEnvironment } from '$lib/server/asmSyncEnv';
-import { syncMedicalFromASM } from '$lib/server/asmMedicalSync';
+import { syncMedicalFromASM, type MedicalSyncResult } from '$lib/server/asmMedicalSync';
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
@@ -40,6 +40,10 @@ export async function POST({ request }: RequestEvent) {
 
 	const lockRef = db.doc(LOCK_DOC);
 
+	const body = (await request.json().catch(() => ({}))) as { since?: number; force?: boolean };
+	// An admin can sync now rather than wait out someone else's five-minute slot.
+	const force = body.force === true && profile.data()?.role === 'admin';
+
 	// Claim the slot in a transaction so two simultaneous logins cannot both decide they
 	// are the one to run it.
 	let lastSyncAt = 0;
@@ -47,13 +51,12 @@ export async function POST({ request }: RequestEvent) {
 		const snap = await tx.get(lockRef);
 		const last = snap.exists ? Number(snap.data()?.at ?? 0) : 0;
 		lastSyncAt = last;
-		if (Date.now() - last < MIN_INTERVAL_MS) return false;
+		if (!force && Date.now() - last < MIN_INTERVAL_MS) return false;
 		tx.set(lockRef, { at: Date.now(), by: uid });
 		return true;
 	});
 
 	// What this person has not seen yet, from any sync — theirs or anyone else's.
-	const body = (await request.json().catch(() => ({}))) as { since?: number };
 	const since = Number.isFinite(Number(body.since)) ? Number(body.since) : 0;
 	const unseen = () => syncLogSince(since).catch((e) => {
 		console.error('[sync log]', e);
@@ -71,10 +74,12 @@ export async function POST({ request }: RequestEvent) {
 
 	// The Medical page from ASM's medical book, in the same slot. It signs in to ASM's
 	// website, which can fail on its own; that must not fail the animal sync.
+	let medical: MedicalSyncResult;
 	try {
-		await syncMedicalFromASM();
+		medical = await syncMedicalFromASM();
 	} catch (e) {
 		console.error('[asm medical]', e);
+		medical = { status: 'failed', error: e instanceof Error ? e.message : String(e) };
 	}
 
 	// Same five-minute slot, so feeding reports reach the approval queue within minutes
@@ -92,5 +97,5 @@ export async function POST({ request }: RequestEvent) {
 	}
 
 	// Return the changes themselves, not just a count — the sync log panel lists them.
-	return json({ synced: true, lastSyncAt: Date.now(), changes: result.changes, unseen: await unseen() });
+	return json({ synced: true, lastSyncAt: Date.now(), changes: result.changes, medical, unseen: await unseen() });
 }
