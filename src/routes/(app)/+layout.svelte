@@ -69,6 +69,8 @@
 	let asmSyncing = false;
 	let asmSyncedAt: string | null = null;
 	let asmError: string | null = null;
+	/** What the last sync's medical pass did, in a line (shown to admins in the sync log). */
+	let medicalNote: string | null = null;
 	let asmChanges: SyncChange[] = [];
 	let asmLastChangedAt: string | null = null;
 	let asmLogVisible = false;
@@ -250,7 +252,7 @@
 			});
 	}
 
-	async function runServerSync() {
+	async function runServerSync(force = false) {
 		const token = await $authUser?.getIdToken();
 		if (!token) return;
 
@@ -260,19 +262,31 @@
 		const res = await fetch('/api/asm/sync', {
 			method: 'POST',
 			headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-			body: JSON.stringify({ since: seenAt })
+			body: JSON.stringify({ since: seenAt, force })
 		});
 		if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
 		const result: {
 			synced: boolean;
 			changes: SyncChange[];
+			medical?: { status: 'ok'; changed: number; regimens: number } | { status: 'empty' } | { status: 'failed'; error: string };
 			lastSyncAt?: number;
 			unseen?: { at: number; changes: SyncChange[] }[];
 		} = await res.json();
 
 		// The latest sync, whoever ran it — this one, or someone else's minutes ago.
 		if (result.lastSyncAt) asmSyncedAt = clockTime(result.lastSyncAt);
-		if (result.synced && result.changes.length > 0) syncVersion.update((v) => v + 1);
+		const medical = result.medical;
+		// Medical-only changes refresh the dogs too, or the Medical page shows the old list.
+		if (result.synced && (result.changes.length > 0 || (medical?.status === 'ok' && medical.changed > 0))) syncVersion.update((v) => v + 1);
+		if (medical) {
+			medicalNote =
+				medical.status === 'ok'
+					? `Medical from ASM: ${medical.regimens} active treatment${medical.regimens === 1 ? '' : 's'} read, ${medical.changed} dog${medical.changed === 1 ? '' : 's'} updated.`
+					: medical.status === 'empty'
+						? 'Medical from ASM: the medical book came back empty, so nothing was changed.'
+						: `Medical from ASM failed: ${medical.error}`;
+		}
+		if (!result.synced) medicalNote = 'Someone synced in the last 5 minutes, so this shows theirs. Press Sync now to run it again.';
 
 		const unseen = result.unseen ?? [];
 		// If the shared history could not be written or read, still show this sync's own changes.
@@ -291,6 +305,21 @@
 		// Read the shared record either way: someone else's sync minutes ago may hold
 		// events this user has not seen.
 		await showUnseenSyncEvents();
+	}
+
+	/** Admin only: sync now, without waiting out the five-minute slot. */
+	async function syncNow() {
+		if (asmSyncing) return;
+		asmSyncing = true;
+		asmError = null;
+		try {
+			await runServerSync(true);
+			asmLogVisible = true;
+		} catch (err) {
+			asmError = err instanceof Error ? err.message : 'Sync failed';
+		} finally {
+			asmSyncing = false;
+		}
 	}
 
 	$: currentPath = $page.url.pathname;
@@ -427,10 +456,10 @@
 								<span class="sync-label">Synced {asmSyncedAt}{asmChanges.length > 0 ? ` · ${asmChanges.length} update${asmChanges.length !== 1 ? 's' : ''}` : ''}</span>
 							</button>
 						{:else if asmError}
-							<span class="sync-badge sync-badge-error">
+							<button class="sync-badge sync-badge-error sync-badge-clickable" title={isAdmin ? 'Click to retry' : asmError} on:click={() => { if (isAdmin) void syncNow(); }}>
 								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v5M8 11v1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 								<span class="sync-label">Sync failed</span>
-							</span>
+							</button>
 						{/if}
 					</div>
 					<div class="topbar-meta">
@@ -462,10 +491,16 @@
 					<div class="sync-log" role="log" aria-live="polite">
 						<div class="sync-log-header">
 							<span class="sync-log-title">Last changes — {asmLastChangedAt ?? asmSyncedAt}</span>
+							{#if isAdmin}
+								<button class="sync-log-now" type="button" on:click={syncNow} disabled={asmSyncing}>{asmSyncing ? 'Syncing…' : 'Sync now'}</button>
+							{/if}
 							<button class="sync-log-close" aria-label="Dismiss" on:click={() => { asmLogVisible = false; }}>
 								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
 							</button>
 						</div>
+						{#if isAdmin && medicalNote}
+							<p class="sync-log-medical">{medicalNote}</p>
+						{/if}
 						<ul class="sync-log-list">
 							{#each asmChanges as change}
 								<li class="sync-log-item">
@@ -918,6 +953,32 @@
 		font-size: 0.72rem;
 		font-weight: 700;
 		color: #1e6b15;
+	}
+
+	.sync-log-now {
+		margin-left: auto;
+		margin-right: 0.4rem;
+		border: 1px solid #9fc59a;
+		border-radius: 0.36rem;
+		background: #fff;
+		color: #1e6b15;
+		font-family: var(--font-ui);
+		font-size: 0.7rem;
+		font-weight: 700;
+		padding: 0.15rem 0.5rem;
+	}
+
+	.sync-log-now:disabled {
+		opacity: 0.6;
+	}
+
+	.sync-log-medical {
+		margin: 0;
+		padding: 0.45rem 0.7rem;
+		border-bottom: 1px solid #dce8f2;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
+		color: #34495e;
 	}
 
 	.sync-log-close {

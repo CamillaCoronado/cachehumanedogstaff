@@ -8,13 +8,18 @@ import { planMedicalSync, shelterToday } from '$lib/utils/medicalSync';
  * animal sync, so a neuter date ASM just recorded is already on the dog. If ASM's
  * website can't be read, or reads as empty, nothing is written: a shelter always has some
  * medical records, so empty means a failed read, and no surgery is dropped for want of
- * data. Returns how many dogs changed.
+ * data. Says what it did, for the sync badge to show an admin.
  */
-export async function syncMedicalFromASM(): Promise<number> {
+export type MedicalSyncResult =
+	| { status: 'ok'; changed: number; regimens: number }
+	| { status: 'empty' }
+	| { status: 'failed'; error: string };
+
+export async function syncMedicalFromASM(): Promise<MedicalSyncResult> {
 	const asm = await loadAsmMedical();
 	if (asm.regimens.length === 0 && asm.given.length === 0) {
 		console.warn('[asm medical] medical book read as empty — skipped');
-		return 0;
+		return { status: 'empty' };
 	}
 	const db = getAdminDb();
 	const snapshot = await db.collection('dogs').get();
@@ -27,5 +32,5 @@ export async function syncMedicalFromASM(): Promise<number> {
 		}
 		await batch.commit();
 	}
-	return writes.length;
+	return { status: 'ok', changed: writes.length, regimens: asm.regimens.length };
 }
