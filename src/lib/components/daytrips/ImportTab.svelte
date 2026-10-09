@@ -1,6 +1,6 @@
 <script lang="ts">
 	import toast from 'svelte-french-toast';
-	import { authProfile } from '$lib/stores/auth';
+	import { authProfile, authUser } from '$lib/stores/auth';
 	import { createDog, importHistoricalDayTrip, listDayTripLogs } from '$lib/data/dogs';
 	import { matchDogByName } from '$lib/utils/dogs';
 	import { toDate } from '$lib/utils/dates';
@@ -95,29 +95,29 @@
 		importDone = false;
 		importLog = [];
 
-		// Look up unmatched dogs in ASM to show their status
+		// Look up unmatched dogs in ASM to show their status — one request for all of them,
+		// since ASM has no search and the server reads its whole lists each time.
 		const unmatched = importPreview.filter((r) => r.willCreate);
-		await Promise.all(
-			unmatched.map(async (row) => {
-				try {
-					const res = await fetch(`/api/asm/search?q=${encodeURIComponent(row.sheetName)}`);
-					if (!res.ok) return;
-					const results: { name: string; status: string }[] = await res.json();
-					const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
-					const hit = results.find((a) =>
-						norm(a.name).includes(norm(row.sheetName)) ||
-						norm(row.sheetName).includes(norm(a.name))
-					);
-					if (hit) {
-						importPreview = importPreview.map((r) =>
-							r.sheetName === row.sheetName ? { ...r, asmStatus: hit.status } : r
-						);
-					}
-				} catch {
-					// silently ignore ASM lookup failures
-				}
-			})
-		);
+		if (unmatched.length > 0) {
+			try {
+				const token = await $authUser?.getIdToken();
+				const params = new URLSearchParams();
+				for (const row of unmatched) params.append('q', row.sheetName);
+				const res = await fetch(`/api/asm/search?${params}`, { headers: { authorization: `Bearer ${token}` } });
+				if (!res.ok) throw new Error(`ASM lookup failed (${res.status})`);
+				const results: Record<string, { name: string; status: string }[]> = await res.json();
+				const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+				importPreview = importPreview.map((r) => {
+					if (!r.willCreate) return r;
+					const hits = results[r.sheetName] ?? [];
+					// An exact name beats a partial one ("Max" should not take "Maxine").
+					const hit = hits.find((a) => norm(a.name) === norm(r.sheetName)) ?? hits[0];
+					return hit ? { ...r, asmStatus: hit.status } : r;
+				});
+			} catch (e) {
+				toast.error(`Couldn't check ASM: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}
 
 		// Compute new-vs-already-logged counts for every row (in parallel).
 		const counts = await Promise.all(importPreview.map((row) => computeRowCounts(row)));
