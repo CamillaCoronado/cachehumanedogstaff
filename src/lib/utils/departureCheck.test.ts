@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog } from '$lib/types';
-import { checkDeparture, findByCode, matchFromFeed, type AsmFeedAnimal } from './departureCheck';
+import { checkDeparture, findByCode, matchFromFeed, sameNameDogs, type AsmFeedAnimal } from './departureCheck';
 
 const dog = (o: Partial<Dog>) => ({ id: '1', name: 'Rex', status: 'adopted', leftShelterDate: new Date(2026, 8, 20, 18), ...o }) as Dog;
 const asm = (o: object) => ({ found: true, movementType: 1, movementDate: '2026-09-20', deceasedDate: null, ...o });
@@ -76,6 +76,14 @@ describe('matchFromFeed', () => {
 		expect(matchFromFeed(dragon(), [row({ deceasedDate: '2026-02-01' })])).toBeNull();
 	});
 
+	it('ignores an intake that is only the day an unlinked record was made', () => {
+		const imported = dragon({ intakeDate: new Date(2026, 8, 30, 10), createdAt: new Date(2026, 8, 30, 10) });
+		expect(matchFromFeed(imported, [row({ deceasedDate: '2026-02-01' })])).toMatchObject({ matchedByName: 'D2026-1' });
+		// Linked to ASM, or given a real intake before it was saved: the guard stays.
+		expect(matchFromFeed({ ...imported, asmShelterCode: 'D2026-5' }, [row({ deceasedDate: '2026-02-01' })])).toBeNull();
+		expect(matchFromFeed(dragon({ createdAt: new Date(2026, 8, 30) }), [row({ deceasedDate: '2026-02-01' })])).toBeNull();
+	});
+
 	it('finds a typed code by shelter code or short code', () => {
 		expect(findByCode(' d2026-1 ', [row({})])).toMatchObject({ found: true, deceasedDate: '2026-08-02' });
 		expect(findByCode('14d', [row({})])).toMatchObject({ found: true });
@@ -84,5 +92,15 @@ describe('matchFromFeed', () => {
 
 	it('matches an ASM name with an old name in brackets', () => {
 		expect(matchFromFeed(dragon(), [row({ name: 'Dragon(Rex)' })])).toMatchObject({ matchedByName: 'D2026-1' });
+	});
+
+	it('lists same-name dogs for picking, this year first', () => {
+		const feed = [
+			row({ id: 1, shelterCode: '2019-40570' }),
+			row({ id: 2, shelterCode: '2026-1', intakeDate: '2026-01-10' }),
+			row({ id: 3, shelterCode: '2023-5' }),
+			row({ id: 4, name: 'Rex' })
+		];
+		expect(sameNameDogs(dragon(), feed, 2026).map((a) => a.id)).toEqual([2, 3, 1]);
 	});
 });

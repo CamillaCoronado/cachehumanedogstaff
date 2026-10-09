@@ -27,6 +27,8 @@ export interface AsmFeedAnimal {
 	movementType: number | null;
 	movementDate: string | null;
 	deceasedDate: string | null;
+	/** YYYY-MM-DD of its latest intake, when ASM gave one. */
+	intakeDate?: string | null;
 }
 
 const sameCode = (a: AsmFeedAnimal, code: string) => {
@@ -48,7 +50,8 @@ const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 /**
  * Finds a dog in the feed: by ASM id or shelter code, else by exact name when exactly one
  * dog in the feed has it and its departure is not before this dog's intake (so an older
- * dog of the same name is never taken). Null when nothing fits.
+ * dog of the same name is never taken). An intake that is only the day the record was
+ * made is not used. Null when nothing fits.
  */
 export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | null {
 	const asmId = dog.asmId ?? (/^\d+$/.test(dog.id) ? Number(dog.id) : null);
@@ -65,7 +68,12 @@ export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | n
 
 	const name = nameKey(dog.name);
 	if (!name) return null;
-	const intake = toDate(dog.intakeDate);
+	// A dog never linked to ASM (added by the Day Trips import, say) was saved with its
+	// creation time as its intake when none was known, so that date says nothing.
+	const created = toDate(dog.createdAt ?? null);
+	const linked = asmId !== null || Boolean(code.trim());
+	const madeUp = !linked && created !== null && ymd(toDate(dog.intakeDate) ?? created) >= ymd(created);
+	const intake = madeUp ? null : toDate(dog.intakeDate);
 	const intakeDay = intake ? ymd(new Date(intake.getFullYear(), intake.getMonth(), intake.getDate() - 1)) : null;
 	const named = feed.filter((a) => {
 		if (nameKey(a.name) !== name) return false;
@@ -73,6 +81,22 @@ export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | n
 		return !intakeDay || !left || left >= intakeDay;
 	});
 	return named.length === 1 ? toDeparture(named[0], named[0].shelterCode || String(named[0].id)) : null;
+}
+
+/** The year an ASM dog came in: its intake date, else the year its shelter code starts with. */
+export const intakeYear = (a: AsmFeedAnimal) => Number((a.intakeDate ?? '').slice(0, 4)) || Number(a.shelterCode.match(/^\D?(\d{4})/)?.[1]) || 0;
+
+/**
+ * Every ASM dog with this dog's name, for a person to pick from when matching can't tell
+ * which it is: this year's first, then the most recent.
+ */
+export function sameNameDogs(dog: Dog, feed: AsmFeedAnimal[], year = new Date().getFullYear()): AsmFeedAnimal[] {
+	const name = nameKey(dog.name);
+	if (!name) return [];
+	const seen = new Set<number>();
+	return feed
+		.filter((a) => nameKey(a.name) === name && !seen.has(a.id) && seen.add(a.id))
+		.sort((a, b) => Number(intakeYear(b) === year) - Number(intakeYear(a) === year) || intakeYear(b) - intakeYear(a) || b.id - a.id);
 }
 
 const MOVEMENT_LABELS: Record<number, string> = {

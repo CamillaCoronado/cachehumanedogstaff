@@ -10,7 +10,7 @@
 	import CheckList from '$lib/components/admin/CheckList.svelte';
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
-	import { checkDeparture, findByCode, matchFromFeed, type AsmFeedAnimal } from '$lib/utils/departureCheck';
+	import { checkDeparture, findByCode, intakeYear, matchFromFeed, sameNameDogs, type AsmFeedAnimal } from '$lib/utils/departureCheck';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
 	import { adoptionStays, turnaroundByMonth, turnaroundWindows } from '$lib/utils/adoptionTurnaround';
@@ -96,7 +96,8 @@
 
 	// One-time backfill: archived dogs missing a departure date
 	type DateFix = { dog: Dog; date: string; source: string; status: Dog['status']; byName: boolean; shelterCode?: string };
-	type DateUnknown = { dog: Dog; manualDate: string; reason: string | null; code: string };
+	/** candidates: ASM dogs with its name, for picking when matching can't tell which. */
+	type DateUnknown = { dog: Dog; manualDate: string; reason: string | null; code: string; candidates: AsmFeedAnimal[] };
 	let backfillRunning = false;
 	let backfillRan = false;
 	let backfillMatched: DateFix[] = [];
@@ -129,8 +130,8 @@
 		if (asmSearchProblem) return `Couldn't search ASM: ${asmSearchProblem}`;
 		const s = asmSearchSummaries.get(q.trim().toUpperCase());
 		if (!s) return 'ASM has no dog with this shelter code or name.';
-		if (s.rows === 0) return `ASM's search for "${s.q}" returned no animals (response had: ${s.keys.join(', ') || 'nothing'}).`;
-		return `ASM's search for "${s.q}" returned ${s.rows} animal${s.rows === 1 ? '' : 's'}, none matching: ${s.sample.join('; ')}.`;
+		if (s.rows === 0) return `ASM's search for "${s.q}" returned no dogs (response had: ${s.keys.join(', ') || 'nothing'}).`;
+		return `ASM's search for "${s.q}" returned ${s.rows} dog${s.rows === 1 ? '' : 's'}, none matching: ${s.sample.join('; ')}.`;
 	}
 	async function searchAsm(queries: string[]): Promise<AsmFeedAnimal[]> {
 		const token = await $authUser?.getIdToken();
@@ -498,7 +499,14 @@
 					const approx = archivedAt
 						? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
 						: '';
-					backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason, code: dog.asmShelterCode ?? '' }];
+					const candidates = sameNameDogs(dog, asmFeed);
+					const reason =
+						candidates.length > 1
+							? `${candidates.length} dogs in ASM are named ${dog.name}. Pick the right one below.`
+							: candidates.length === 1
+								? `ASM's only ${dog.name} left before this one's intake date. Pick it below if it's the same dog.`
+								: result.reason;
+					backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason, code: dog.asmShelterCode ?? '', candidates }];
 				}
 			}
 			backfillMatched.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
@@ -562,6 +570,20 @@
 		} finally {
 			backfillApplying = false;
 		}
+	}
+
+	/** Picks one of the same-name ASM dogs for an unmatched dog: looked up as if its code were typed. */
+	function pickCandidate(entry: DateUnknown, a: AsmFeedAnimal) {
+		entry.code = a.shelterCode || a.shortCode;
+		backfillUnknown = backfillUnknown;
+		void lookupByShelterCode(entry);
+	}
+
+	/** One same-name ASM dog, briefly: code, intake year, and how it left. */
+	function candidateLabel(a: AsmFeedAnimal): string {
+		const year = intakeYear(a);
+		const left = a.deceasedDate ? `died ${a.deceasedDate}` : a.movementDate ? `left ${a.movementDate}` : 'no departure';
+		return `${a.shelterCode || a.shortCode || a.id}${year ? ` · in ${year}` : ''} · ${left}`;
 	}
 
 	// Looks the dog up in ASM by a shelter code typed in by hand. A hit moves it to the
@@ -1091,6 +1113,19 @@
 									<p class="suspect-name">{entry.dog.name}</p>
 									<p class="suspect-detail">{entry.dog.status} · {entry.manualDate ? 'approximate date from archive time' : 'no date on record — set by hand'}</p>
 									{#if entry.reason}<p class="suspect-detail">{entry.reason}</p>{/if}
+									{#if entry.candidates.length > 0}
+										<div class="candidate-list">
+											{#each entry.candidates as a (a.id)}
+												<button
+													class="ghost-btn action-btn-small"
+													class:candidate-this-year={intakeYear(a) === new Date().getFullYear()}
+													type="button"
+													disabled={backfillFixingId === entry.dog.id}
+													on:click={() => pickCandidate(entry, a)}
+												>{candidateLabel(a)}</button>
+											{/each}
+										</div>
+									{/if}
 								</div>
 								<div class="repair-actions">
 									<input
@@ -1918,6 +1953,18 @@
 
 	.backfill-apply {
 		margin-top: 0.7rem;
+	}
+
+	.candidate-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-top: 0.4rem;
+	}
+
+	.candidate-this-year {
+		font-weight: 700;
+		border-color: currentColor;
 	}
 
 	.backfill-date-input.backfill-code-input {

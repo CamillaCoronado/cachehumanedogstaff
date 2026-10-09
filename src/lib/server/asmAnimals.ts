@@ -20,6 +20,8 @@ export interface AsmDog {
 	movementType: number | null;
 	movementDate: string | null;
 	deceasedDate: string | null;
+	/** YYYY-MM-DD of its latest intake, to tell same-name dogs apart. */
+	intakeDate: string | null;
 }
 
 export function asmBase(): string | null {
@@ -93,7 +95,8 @@ export async function loadAsmDogs(base: string, from: string, opts: { shelter?: 
 			breed: String(a.BREEDNAME ?? prev?.breed ?? ''),
 			movementType: Number.isFinite(type) && type > 0 ? type : (prev?.movementType ?? null),
 			movementDate: day(a.ACTIVEMOVEMENTDATE) ?? prev?.movementDate ?? null,
-			deceasedDate: day(a.DECEASEDDATE) ?? prev?.deceasedDate ?? null
+			deceasedDate: day(a.DECEASEDDATE) ?? prev?.deceasedDate ?? null,
+			intakeDate: day(a.MOSTRECENTENTRYDATE ?? a.DATEBROUGHTIN) ?? prev?.intakeDate ?? null
 		});
 	};
 	for (const a of adopted) add(a);
@@ -118,7 +121,8 @@ function toAsmDog(a: Record<string, unknown>): AsmDog | null {
 		breed: String(a.BREEDNAME ?? ''),
 		movementType: Number.isFinite(type) && type > 0 ? type : null,
 		movementDate: day(a.ACTIVEMOVEMENTDATE),
-		deceasedDate: day(a.DECEASEDDATE)
+		deceasedDate: day(a.DECEASEDDATE),
+		intakeDate: day(a.MOSTRECENTENTRYDATE ?? a.DATEBROUGHTIN)
 	};
 }
 
@@ -189,20 +193,35 @@ async function webSignIn(): Promise<WebSession> {
  */
 export interface AsmSearchSummary {
 	q: string;
+	/** Dogs returned; other species are left out. */
 	rows: number;
-	/** Up to five rows as "code name (species)". */
+	/** The dogs it returned (up to 50), as "code name (species)". */
 	sample: string[];
 	/** Top-level keys of the response, in case the rows are somewhere else. */
 	keys: string[];
 }
 
-/** Searches every animal in ASM, deceased included, the way the search box on its website does. */
+/**
+ * ASM's species id for dogs: 1 in its standard data. Set ASM_DOG_SPECIES_ID if this
+ * shelter's differs.
+ */
+const dogSpeciesId = () => Number(env.ASM_DOG_SPECIES_ID) || 1;
+
+/** A shelter code or short code has digits; a name searched for doesn't. */
+const looksLikeCode = (q: string) => /\d/.test(q);
+
+/**
+ * Searches every animal in ASM, deceased included. A name is searched for among dogs only,
+ * by name only (ASM's advanced search); a code goes through the simple search box, which
+ * also matches codes.
+ */
 export async function searchAsmWebsite(q: string): Promise<AsmDog[]> {
 	return (await searchAsmWebsiteWithSummary(q)).dogs;
 }
 
-export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: AsmDog[]; summary: AsmSearchSummary }> {
-	const run = (s: WebSession) => webFetch(s, `/animal_find_results?mode=SIMPLE&json=true&q=${encodeURIComponent(q)}`);
+/** One website search, rows with upper-cased keys. */
+async function webSearch(params: URLSearchParams): Promise<{ rows: Record<string, unknown>[]; keys: string[] }> {
+	const run = (s: WebSession) => webFetch(s, `/animal_find_results?${params}`);
 	let s = await webSignIn();
 	let res = await run(s);
 	let text = await res.text();
@@ -220,18 +239,42 @@ export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: As
 	} catch {
 		throw new Error(`ASM website search didn't return JSON: ${text.slice(0, 120)}`);
 	}
-	const rows = (Array.isArray(data.rows) ? (data.rows as Record<string, unknown>[]) : []).map((r) =>
-		Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toUpperCase(), v]))
+	return {
+		rows: (Array.isArray(data.rows) ? (data.rows as Record<string, unknown>[]) : []).map((r) =>
+			Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toUpperCase(), v]))
+		),
+		keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 8) : []
+	};
+}
+
+const isDogRow = (r: Record<string, unknown>) => String(r.SPECIESNAME ?? 'dog').toLowerCase() === 'dog';
+
+export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: AsmDog[]; summary: AsmSearchSummary }> {
+	const simple = new URLSearchParams({ mode: 'SIMPLE', json: 'true', q });
+	let found = await webSearch(
+		looksLikeCode(q)
+			? simple
+			: new URLSearchParams({
+					mode: 'ADVANCED',
+					json: 'true',
+					animalname: q,
+					speciesid: String(dogSpeciesId()),
+					// Without these the advanced search leaves out deceased and non-shelter animals.
+					filter: 'includedeceased includenonshelter'
+				})
 	);
+	// No dogs by name: perhaps this shelter's dog species id isn't 1. The simple search
+	// finds every species; the dogs are picked out below.
+	if (!looksLikeCode(q) && !found.rows.some(isDogRow)) found = await webSearch(simple);
+	// Dogs only, whatever the search: a code can belong to a cat.
+	const rows = found.rows.filter(isDogRow);
 	return {
 		dogs: rows.map(toAsmDog).filter((d): d is AsmDog => d !== null),
 		summary: {
 			q,
 			rows: rows.length,
-			sample: rows
-				.slice(0, 5)
-				.map((r) => `${r.SHELTERCODE ?? r.CODE ?? '?'} ${r.ANIMALNAME ?? '?'} (${r.SPECIESNAME ?? 'no species'})`),
-			keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 8) : []
+			sample: rows.slice(0, 50).map((r) => `${r.SHELTERCODE ?? r.CODE ?? '?'} ${r.ANIMALNAME ?? '?'} (${r.SPECIESNAME ?? 'no species'})`),
+			keys: found.keys
 		}
 	};
 }
