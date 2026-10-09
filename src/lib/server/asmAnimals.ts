@@ -195,7 +195,7 @@ export interface AsmSearchSummary {
 	q: string;
 	/** Dogs returned; other species are left out. */
 	rows: number;
-	/** Up to five of the dogs it returned, as "code name (species)". */
+	/** The dogs it returned (up to 50), as "code name (species)". */
 	sample: string[];
 	/** Top-level keys of the response, in case the rows are somewhere else. */
 	keys: string[];
@@ -273,7 +273,7 @@ export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: As
 		summary: {
 			q,
 			rows: rows.length,
-			sample: rows.slice(0, 5).map((r) => `${r.SHELTERCODE ?? r.CODE ?? '?'} ${r.ANIMALNAME ?? '?'} (${r.SPECIESNAME ?? 'no species'})`),
+			sample: rows.slice(0, 50).map((r) => `${r.SHELTERCODE ?? r.CODE ?? '?'} ${r.ANIMALNAME ?? '?'} (${r.SPECIESNAME ?? 'no species'})`),
 			keys: found.keys
 		}
 	};
