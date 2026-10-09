@@ -442,6 +442,9 @@
 		background: #ffffff;
 		padding: 1rem;
 		display: grid;
+		/* minmax(0, …) on every grid here: an unsized column grows to its widest row (a long
+		   message, the dog list) and pushes the card off the side of a phone screen. */
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.8rem;
 	}
 	.check-head {
@@ -494,6 +497,7 @@
 		margin: 0;
 		padding: 0;
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 12px;
 	}
 	.check-item {
@@ -501,6 +505,7 @@
 		border-radius: 6px;
 		padding: 12px 14px;
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 9px;
 		min-width: 0;
 	}
@@ -562,7 +567,9 @@
 	}
 	.check-edit {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 10px;
+		min-width: 0;
 		padding: 10px;
 		background: #f7fbff;
 		border-radius: 6px;
@@ -604,6 +611,11 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
+		min-width: 0;
+	}
+	.check-named li select {
+		flex: 0 1 auto;
+		min-width: 0;
 	}
 	.check-dog {
 		font-weight: 600;
