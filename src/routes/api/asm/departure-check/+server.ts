@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { getAdminAuth, getAdminDb } from '$lib/firebase/admin';
 import type { AsmFeedAnimal } from '$lib/utils/departureCheck';
-import { asmBase, loadAsmDogs, searchAsmWebsite } from '$lib/server/asmAnimals';
+import { asmBase, loadAsmDogs, searchAsmWebsiteWithSummary, type AsmSearchSummary } from '$lib/server/asmAnimals';
 
 export const config = { maxDuration: 60 };
 
@@ -29,18 +29,22 @@ export async function POST({ request }: RequestEvent) {
 		const queries = [...new Set(body.search.map((q) => String(q).trim()).filter(Boolean))].slice(0, 25);
 		const found = new Map<number, AsmFeedAnimal>();
 		const problems: string[] = [];
+		const summaries: AsmSearchSummary[] = [];
 		for (let i = 0; i < queries.length; i += 5) {
 			const batch = await Promise.all(
 				queries.slice(i, i + 5).map((q) =>
-					searchAsmWebsite(q).catch((e: Error) => {
+					searchAsmWebsiteWithSummary(q).catch((e: Error) => {
 						problems.push(e.message);
-						return [];
+						return { dogs: [], summary: null };
 					})
 				)
 			);
-			for (const dogs of batch) for (const { breed: _breed, ...dog } of dogs) found.set(dog.id, dog);
+			for (const { dogs, summary } of batch) {
+				if (summary) summaries.push(summary);
+				for (const { breed: _breed, ...dog } of dogs) found.set(dog.id, dog);
+			}
 		}
-		return json({ animals: [...found.values()], problem: problems[0] ?? null });
+		return json({ animals: [...found.values()], problem: problems[0] ?? null, summaries });
 	}
 
 	const from = /^\d{4}-\d{2}-\d{2}$/.test(body.from ?? '') ? body.from! : `${new Date().getFullYear()}-01-01`;

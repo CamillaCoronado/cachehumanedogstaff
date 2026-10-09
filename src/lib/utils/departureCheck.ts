@@ -40,6 +40,9 @@ export function findByCode(code: string, feed: AsmFeedAnimal[]): AsmDeparture | 
 	return a ? { found: true, movementType: a.movementType, movementDate: a.movementDate, deceasedDate: a.deceasedDate } : null;
 }
 
+/** A name for matching: ASM adds old names in brackets ("Dragon(Rex)"), so those go, as do case and punctuation. */
+const nameKey = (name: string) => name.replace(/\(.*?\)/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /**
@@ -60,12 +63,12 @@ export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | n
 	const direct = feed.find((a) => (asmId !== null && a.id === asmId) || sameCode(a, code));
 	if (direct) return toDeparture(direct, null);
 
-	const name = dog.name.trim().toLowerCase();
+	const name = nameKey(dog.name);
 	if (!name) return null;
 	const intake = toDate(dog.intakeDate);
 	const intakeDay = intake ? ymd(new Date(intake.getFullYear(), intake.getMonth(), intake.getDate() - 1)) : null;
 	const named = feed.filter((a) => {
-		if (a.name.trim().toLowerCase() !== name) return false;
+		if (nameKey(a.name) !== name) return false;
 		const left = a.deceasedDate ?? a.movementDate;
 		return !intakeDay || !left || left >= intakeDay;
 	});
