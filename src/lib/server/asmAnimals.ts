@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import type { AsmRegimen } from '$lib/utils/medicalCheck';
+import type { AsmGivenDose, AsmRegimen } from '$lib/utils/medicalSync';
 
 /**
  * ASM's service API has no animal search (there is no json_find_animals; unknown methods
@@ -286,44 +286,55 @@ export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: As
 }
 
 /**
- * Every active medical regimen with a dose still to give, from ASM's medical book (the
- * website's Medical screen: doses due between a year back and a year ahead, for animals
- * on the shelter or in foster). The service API has no medical method, so this signs in
- * to the website like the search does; the ASM user needs view-medical rights.
+ * ASM's medical book: every active regimen with a dose still to give (doses due between
+ * a year back and a year ahead), and the doses given in the last month, for dogs on the
+ * shelter or in foster. The service API has no medical method, so this signs in to the
+ * website like the search does; the ASM user needs view-medical rights.
  */
-export async function loadAsmRegimens(): Promise<AsmRegimen[]> {
-	const pages = await Promise.all(
-		['m365', 'p365'].map(async (offset) => {
-			const data = (await webJson(`/medical?json=true&offset=${offset}`, 'medical book')) as { rows?: unknown } | null;
-			return (Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : []).map(upperKeys);
-		})
-	);
-	const byId = new Map<number, AsmRegimen>();
-	for (const r of pages.flat()) {
+export async function loadAsmMedical(): Promise<{ regimens: AsmRegimen[]; given: AsmGivenDose[] }> {
+	const page = async (offset: string) => {
+		const data = (await webJson(`/medical?json=true&offset=${offset}`, 'medical book')) as { rows?: unknown } | null;
+		// Dogs only; the medical book has every species.
+		return (Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : []).map(upperKeys).filter(isDogRow);
+	};
+	const [past, ahead, recent] = await Promise.all([page('m365'), page('p365'), page('g31')]);
+
+	const regimens = new Map<number, AsmRegimen>();
+	for (const r of [...past, ...ahead]) {
 		const regimenId = Number(r.REGIMENID ?? r.ID);
 		const animalId = Number(r.ANIMALID);
-		// Dogs only; the medical book has every species.
-		if (!regimenId || !animalId || Number(r.STATUS ?? 0) !== 0 || !isDogRow(r)) continue;
+		if (!regimenId || !animalId || Number(r.STATUS ?? 0) !== 0) continue;
 		const due = day(r.DATEREQUIRED);
-		const prev = byId.get(regimenId);
-		byId.set(regimenId, {
+		const prev = regimens.get(regimenId);
+		const earlier = !prev?.nextDue || (due !== null && due < prev.nextDue);
+		const hour = typeof r.DATEREQUIRED === 'string' ? Number(r.DATEREQUIRED.match(/[T ](\d{2}):/)?.[1]) : NaN;
+		regimens.set(regimenId, {
 			regimenId,
 			animalId,
 			shelterCode: String(r.SHELTERCODE ?? ''),
 			shortCode: String(r.SHORTCODE ?? ''),
-			animalName: String(r.ANIMALNAME ?? ''),
 			treatmentName: String(r.TREATMENTNAME ?? '').trim(),
 			dosage: String(r.DOSAGE ?? '').trim(),
 			frequency: String(r.NAMEDFREQUENCY ?? '').trim(),
 			comments: String(r.REGIMENCOMMENTS ?? r.COMMENTS ?? '').trim(),
 			startDate: day(r.STARTDATE),
-			nextDue: [prev?.nextDue, due].filter((d): d is string => Boolean(d)).sort()[0] ?? null,
+			nextDue: earlier ? due : prev!.nextDue,
+			nextDueHour: earlier ? (Number.isFinite(hour) && hour > 0 ? hour : null) : prev!.nextDueHour,
 			remaining: Number(r.TREATMENTSREMAINING) || 0,
 			perPeriod: Number(r.TIMINGRULE) || 0,
 			unit: Number(r.TIMINGRULEFREQUENCY) || 0,
 			every: Number(r.TIMINGRULENOFREQUENCIES) || 1,
+			totalPeriods: Number(r.TOTALNUMBEROFTREATMENTS) || 0,
 			openEnded: Number(r.TREATMENTRULE) === 1
 		});
 	}
-	return [...byId.values()];
+	const given: AsmGivenDose[] = [];
+	for (const r of recent) {
+		const regimenId = Number(r.REGIMENID ?? r.ID);
+		const animalId = Number(r.ANIMALID);
+		const on = day(r.DATEGIVEN);
+		if (!regimenId || !animalId || !on) continue;
+		given.push({ regimenId, animalId, treatmentName: String(r.TREATMENTNAME ?? '').trim(), given: on, openEnded: Number(r.TREATMENTRULE) === 1 });
+	}
+	return { regimens: [...regimens.values()], given };
 }

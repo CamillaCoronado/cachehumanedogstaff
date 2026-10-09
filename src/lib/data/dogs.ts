@@ -34,6 +34,7 @@ interface StoredTreatment {
 	notes?: string | null;
 	startDate?: string | null;
 	endDate?: string | null;
+	asmRegimenId?: number | null;
 }
 
 interface StoredDog {
@@ -94,6 +95,9 @@ interface StoredDog {
 	fortifloraDate?: string | null;
 	fortifloraDays?: number | null;
 	fortifloraTime?: string | null;
+	surgeryAsmRegimenId?: number | null;
+	fortifloraAsmRegimenId?: number | null;
+	fleaAsmRegimenId?: number | null;
 	fastUntilDate?: string | null;
 	fastUntilMeal?: string | null;
 	fastReason?: string | null;
@@ -436,6 +440,10 @@ function serializeDog(dog: Dog): StoredDog {
 		fortifloraDate: toDateString(dog.fortifloraDate) ?? null,
 		fortifloraDays: typeof dog.fortifloraDays === 'number' ? dog.fortifloraDays : null,
 		fortifloraTime: dog.fortifloraTime ?? null,
+		// Cleared along with the card they belong to, so a later sync can't take off what staff re-entered.
+		surgeryAsmRegimenId: dog.surgeryDate ? (dog.surgeryAsmRegimenId ?? null) : null,
+		fortifloraAsmRegimenId: dog.fortifloraDate ? (dog.fortifloraAsmRegimenId ?? null) : null,
+		fleaAsmRegimenId: dog.hasFleas ? (dog.fleaAsmRegimenId ?? null) : null,
 		fastUntilDate: toDateString(dog.fastUntilDate) ?? null,
 		fastUntilMeal: dog.fastUntilMeal ?? null,
 		fastReason: dog.fastReason ?? null,
@@ -487,7 +495,8 @@ function serializeDog(dog: Dog): StoredDog {
 			condition: t.condition ?? null,
 			notes: t.notes ?? null,
 			startDate: toDateString(t.startDate),
-			endDate: toDateString(t.endDate)
+			endDate: toDateString(t.endDate),
+			asmRegimenId: t.asmRegimenId ?? null
 		})),
 		// Deprecated flat fields are no longer written — null them out as data migrates.
 		treatmentName: null,
@@ -511,7 +520,8 @@ function deserializeTreatments(stored: StoredDog): Treatment[] {
 			condition: t.condition ?? null,
 			notes: t.notes ?? null,
 			startDate: t.startDate ? toDate(t.startDate) : null,
-			endDate: t.endDate ? toDate(t.endDate) : null
+			endDate: t.endDate ? toDate(t.endDate) : null,
+			asmRegimenId: typeof t.asmRegimenId === 'number' ? t.asmRegimenId : null
 		}));
 	}
 	if (stored.treatmentName) {
@@ -634,6 +644,9 @@ function deserializeDog(stored: StoredDog): Dog {
 		fortifloraDate: stored.fortifloraDate ? toDate(stored.fortifloraDate) : null,
 		fortifloraDays: typeof stored.fortifloraDays === 'number' ? stored.fortifloraDays : null,
 		fortifloraTime: (['am', 'pm', 'both'].includes(stored.fortifloraTime ?? '') ? stored.fortifloraTime as 'am' | 'pm' | 'both' : null),
+		surgeryAsmRegimenId: typeof stored.surgeryAsmRegimenId === 'number' ? stored.surgeryAsmRegimenId : null,
+		fortifloraAsmRegimenId: typeof stored.fortifloraAsmRegimenId === 'number' ? stored.fortifloraAsmRegimenId : null,
+		fleaAsmRegimenId: typeof stored.fleaAsmRegimenId === 'number' ? stored.fleaAsmRegimenId : null,
 		fastUntilDate: stored.fastUntilDate ? toDate(stored.fastUntilDate) : null,
 		fastUntilMeal: (['am', 'pm', 'second'].includes(stored.fastUntilMeal ?? '') ? stored.fastUntilMeal as MealTime : null),
 		fastReason: stored.fastReason ?? null,

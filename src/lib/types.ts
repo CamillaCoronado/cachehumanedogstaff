@@ -31,7 +31,7 @@ export interface Treatment {
 	notes?: string | null;
 	startDate?: DateValue | null;
 	endDate?: DateValue | null;
-	/** The ASM medical regimen this was filled in from, so a later check doesn't offer it again. */
+	/** The ASM medical regimen this came from; the sync keeps it in line with ASM. */
 	asmRegimenId?: number | null;
 }
 
@@ -151,6 +151,11 @@ export interface Dog {
 	fortifloraDate: DateValue | null;
 	fortifloraDays: number | null;
 	fortifloraTime: 'am' | 'pm' | 'both' | null;
+	/** ASM regimens the sync put on the Surgery, FortiFlora and Fleas cards, so it can take
+	 *  them off again when ASM's are over without touching what staff entered. */
+	surgeryAsmRegimenId?: number | null;
+	fortifloraAsmRegimenId?: number | null;
+	fleaAsmRegimenId?: number | null;
 	/** Vet-ordered fast: skip every meal through this date + meal (inclusive),
 	 *  e.g. "fast tonight and tomorrow morning" → tomorrow's date, meal 'am'. */
 	fastUntilDate?: DateValue | null;
