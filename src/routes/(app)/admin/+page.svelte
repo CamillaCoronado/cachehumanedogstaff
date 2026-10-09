@@ -799,7 +799,7 @@
 
 		<div class="admin-panel-stack" hidden={tab !== 'stats'}>
 
-			<section class="admin-card panel-sky">
+			<section class="admin-card">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Stats</p>
@@ -847,7 +847,7 @@
 		</div>
 
 		<div class="admin-panel-stack" hidden={tab !== 'groups'}>
-			<section class="admin-card panel-sage">
+			<section class="admin-card">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Names</p>
@@ -902,7 +902,7 @@
 		</div>
 
 		<div class="admin-panel-stack" hidden={tab !== 'users'}>
-			<section class="admin-card panel-lilac">
+			<section class="admin-card">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Users</p>
@@ -1009,7 +1009,7 @@
 		</div>
 
 		<div class="admin-tools" hidden={tab !== 'cleanup'}>
-			<section class="admin-card panel-steel">
+			<section class="admin-card">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
@@ -1106,7 +1106,7 @@
 				{/if}
 			</section>
 
-			<section class="admin-card panel-steel">
+			<section class="admin-card">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
@@ -1181,7 +1181,7 @@
 				{/if}
 			</section>
 
-			<section class="admin-card panel-steel">
+			<section class="admin-card">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
@@ -1215,7 +1215,7 @@
 				{/if}
 			</section>
 
-			<section class="admin-card panel-steel">
+			<section class="admin-card">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
@@ -1305,7 +1305,7 @@
 				{/if}
 			</section>
 
-			<section class="admin-card panel-steel admin-wide">
+			<section class="admin-card admin-wide">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
@@ -1380,7 +1380,7 @@
 	}
 
 	.admin-card {
-		border: 1px solid rgba(46, 56, 69, 0.06);
+		border: 1px solid #dde6ef;
 		border-radius: 0.92rem;
 		background: #ffffff;
 	}
@@ -1514,9 +1514,9 @@
 
 	/* The Slack check list is its own component; give it the same panel look. */
 	.admin-panel-stack :global(.check-card) {
-		border: 1px solid rgba(46, 56, 69, 0.06);
+		border: 1px solid #dde6ef;
 		border-radius: 0.92rem;
-		background: linear-gradient(180deg, #f4dde4 0%, #f0d8df 100%);
+		background: #ffffff;
 		padding: 1.15rem 1.3rem;
 	}
 
@@ -1530,23 +1530,6 @@
 		font-size: 1.45rem;
 		font-weight: 500;
 		color: #2e3845;
-	}
-
-	/* Dashboard-style panels: a soft tint per section, no hard border. */
-	.panel-sky {
-		background: linear-gradient(180deg, #daeaf7 0%, #d4e4f2 100%);
-	}
-
-	.panel-lilac {
-		background: linear-gradient(180deg, #ece8f3 0%, #e7e3ef 100%);
-	}
-
-	.panel-sage {
-		background: linear-gradient(180deg, #ddeedd 0%, #d7e9d7 100%);
-	}
-
-	.panel-steel {
-		background: linear-gradient(180deg, #e6edf4 0%, #dfe7ef 100%);
 	}
 
 	.how-it-works {
