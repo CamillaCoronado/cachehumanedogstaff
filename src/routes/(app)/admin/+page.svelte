@@ -10,7 +10,7 @@
 	import CheckList from '$lib/components/admin/CheckList.svelte';
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
-	import { checkDeparture, type AsmDeparture } from '$lib/utils/departureCheck';
+	import { checkDeparture, matchFromFeed, type AsmDeparture, type AsmFeedAnimal } from '$lib/utils/departureCheck';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
 	import { adoptionStays, turnaroundByMonth, turnaroundWindows } from '$lib/utils/adoptionTurnaround';
@@ -270,6 +270,27 @@
 	let pgResult: PlaygroupBackfill | null = null;
 	// The review list at the top of the page; reloaded after a backfill adds to it.
 	let checkList: CheckList | undefined;
+	let checkCount = 0;
+
+	type AdminTab = 'check' | 'stats' | 'users' | 'groups' | 'cleanup';
+	const TAB_KEY = 'admin-tab';
+	const TABS: AdminTab[] = ['check', 'stats', 'users', 'groups', 'cleanup'];
+	let tab: AdminTab = 'check';
+	try {
+		const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(TAB_KEY) : null;
+		if (saved && (TABS as string[]).includes(saved)) tab = saved as AdminTab;
+	} catch {
+		/* storage blocked: start on the first tab */
+	}
+	function showTab(next: AdminTab) {
+		tab = next;
+		try {
+			localStorage.setItem(TAB_KEY, next);
+		} catch {
+			/* not remembered, that's all */
+		}
+	}
+	$: awaitingApprovalCount = users.filter((u) => !isProfileApproved(u)).length;
 	let pgWasDryRun = true;
 	// Review edits on the dry run, like the Playgroups page's own review: names removed
 	// from one message, names removed from every message, and messages skipped outright.
@@ -400,41 +421,65 @@
 				(d) => d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized'
 			);
 			const token = await $authUser?.getIdToken();
-			// Each dog can take a few ASM searches now (both ids, then its name), so keep
-			// batches small enough to finish inside the server's time limit.
-			const BATCH = 10;
-			for (let i = 0; i < dogs.length; i += BATCH) {
-				backfillProgress = `Checked ${i} of ${dogs.length} in ASM…`;
-				const batch = dogs.slice(i, i + BATCH);
-				const res = await fetch('/api/asm/departure-check', {
+			const post = (body: unknown) =>
+				fetch('/api/asm/departure-check', {
 					method: 'POST',
 					headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-					body: JSON.stringify({
-						dogs: batch.map((d) => ({
-							id: d.id,
-							name: d.name,
-							asmId: d.asmId ?? (/^\d+$/.test(d.id) ? Number(d.id) : null),
-							shelterCode: d.asmShelterCode ?? null
-						}))
-					})
+					body: JSON.stringify(body)
+				});
+			const sort = (dog: Dog, dep: AsmDeparture) => {
+				const result = checkDeparture(dog, dep);
+				if (result.kind === 'fix') {
+					backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status, byName: result.byName }];
+				} else if (result.kind === 'still-here') {
+					backfillStillHere = [...backfillStillHere, { dog, label: result.label }];
+				} else if (result.kind === 'not-found' && !toDate(dog.leftShelterDate)) {
+					// Not in ASM and no date on record — pre-fill with the day the sync
+					// archived the dog (usually within a day of the real departure). Editable.
+					const archivedAt = toDate(dog.lastSyncedAt);
+					const approx = archivedAt
+						? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
+						: '';
+					backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason, code: dog.asmShelterCode ?? '' }];
+				}
+			};
+
+			// First this year's adoptions and recent deaths from ASM in one request, matched
+			// here by id, shelter code or name. Only dogs that misses go to the per-dog search.
+			backfillProgress = 'Loading this year’s ASM adoptions…';
+			let left = dogs;
+			try {
+				const res = await post({ feed: { from: `${new Date().getFullYear()}-01-01` } });
+				if (!res.ok) throw new Error(`ASM feed failed (${res.status})`);
+				const { animals } = (await res.json()) as { animals: AsmFeedAnimal[] };
+				left = [];
+				for (const dog of dogs) {
+					const dep = matchFromFeed(dog, animals);
+					if (dep) sort(dog, dep);
+					else left.push(dog);
+				}
+			} catch (e) {
+				toast.error((e instanceof Error ? e.message : String(e)) + ' — searching dog by dog instead.');
+			}
+
+			// Each dog can take a few ASM searches (both ids, then its name), so keep
+			// batches small enough to finish inside the server's time limit.
+			const BATCH = 10;
+			for (let i = 0; i < left.length; i += BATCH) {
+				backfillProgress = `Searched ${i} of ${left.length} remaining dogs in ASM…`;
+				const batch = left.slice(i, i + BATCH);
+				const res = await post({
+					dogs: batch.map((d) => ({
+						id: d.id,
+						name: d.name,
+						asmId: d.asmId ?? (/^\d+$/.test(d.id) ? Number(d.id) : null),
+						shelterCode: d.asmShelterCode ?? null
+					}))
 				});
 				if (!res.ok) throw new Error(`ASM lookup failed (${res.status})`);
 				const found: Record<string, AsmDeparture> = await res.json();
 				for (const dog of batch) {
-					const result = checkDeparture(dog, found[dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null });
-					if (result.kind === 'fix') {
-						backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status, byName: result.byName }];
-					} else if (result.kind === 'still-here') {
-						backfillStillHere = [...backfillStillHere, { dog, label: result.label }];
-					} else if (result.kind === 'not-found' && !toDate(dog.leftShelterDate)) {
-						// Not in ASM and no date on record — pre-fill with the day the sync
-						// archived the dog (usually within a day of the real departure). Editable.
-						const archivedAt = toDate(dog.lastSyncedAt);
-						const approx = archivedAt
-							? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
-							: '';
-						backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason, code: dog.asmShelterCode ?? '' }];
-					}
+					sort(dog, found[dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null });
 				}
 			}
 			backfillMatched.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
@@ -730,32 +775,37 @@
 	</section>
 {:else}
 	<section class="admin-page">
-		<div class="admin-hero">
-			<div>
-				<p class="section-kicker">Admin</p>
-				<h2 class="hero-title">System tools and user management</h2>
-				<p class="section-copy">Manage staff roles and merge duplicate dog records.</p>
+		<div class="admin-toolbar">
+			<div class="admin-tabs" role="tablist" aria-label="Admin sections">
+				<button class={`sort-chip ${tab === 'check' ? 'sort-chip-active' : ''}`} role="tab" aria-selected={tab === 'check'} on:click={() => showTab('check')}>
+					Check these{#if checkCount > 0}<span class="tab-count">{checkCount}</span>{/if}
+				</button>
+				<button class={`sort-chip ${tab === 'stats' ? 'sort-chip-active' : ''}`} role="tab" aria-selected={tab === 'stats'} on:click={() => showTab('stats')}>Stats</button>
+				<button class={`sort-chip ${tab === 'users' ? 'sort-chip-active' : ''}`} role="tab" aria-selected={tab === 'users'} on:click={() => showTab('users')}>
+					Users{#if awaitingApprovalCount > 0}<span class="tab-count">{awaitingApprovalCount}</span>{/if}
+				</button>
+				<button class={`sort-chip ${tab === 'groups' ? 'sort-chip-active' : ''}`} role="tab" aria-selected={tab === 'groups'} on:click={() => showTab('groups')}>Dog groups</button>
+				<button class={`sort-chip ${tab === 'cleanup' ? 'sort-chip-active' : ''}`} role="tab" aria-selected={tab === 'cleanup'} on:click={() => showTab('cleanup')}>Cleanup tools</button>
 			</div>
-			<div class="hero-badges">
-				<span class="hero-badge">{users.length} user{users.length === 1 ? '' : 's'}</span>
-				<span class="hero-badge">{pendingUserCount} pending edit{pendingUserCount === 1 ? '' : 's'}</span>
+			<div class="admin-counts">
+				<span class="count-chip count-chip-blue">Users: {users.length}</span>
+				{#if pendingUserCount > 0}<span class="count-chip count-chip-amber">Unsaved: {pendingUserCount}</span>{/if}
 			</div>
 		</div>
 
-		<div class="admin-grid">
-			<div class="admin-wide">
-				<CheckList bind:this={checkList} dogs={allDogs} profile={$authProfile} />
-			</div>
+		<div class="admin-panel-stack" hidden={tab !== 'check'}>
+			<CheckList bind:this={checkList} bind:count={checkCount} dogs={allDogs} profile={$authProfile} />
+		</div>
 
-			<section class="admin-card admin-wide">
+		<div class="admin-panel-stack" hidden={tab !== 'stats'}>
+
+			<section class="admin-card panel-sky">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Stats</p>
 						<h3 class="section-title">Adoption turnaround</h3>
-						<p class="section-copy">
-							Days from a dog's latest intake to its adoption, grouped by adoption date. Foster
-							time counts; a dog adopted, returned and adopted again counts its last stay only.
-						</p>
+						<p class="section-copy">How long dogs stay before they are adopted.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>Days from a dog's latest intake to its adoption, grouped by adoption date. Foster time counts; a dog adopted, returned and adopted again counts its last stay only.</p></details>
 					</div>
 				</div>
 
@@ -794,17 +844,16 @@
 					</details>
 				{/if}
 			</section>
+		</div>
 
-			<section class="admin-card">
+		<div class="admin-panel-stack" hidden={tab !== 'groups'}>
+			<section class="admin-card panel-sage">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Names</p>
 						<h3 class="section-title">Dog groups</h3>
-						<p class="section-copy">
-							A name that stands for several dogs. Litters get called "the hat puppies" long
-							before anyone types out every name, and a surgery list saying that would otherwise
-							match nobody. Individual nicknames live on each dog's own page.
-						</p>
+						<p class="section-copy">One name for several dogs, like “the hat puppies”.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>A name that stands for several dogs. Litters get called "the hat puppies" long before anyone types out every name, and a surgery list saying that would otherwise match nobody. Individual nicknames live on each dog's own page.</p></details>
 					</div>
 				</div>
 
@@ -852,10 +901,8 @@
 
 		</div>
 
-		<details class="admin-more">
-			<summary>Users ({users.length})</summary>
-			<div class="admin-grid">
-			<section class="admin-card">
+		<div class="admin-panel-stack" hidden={tab !== 'users'}>
+			<section class="admin-card panel-lilac">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Users</p>
@@ -959,24 +1006,16 @@
 					</div>
 				{/if}
 			</section>
-			</div>
-		</details>
+		</div>
 
-		<details class="admin-more">
-			<summary>Cleanup tools</summary>
-			<div class="admin-grid">
-			<section class="admin-card">
+		<div class="admin-tools" hidden={tab !== 'cleanup'}>
+			<section class="admin-card panel-steel">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Departure dates and outcomes from ASM</h3>
-						<p class="section-copy">
-							Checks every adopted, transferred and deceased dog against ASM — its last movement and date,
-							or its death — and lists each one where the app differs: a wrong date (usually the day the
-							sync noticed rather than the day the dog left) or a wrong outcome. <strong>Nothing changes
-							until you apply, and only ticked dogs.</strong> Asks ASM a few dogs at a time, so it takes a
-							little while.
-						</p>
+						<p class="section-copy">Fix departure dates and outcomes using ASM.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>Checks every adopted, transferred and deceased dog against ASM — its last movement and date, or its death — and lists each one where the app differs: a wrong date (usually the day the sync noticed rather than the day the dog left) or a wrong outcome. <strong>Nothing changes until you apply, and only ticked dogs.</strong> Asks ASM a few dogs at a time, so it takes a little while.</p></details>
 					</div>
 					<button class="action-btn" type="button" on:click={runBackfillDryRun} disabled={backfillRunning}>
 						{backfillRunning ? 'Checking…' : 'Dry run'}
@@ -1067,17 +1106,13 @@
 				{/if}
 			</section>
 
-			<section class="admin-card">
+			<section class="admin-card panel-steel">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Backfill #dog-staff from Slack</h3>
-						<p class="section-copy">
-							Reads #dog-staff, thread replies included, from the date below and logs what it finds the
-							way the live Slack poll does: baths and yard time. Anything already
-							logged is left alone, and last-bath / last-yard dates only move forward. <strong>Dry run
-							first — nothing is logged until you apply, and only ticked rows.</strong>
-						</p>
+						<p class="section-copy">Log past baths and yard time from #dog-staff.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>Reads #dog-staff, thread replies included, from the date below and logs what it finds the way the live Slack poll does: baths and yard time. Anything already logged is left alone, and last-bath / last-yard dates only move forward. <strong>Dry run first — nothing is logged until you apply, and only ticked rows.</strong></p></details>
 					</div>
 				</div>
 				<div class="repair-actions">
@@ -1146,17 +1181,13 @@
 				{/if}
 			</section>
 
-			<section class="admin-card">
+			<section class="admin-card panel-steel">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Repair foster returns</h3>
-						<p class="section-copy">
-							Coming back from foster used to reset the dog's length of stay. This finds those dogs and
-							moves that date to its own "back from foster" stamp, so the stay counts from intake again
-							(a transfer's floor date, if it had one, was already lost). <strong>Nothing changes until
-							you apply, and only ticked dogs.</strong> Guesses from the dates start unticked.
-						</p>
+						<p class="section-copy">Stop foster returns from resetting length of stay.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>Coming back from foster used to reset the dog's length of stay. This finds those dogs and moves that date to its own "back from foster" stamp, so the stay counts from intake again (a transfer's floor date, if it had one, was already lost). <strong>Nothing changes until you apply, and only ticked dogs.</strong> Guesses from the dates start unticked.</p></details>
 					</div>
 					<button class="action-btn" type="button" on:click={runFosterRepairDryRun} disabled={frRunning}>
 						{frRunning ? 'Checking…' : 'Dry run'}
@@ -1184,17 +1215,13 @@
 				{/if}
 			</section>
 
-			<section class="admin-card">
+			<section class="admin-card panel-steel">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Backfill playgroups from Slack</h3>
-						<p class="section-copy">
-							The Slack poll only reaches two days back. This reads the playgroups channel from the date
-							below and adds reports naming dogs to the review list on the Playgroups page. Anything
-							already in that list, reviewed or not, is left alone. <strong>Dry run first — nothing is
-							added until you queue them.</strong>
-						</p>
+						<p class="section-copy">Pull past playgroup reports from Slack into review.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>The Slack poll only reaches two days back. This reads the playgroups channel from the date below and adds reports naming dogs to the review list on the Playgroups page. Anything already in that list, reviewed or not, is left alone. <strong>Dry run first — nothing is added until you queue them.</strong></p></details>
 					</div>
 				</div>
 				<div class="repair-actions">
@@ -1278,7 +1305,7 @@
 				{/if}
 			</section>
 
-			<section class="admin-card">
+			<section class="admin-card panel-steel admin-wide">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
@@ -1337,51 +1364,219 @@
 					</div>
 				{/if}
 			</section>
-			</div>
-		</details>
+		</div>
 	</section>
 {/if}
 
 <style>
 	.admin-page {
 		display: grid;
+		/* minmax(0, …) so the scrolling tab row on phones can't widen the whole column. */
+		grid-template-columns: minmax(0, 1fr);
+		gap: 1.25rem;
+		width: 100%;
+		max-width: 72rem;
+		margin: 0 auto;
+	}
+
+	.admin-card {
+		border: 1px solid rgba(46, 56, 69, 0.06);
+		border-radius: 0.92rem;
+		background: #ffffff;
+	}
+
+	.admin-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.6rem;
+	}
+
+	.admin-tabs,
+	.admin-counts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	/* Same chips as the Dogs page filters. */
+	.sort-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		min-height: 2rem;
+		border: 1px solid #d2dbe8;
+		border-radius: 0.52rem;
+		background: #ffffff;
+		padding: 0.26rem 0.7rem;
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		color: #2f425b;
+		cursor: pointer;
+	}
+
+	.sort-chip-active {
+		border-color: #2e84b7;
+		background: #e8f3ff;
+		color: #1e4f72;
+	}
+
+	.tab-count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.15rem;
+		height: 1.15rem;
+		padding: 0 0.3rem;
+		border-radius: 999px;
+		background: #3a7eb8;
+		color: #ffffff;
+		font-size: 0.6rem;
+	}
+
+	/* Same as the Dogs page count chips. */
+	.count-chip {
+		display: inline-flex;
+		align-items: center;
+		border: 1.5px solid;
+		border-radius: 999px;
+		padding: 0.18rem 0.6rem;
+		font-family: var(--font-typewriter);
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.count-chip-blue {
+		background: #e8f4fc;
+		color: #016aa5;
+		border-color: #7ec2e8;
+	}
+
+	.count-chip-amber {
+		background: #fff8e5;
+		color: #7a6200;
+		border-color: #e3cf80;
+	}
+
+	.admin-panel-stack {
+		display: grid;
 		gap: 1rem;
 	}
 
-	.admin-hero,
-	.admin-card {
-		border: 1px solid #d3dfeb;
-		border-radius: 1rem;
-		background: rgba(255, 255, 255, 0.96);
-		box-shadow: 0 16px 32px rgba(15, 38, 59, 0.08);
+	.admin-tools {
+		display: grid;
+		gap: 1rem;
+		grid-template-columns: minmax(0, 1fr);
 	}
 
-	.admin-hero {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 0.9rem;
-		padding: 1.15rem 1.2rem;
-		background:
-			radial-gradient(circle at top right, rgba(147, 57, 128, 0.12), transparent 36%),
-			linear-gradient(180deg, rgba(1, 107, 165, 0.06), rgba(255, 255, 255, 0.96));
+	@media (min-width: 60rem) {
+		.admin-tools {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 
-	.hero-title,
+	[hidden] {
+		display: none !important;
+	}
+
+	@media (max-width: 40rem) {
+		.admin-tabs {
+			flex-wrap: nowrap;
+			overflow-x: auto;
+			width: 100%;
+			padding-bottom: 0.2rem;
+		}
+
+		.admin-tabs .sort-chip {
+			flex: 0 0 auto;
+		}
+	}
+
+	.admin-tools {
+		align-items: start;
+	}
+
+	/* Every tool reads the same way: title, line, how it works, then its controls. */
+	.admin-tools .card-header {
+		flex-direction: column;
+	}
+
+	.admin-tools .backfill-date-input {
+		width: auto;
+		min-width: 11rem;
+	}
+
+	/* The Slack check list is its own component; give it the same panel look. */
+	.admin-panel-stack :global(.check-card) {
+		border: 1px solid rgba(46, 56, 69, 0.06);
+		border-radius: 0.92rem;
+		background: linear-gradient(180deg, #f4dde4 0%, #f0d8df 100%);
+		padding: 1.15rem 1.3rem;
+	}
+
+	.admin-panel-stack :global(.check-kicker) {
+		display: none;
+	}
+
+	.admin-panel-stack :global(.check-title) {
+		margin: 0;
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: 1.45rem;
+		font-weight: 500;
+		color: #2e3845;
+	}
+
+	/* Dashboard-style panels: a soft tint per section, no hard border. */
+	.panel-sky {
+		background: linear-gradient(180deg, #daeaf7 0%, #d4e4f2 100%);
+	}
+
+	.panel-lilac {
+		background: linear-gradient(180deg, #ece8f3 0%, #e7e3ef 100%);
+	}
+
+	.panel-sage {
+		background: linear-gradient(180deg, #ddeedd 0%, #d7e9d7 100%);
+	}
+
+	.panel-steel {
+		background: linear-gradient(180deg, #e6edf4 0%, #dfe7ef 100%);
+	}
+
+	.how-it-works {
+		margin-top: 0.3rem;
+		font-family: var(--font-ui);
+		font-size: 0.8rem;
+		color: #4f6377;
+	}
+
+	.how-it-works summary {
+		cursor: pointer;
+		font-weight: 700;
+		color: #2e6f9e;
+		width: fit-content;
+	}
+
+	.how-it-works p {
+		margin: 0.35rem 0 0;
+		max-width: 64ch;
+		line-height: 1.5;
+	}
+
+	/* Serif headings, like the Dashboard lists. */
 	.section-title {
 		margin: 0;
-		font-family: var(--font-ui);
-		color: #133149;
-	}
-
-	.hero-title {
-		font-size: clamp(1.35rem, 3vw, 1.8rem);
-		line-height: 1.05;
-	}
-
-	.section-title {
-		font-size: 1.05rem;
+		font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+		font-size: 1.45rem;
+		font-weight: 500;
+		line-height: 1.1;
+		color: #2e3845;
 	}
 
 	.section-kicker {
@@ -1394,22 +1589,25 @@
 	}
 
 	.section-copy {
-		margin: 0.32rem 0 0;
+		margin: 0.3rem 0 0;
 		font-family: var(--font-ui);
-		font-size: 0.9rem;
-		line-height: 1.45;
-		color: #526b81;
-		max-width: 42rem;
+		font-size: 0.86rem;
+		line-height: 1.5;
+		color: #5a7186;
+		max-width: 64ch;
 	}
 
-	.hero-badges,
+	/* The card titles say what each tool is; the small kicker above them only repeated it. */
+	.admin-card .section-kicker {
+		display: none;
+	}
+
 	.role-summary {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.45rem;
 	}
 
-	.hero-badge,
 	.role-chip,
 	.current-user-badge {
 		display: inline-flex;
@@ -1422,20 +1620,21 @@
 		font-weight: 700;
 	}
 
-	.hero-badge {
-		background: rgba(1, 107, 165, 0.08);
-		border: 1px solid rgba(1, 107, 165, 0.18);
-		color: #016ba5;
-	}
-
+	/* One column: cards of uneven height in an auto-fit grid left ragged gaps. */
 	.admin-grid {
 		display: grid;
 		gap: 1rem;
-		grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	@media (min-width: 60rem) {
+		.admin-grid-tools {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 
 	.admin-card {
-		padding: 1rem 1.05rem;
+		padding: 1.15rem 1.3rem;
 	}
 
 	.admin-wide {
@@ -1510,17 +1709,6 @@
 		font-weight: 600;
 	}
 
-	.admin-more {
-		margin-top: 1.2rem;
-	}
-
-	.admin-more > summary {
-		cursor: pointer;
-		font-weight: 700;
-		color: #214866;
-		padding: 0.6rem 0;
-	}
-
 	.admin-card-centered {
 		padding: 1.4rem;
 		text-align: center;
@@ -1545,16 +1733,23 @@
 	}
 
 	.action-btn {
-		border: 1px solid #126a97;
-		background: linear-gradient(180deg, #1387be 0%, #016ba5 100%);
+		border: 1px solid #016ba5;
+		background: #016ba5;
 		color: #ffffff;
-		box-shadow: 0 10px 18px rgba(1, 107, 165, 0.18);
+	}
+
+	.action-btn:hover:not(:disabled) {
+		background: #015a8b;
 	}
 
 	.ghost-btn {
 		border: 1px solid #cad8e6;
-		background: #f7fbff;
+		background: #ffffff;
 		color: #214866;
+	}
+
+	.ghost-btn:hover:not(:disabled) {
+		background: #f2f7fb;
 	}
 
 	.action-btn:disabled,

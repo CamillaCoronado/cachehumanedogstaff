@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog } from '$lib/types';
-import { checkDeparture } from './departureCheck';
+import { checkDeparture, matchFromFeed, type AsmFeedAnimal } from './departureCheck';
 
 const dog = (o: Partial<Dog>) => ({ id: '1', name: 'Rex', status: 'adopted', leftShelterDate: new Date(2026, 8, 20, 18), ...o }) as Dog;
 const asm = (o: object) => ({ found: true, movementType: 1, movementDate: '2026-09-20', deceasedDate: null, ...o });
@@ -40,5 +40,38 @@ describe('checkDeparture', () => {
 		const r = checkDeparture(dog({}), asm({ deceasedDate: '2026-09-18', matchedByName: 'D2025-14' }));
 		expect(r).toMatchObject({ kind: 'fix', status: 'euthanized', byName: true });
 		if (r.kind === 'fix') expect(r.reason).toContain('D2025-14');
+	});
+});
+
+describe('matchFromFeed', () => {
+	const row = (o: Partial<AsmFeedAnimal>): AsmFeedAnimal => ({
+		id: 900,
+		shelterCode: 'D2026-1',
+		name: 'Dragon',
+		movementType: null,
+		movementDate: null,
+		deceasedDate: '2026-08-02',
+		...o
+	});
+	const dragon = (o: Partial<Dog> = {}) => dog({ id: 'abc', name: 'Dragon', intakeDate: new Date(2026, 5, 1), ...o });
+
+	it('matches by ASM id or shelter code first', () => {
+		expect(matchFromFeed(dragon({ asmId: 900, name: 'Other' }), [row({})])).toMatchObject({ found: true, matchedByName: null });
+		expect(matchFromFeed(dragon({ asmShelterCode: 'd2026-1', name: 'Other' }), [row({})])).toMatchObject({ matchedByName: null });
+	});
+
+	it('falls back to a single exact name, flagged', () => {
+		expect(matchFromFeed(dragon(), [row({}), row({ id: 901, name: 'Rex' })])).toMatchObject({
+			deceasedDate: '2026-08-02',
+			matchedByName: 'D2026-1'
+		});
+	});
+
+	it('will not guess between two dogs of the same name', () => {
+		expect(matchFromFeed(dragon(), [row({}), row({ id: 901, shelterCode: 'D2026-9' })])).toBeNull();
+	});
+
+	it('skips a same-name dog that left before this one came in', () => {
+		expect(matchFromFeed(dragon(), [row({ deceasedDate: '2026-02-01' })])).toBeNull();
 	});
 });
