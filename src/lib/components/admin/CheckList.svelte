@@ -22,6 +22,8 @@
 	/** Every dog, for matching names and for adding a dog when editing. */
 	export let dogs: Dog[] = [];
 	export let profile: UserProfile | null = null;
+	/** How many items are waiting, for a count beside the tab that shows this list. */
+	export let count = 0;
 
 	type Item =
 		| { kind: 'feeding'; id: string; at: Date; feeding: PendingFeeding }
@@ -35,6 +37,7 @@
 	let editingId: string | null = null;
 
 	// One list, newest first: what was said in Slack and what the app made of it.
+	$: count = items.length;
 	$: items = [
 		...feedings.map((f) => ({ kind: 'feeding' as const, id: `f-${f.id}`, at: new Date(f.postedAt), feeding: f })),
 		...playgroups.map((p) => ({ kind: 'playgroup' as const, id: `p-${p.id}`, at: pendingPostedAt(p), playgroup: p }))
