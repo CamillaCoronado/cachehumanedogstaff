@@ -17,6 +17,48 @@ export interface AsmDeparture {
 	missReason?: string | null;
 }
 
+/** A dog from ASM's adoption and recent-changes feeds, for matching without a per-dog search. */
+export interface AsmFeedAnimal {
+	id: number;
+	shelterCode: string;
+	name: string;
+	movementType: number | null;
+	movementDate: string | null;
+	deceasedDate: string | null;
+}
+
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * Finds a dog in the feed: by ASM id or shelter code, else by exact name when exactly one
+ * dog in the feed has it and its departure is not before this dog's intake (so an older
+ * dog of the same name is never taken). Null when nothing fits.
+ */
+export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | null {
+	const asmId = dog.asmId ?? (/^\d+$/.test(dog.id) ? Number(dog.id) : null);
+	const code = (dog.asmShelterCode ?? '').trim().toUpperCase();
+	const toDeparture = (a: AsmFeedAnimal, matchedByName: string | null): AsmDeparture => ({
+		found: true,
+		movementType: a.movementType,
+		movementDate: a.movementDate,
+		deceasedDate: a.deceasedDate,
+		matchedByName
+	});
+	const direct = feed.find((a) => (asmId !== null && a.id === asmId) || (code && a.shelterCode.trim().toUpperCase() === code));
+	if (direct) return toDeparture(direct, null);
+
+	const name = dog.name.trim().toLowerCase();
+	if (!name) return null;
+	const intake = toDate(dog.intakeDate);
+	const intakeDay = intake ? ymd(new Date(intake.getFullYear(), intake.getMonth(), intake.getDate() - 1)) : null;
+	const named = feed.filter((a) => {
+		if (a.name.trim().toLowerCase() !== name) return false;
+		const left = a.deceasedDate ?? a.movementDate;
+		return !intakeDay || !left || left >= intakeDay;
+	});
+	return named.length === 1 ? toDeparture(named[0], named[0].shelterCode || String(named[0].id)) : null;
+}
+
 const MOVEMENT_LABELS: Record<number, string> = {
 	1: 'adopted',
 	2: 'in foster',

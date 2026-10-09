@@ -10,7 +10,7 @@
 	import CheckList from '$lib/components/admin/CheckList.svelte';
 	import { listFosterEvents } from '$lib/data/syncEvents';
 	import { fosterRepairCandidates, type FosterRepairCandidate } from '$lib/utils/fosterRepair';
-	import { checkDeparture, type AsmDeparture } from '$lib/utils/departureCheck';
+	import { checkDeparture, matchFromFeed, type AsmDeparture, type AsmFeedAnimal } from '$lib/utils/departureCheck';
 	import { listDogGroups, saveDogGroup, deleteDogGroup } from '$lib/data/dogGroups';
 	import type { DogGroup } from '$lib/types';
 	import { adoptionStays, turnaroundByMonth, turnaroundWindows } from '$lib/utils/adoptionTurnaround';
@@ -400,41 +400,65 @@
 				(d) => d.status === 'adopted' || d.status === 'transferred' || d.status === 'euthanized'
 			);
 			const token = await $authUser?.getIdToken();
-			// Each dog can take a few ASM searches now (both ids, then its name), so keep
-			// batches small enough to finish inside the server's time limit.
-			const BATCH = 10;
-			for (let i = 0; i < dogs.length; i += BATCH) {
-				backfillProgress = `Checked ${i} of ${dogs.length} in ASM…`;
-				const batch = dogs.slice(i, i + BATCH);
-				const res = await fetch('/api/asm/departure-check', {
+			const post = (body: unknown) =>
+				fetch('/api/asm/departure-check', {
 					method: 'POST',
 					headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-					body: JSON.stringify({
-						dogs: batch.map((d) => ({
-							id: d.id,
-							name: d.name,
-							asmId: d.asmId ?? (/^\d+$/.test(d.id) ? Number(d.id) : null),
-							shelterCode: d.asmShelterCode ?? null
-						}))
-					})
+					body: JSON.stringify(body)
+				});
+			const sort = (dog: Dog, dep: AsmDeparture) => {
+				const result = checkDeparture(dog, dep);
+				if (result.kind === 'fix') {
+					backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status, byName: result.byName }];
+				} else if (result.kind === 'still-here') {
+					backfillStillHere = [...backfillStillHere, { dog, label: result.label }];
+				} else if (result.kind === 'not-found' && !toDate(dog.leftShelterDate)) {
+					// Not in ASM and no date on record — pre-fill with the day the sync
+					// archived the dog (usually within a day of the real departure). Editable.
+					const archivedAt = toDate(dog.lastSyncedAt);
+					const approx = archivedAt
+						? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
+						: '';
+					backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason, code: dog.asmShelterCode ?? '' }];
+				}
+			};
+
+			// First this year's adoptions and recent deaths from ASM in one request, matched
+			// here by id, shelter code or name. Only dogs that misses go to the per-dog search.
+			backfillProgress = 'Loading this year’s ASM adoptions…';
+			let left = dogs;
+			try {
+				const res = await post({ feed: { from: `${new Date().getFullYear()}-01-01` } });
+				if (!res.ok) throw new Error(`ASM feed failed (${res.status})`);
+				const { animals } = (await res.json()) as { animals: AsmFeedAnimal[] };
+				left = [];
+				for (const dog of dogs) {
+					const dep = matchFromFeed(dog, animals);
+					if (dep) sort(dog, dep);
+					else left.push(dog);
+				}
+			} catch (e) {
+				toast.error((e instanceof Error ? e.message : String(e)) + ' — searching dog by dog instead.');
+			}
+
+			// Each dog can take a few ASM searches (both ids, then its name), so keep
+			// batches small enough to finish inside the server's time limit.
+			const BATCH = 10;
+			for (let i = 0; i < left.length; i += BATCH) {
+				backfillProgress = `Searched ${i} of ${left.length} remaining dogs in ASM…`;
+				const batch = left.slice(i, i + BATCH);
+				const res = await post({
+					dogs: batch.map((d) => ({
+						id: d.id,
+						name: d.name,
+						asmId: d.asmId ?? (/^\d+$/.test(d.id) ? Number(d.id) : null),
+						shelterCode: d.asmShelterCode ?? null
+					}))
 				});
 				if (!res.ok) throw new Error(`ASM lookup failed (${res.status})`);
 				const found: Record<string, AsmDeparture> = await res.json();
 				for (const dog of batch) {
-					const result = checkDeparture(dog, found[dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null });
-					if (result.kind === 'fix') {
-						backfillMatched = [...backfillMatched, { dog, date: result.date, source: result.reason, status: result.status, byName: result.byName }];
-					} else if (result.kind === 'still-here') {
-						backfillStillHere = [...backfillStillHere, { dog, label: result.label }];
-					} else if (result.kind === 'not-found' && !toDate(dog.leftShelterDate)) {
-						// Not in ASM and no date on record — pre-fill with the day the sync
-						// archived the dog (usually within a day of the real departure). Editable.
-						const archivedAt = toDate(dog.lastSyncedAt);
-						const approx = archivedAt
-							? `${archivedAt.getFullYear()}-${String(archivedAt.getMonth() + 1).padStart(2, '0')}-${String(archivedAt.getDate()).padStart(2, '0')}`
-							: '';
-						backfillUnknown = [...backfillUnknown, { dog, manualDate: approx, reason: result.reason, code: dog.asmShelterCode ?? '' }];
-					}
+					sort(dog, found[dog.id] ?? { found: false, movementType: null, movementDate: null, deceasedDate: null });
 				}
 			}
 			backfillMatched.sort((a, b) => a.dog.name.localeCompare(b.dog.name));
@@ -964,7 +988,7 @@
 
 		<details class="admin-more">
 			<summary>Cleanup tools</summary>
-			<div class="admin-grid">
+			<div class="admin-grid admin-grid-tools">
 			<section class="admin-card">
 				<div class="card-header">
 					<div>
@@ -1278,7 +1302,7 @@
 				{/if}
 			</section>
 
-			<section class="admin-card">
+			<section class="admin-card admin-wide">
 				<div class="card-header">
 					<div>
 						<p class="section-kicker">Data</p>
@@ -1345,27 +1369,27 @@
 <style>
 	.admin-page {
 		display: grid;
-		gap: 1rem;
+		gap: 1.25rem;
+		width: 100%;
+		max-width: 72rem;
+		margin: 0 auto;
 	}
 
-	.admin-hero,
 	.admin-card {
-		border: 1px solid #d3dfeb;
-		border-radius: 1rem;
-		background: rgba(255, 255, 255, 0.96);
-		box-shadow: 0 16px 32px rgba(15, 38, 59, 0.08);
+		border: 1px solid #dde6ef;
+		border-radius: 0.9rem;
+		background: #ffffff;
+		box-shadow: 0 1px 2px rgba(15, 38, 59, 0.05);
 	}
 
 	.admin-hero {
 		display: flex;
 		flex-wrap: wrap;
-		align-items: flex-start;
+		align-items: flex-end;
 		justify-content: space-between;
 		gap: 0.9rem;
-		padding: 1.15rem 1.2rem;
-		background:
-			radial-gradient(circle at top right, rgba(147, 57, 128, 0.12), transparent 36%),
-			linear-gradient(180deg, rgba(1, 107, 165, 0.06), rgba(255, 255, 255, 0.96));
+		padding: 0.25rem 0 1rem;
+		border-bottom: 1px solid #dde6ef;
 	}
 
 	.hero-title,
@@ -1394,12 +1418,17 @@
 	}
 
 	.section-copy {
-		margin: 0.32rem 0 0;
+		margin: 0.3rem 0 0;
 		font-family: var(--font-ui);
-		font-size: 0.9rem;
-		line-height: 1.45;
-		color: #526b81;
-		max-width: 42rem;
+		font-size: 0.86rem;
+		line-height: 1.5;
+		color: #5a7186;
+		max-width: 64ch;
+	}
+
+	/* The card titles say what each tool is; the small kicker above them only repeated it. */
+	.admin-card .section-kicker {
+		display: none;
 	}
 
 	.hero-badges,
@@ -1428,14 +1457,21 @@
 		color: #016ba5;
 	}
 
+	/* One column: cards of uneven height in an auto-fit grid left ragged gaps. */
 	.admin-grid {
 		display: grid;
 		gap: 1rem;
-		grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	@media (min-width: 60rem) {
+		.admin-grid-tools {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 
 	.admin-card {
-		padding: 1rem 1.05rem;
+		padding: 1.15rem 1.3rem;
 	}
 
 	.admin-wide {
@@ -1511,7 +1547,43 @@
 	}
 
 	.admin-more {
-		margin-top: 1.2rem;
+		margin-top: 0.25rem;
+	}
+
+	.admin-more > summary {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		padding: 0.9rem 0 0.75rem;
+		border-top: 1px solid #dde6ef;
+		font-family: var(--font-ui);
+		font-size: 1.05rem;
+		font-weight: 700;
+		color: #133149;
+		cursor: pointer;
+		list-style: none;
+	}
+
+	.admin-more > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.admin-more > summary::before {
+		content: '›';
+		display: inline-block;
+		width: 1rem;
+		font-size: 1.3rem;
+		line-height: 1;
+		color: #5a7186;
+		transition: transform 0.15s ease;
+	}
+
+	.admin-more[open] > summary::before {
+		transform: rotate(90deg);
+	}
+
+	.admin-more[open] > summary {
+		margin-bottom: 0.4rem;
 	}
 
 	.admin-more > summary {
@@ -1545,16 +1617,23 @@
 	}
 
 	.action-btn {
-		border: 1px solid #126a97;
-		background: linear-gradient(180deg, #1387be 0%, #016ba5 100%);
+		border: 1px solid #016ba5;
+		background: #016ba5;
 		color: #ffffff;
-		box-shadow: 0 10px 18px rgba(1, 107, 165, 0.18);
+	}
+
+	.action-btn:hover:not(:disabled) {
+		background: #015a8b;
 	}
 
 	.ghost-btn {
 		border: 1px solid #cad8e6;
-		background: #f7fbff;
+		background: #ffffff;
 		color: #214866;
+	}
+
+	.ghost-btn:hover:not(:disabled) {
+		background: #f2f7fb;
 	}
 
 	.action-btn:disabled,

@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getAdminAuth, getAdminDb } from '$lib/firebase/admin';
-import type { AsmDeparture } from '$lib/utils/departureCheck';
+import type { AsmDeparture, AsmFeedAnimal } from '$lib/utils/departureCheck';
 
 export const config = { maxDuration: 60 };
 
@@ -37,7 +37,44 @@ export async function POST({ request }: RequestEvent) {
 	if (!ASM_URL || !ASM_ACCOUNT || !ASM_USER || !ASM_PASS) throw error(503, 'ASM credentials not configured');
 	const base = `${ASM_URL}/asmservice?account=${encodeURIComponent(ASM_ACCOUNT)}&username=${encodeURIComponent(ASM_USER)}&password=${encodeURIComponent(ASM_PASS)}`;
 
-	const body = (await request.json().catch(() => ({}))) as { dogs?: DogRef[] };
+	const body = (await request.json().catch(() => ({}))) as { dogs?: DogRef[]; feed?: { from?: string } };
+
+	// Feed mode: every dog ASM adopted out since `from`, plus its recent changes (which
+	// carry deaths from about the last month). One request, matched on the page — the
+	// per-dog search below can fail on ASM's side, and this does not depend on it.
+	if (body.feed) {
+		const from = /^\d{4}-\d{2}-\d{2}$/.test(body.feed.from ?? '') ? body.feed.from! : `${new Date().getFullYear()}-01-01`;
+		const t = new Date();
+		const to = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+		const get = async (params: string) => {
+			const res = await fetch(`${base}&${params}`);
+			if (!res.ok) throw error(502, `ASM returned ${res.status} for ${params.split('&')[0]}`);
+			const rows = await res.json().catch(() => []);
+			return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+		};
+		const [adopted, changes] = await Promise.all([
+			get(`method=json_adopted_animals&fromdate=${from}&todate=${to}`),
+			get('method=json_recent_changes').catch(() => [] as Record<string, unknown>[])
+		]);
+		const byId = new Map<string, AsmFeedAnimal>();
+		for (const a of [...adopted, ...changes]) {
+			if (String(a.SPECIESNAME ?? '').toLowerCase() !== 'dog') continue;
+			const id = String(a.ID ?? '');
+			if (!id) continue;
+			const type = Number(a.ACTIVEMOVEMENTTYPE);
+			const prev = byId.get(id);
+			byId.set(id, {
+				id: Number(id),
+				shelterCode: String(a.SHELTERCODE ?? prev?.shelterCode ?? ''),
+				name: String(a.ANIMALNAME ?? prev?.name ?? ''),
+				movementType: Number.isFinite(type) && type > 0 ? type : (prev?.movementType ?? null),
+				movementDate: day(a.ACTIVEMOVEMENTDATE) ?? prev?.movementDate ?? null,
+				deceasedDate: day(a.DECEASEDDATE) ?? prev?.deceasedDate ?? null
+			});
+		}
+		return json({ from, animals: [...byId.values()] });
+	}
+
 	const dogs = (Array.isArray(body.dogs) ? body.dogs : []).slice(0, MAX_DOGS);
 
 	const miss = (missReason: string): AsmDeparture => ({
