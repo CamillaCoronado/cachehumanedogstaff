@@ -76,6 +76,14 @@ describe('matchFromFeed', () => {
 		expect(matchFromFeed(dragon(), [row({ deceasedDate: '2026-02-01' })])).toBeNull();
 	});
 
+	it('ignores an intake that is only the day an unlinked record was made', () => {
+		const imported = dragon({ intakeDate: new Date(2026, 8, 30, 10), createdAt: new Date(2026, 8, 30, 10) });
+		expect(matchFromFeed(imported, [row({ deceasedDate: '2026-02-01' })])).toMatchObject({ matchedByName: 'D2026-1' });
+		// Linked to ASM, or given a real intake before it was saved: the guard stays.
+		expect(matchFromFeed({ ...imported, asmShelterCode: 'D2026-5' }, [row({ deceasedDate: '2026-02-01' })])).toBeNull();
+		expect(matchFromFeed(dragon({ createdAt: new Date(2026, 8, 30) }), [row({ deceasedDate: '2026-02-01' })])).toBeNull();
+	});
+
 	it('finds a typed code by shelter code or short code', () => {
 		expect(findByCode(' d2026-1 ', [row({})])).toMatchObject({ found: true, deceasedDate: '2026-08-02' });
 		expect(findByCode('14d', [row({})])).toMatchObject({ found: true });

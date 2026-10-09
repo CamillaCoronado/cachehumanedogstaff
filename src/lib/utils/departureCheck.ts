@@ -48,7 +48,8 @@ const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 /**
  * Finds a dog in the feed: by ASM id or shelter code, else by exact name when exactly one
  * dog in the feed has it and its departure is not before this dog's intake (so an older
- * dog of the same name is never taken). Null when nothing fits.
+ * dog of the same name is never taken). An intake that is only the day the record was
+ * made is not used. Null when nothing fits.
  */
 export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | null {
 	const asmId = dog.asmId ?? (/^\d+$/.test(dog.id) ? Number(dog.id) : null);
@@ -65,7 +66,12 @@ export function matchFromFeed(dog: Dog, feed: AsmFeedAnimal[]): AsmDeparture | n
 
 	const name = nameKey(dog.name);
 	if (!name) return null;
-	const intake = toDate(dog.intakeDate);
+	// A dog never linked to ASM (added by the Day Trips import, say) was saved with its
+	// creation time as its intake when none was known, so that date says nothing.
+	const created = toDate(dog.createdAt ?? null);
+	const linked = asmId !== null || Boolean(code.trim());
+	const madeUp = !linked && created !== null && ymd(toDate(dog.intakeDate) ?? created) >= ymd(created);
+	const intake = madeUp ? null : toDate(dog.intakeDate);
 	const intakeDay = intake ? ymd(new Date(intake.getFullYear(), intake.getMonth(), intake.getDate() - 1)) : null;
 	const named = feed.filter((a) => {
 		if (nameKey(a.name) !== name) return false;

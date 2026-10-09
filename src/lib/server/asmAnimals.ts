@@ -190,7 +190,7 @@ async function webSignIn(): Promise<WebSession> {
 export interface AsmSearchSummary {
 	q: string;
 	rows: number;
-	/** Up to five rows as "code name (species)". */
+	/** Up to five rows as "code name (species)", dogs first. */
 	sample: string[];
 	/** Top-level keys of the response, in case the rows are somewhere else. */
 	keys: string[];
@@ -228,7 +228,9 @@ export async function searchAsmWebsiteWithSummary(q: string): Promise<{ dogs: As
 		summary: {
 			q,
 			rows: rows.length,
-			sample: rows
+			// Dogs first: a name search can bring back cats of the same name ahead of them.
+			sample: [...rows]
+				.sort((a, b) => Number(String(b.SPECIESNAME ?? '').toLowerCase() === 'dog') - Number(String(a.SPECIESNAME ?? '').toLowerCase() === 'dog'))
 				.slice(0, 5)
 				.map((r) => `${r.SHELTERCODE ?? r.CODE ?? '?'} ${r.ANIMALNAME ?? '?'} (${r.SPECIESNAME ?? 'no species'})`),
 			keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 8) : []
