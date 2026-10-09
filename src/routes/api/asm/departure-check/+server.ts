@@ -87,7 +87,7 @@ export async function POST({ request }: RequestEvent) {
 				continue;
 			}
 			const a = rows.find(
-				(r) => (d.asmId && Number(r.ID) === d.asmId) || (d.shelterCode && String(r.SHELTERCODE ?? '') === d.shelterCode)
+				(r) => (d.asmId && Number(r.ID) === d.asmId) || (d.shelterCode && String(r.SHELTERCODE ?? '').trim().toUpperCase() === d.shelterCode.trim().toUpperCase())
 			);
 			if (a) return [d.id, toDeparture(a, null)];
 		}
