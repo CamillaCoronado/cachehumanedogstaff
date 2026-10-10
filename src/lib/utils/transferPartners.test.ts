@@ -180,3 +180,37 @@ describe('analyzeTransferPartners', () => {
 		expect(row.medianDaysToAdoption).toBeNull();
 	});
 });
+
+describe('stats inputs from the ASM sync', () => {
+	it('counts an ASM return (intake later than first intake) as returned', () => {
+		const back = dog({
+			origin: 'Brenham',
+			originalIntakeDate: new Date('2026-02-01T12:00:00'),
+			intakeDate: new Date('2026-06-01T12:00:00')
+		});
+		const stayed = dog({
+			origin: 'Brenham',
+			originalIntakeDate: new Date('2026-06-01T09:00:00'),
+			intakeDate: new Date('2026-06-01T12:00:00')
+		});
+		const row = analyzeTransferPartners([back, stayed], TODAY).rows.find((r) => r.partner === 'Brenham')!;
+		expect(row.returned).toBe(1);
+	});
+
+	it('leaves day trip import placeholders out entirely', () => {
+		const ghost = dog({
+			origin: '',
+			status: 'adopted',
+			hiddenComments: 'Auto-created during day trip import — not found in system'
+		});
+		const result = analyzeTransferPartners([ghost], TODAY);
+		expect(result.totalDogs).toBe(0);
+		expect(result.rows.find((r) => r.partner === 'Unrecorded')).toBeUndefined();
+	});
+
+	it('does not count incoming dogs as here now', () => {
+		const incoming = dog({ origin: 'Brenham', isIncoming: true });
+		const row = analyzeTransferPartners([incoming], TODAY).rows.find((r) => r.partner === 'Brenham')!;
+		expect(row.current).toBe(0);
+	});
+});
