@@ -114,6 +114,8 @@ export async function fetchTabRows(tabTitle: string, fallbackGid: string): Promi
 		return (data.values ?? []).map((row) => row.map((cell) => cell ?? ''));
 	}
 
+	// Without a gid the CSV export silently serves the first tab, so fail instead.
+	if (!fallbackGid) throw new Error(`No sheet tab id known for "${tabTitle}"`);
 	const url = `https://docs.google.com/spreadsheets/d/${sheetId()}/export?format=csv&gid=${fallbackGid}`;
 	const res = await fetch(url, { redirect: 'follow' });
 	if (!res.ok) throw new Error(`Sheet CSV fetch failed: ${res.status} for tab "${tabTitle}"`);

@@ -85,6 +85,24 @@ export function createAdminSyncEnvironment(): SyncEnvironment {
 				}));
 		},
 
+		async fetchRecentTransfers() {
+			const base = asmBase();
+			if (!base) return [];
+			const res = await fetch(`${base}&method=json_recent_changes`);
+			if (!res.ok) return [];
+			const body = await res.json();
+			if (!Array.isArray(body)) return [];
+			// ASM movement type 3 is a transfer out.
+			return body
+				.filter((a: Record<string, unknown>) =>
+					String(a.SPECIESNAME ?? '').toLowerCase() === 'dog' && Number(a.ACTIVEMOVEMENTTYPE) === 3 && !a.DECEASEDDATE
+				)
+				.map((a: Record<string, unknown>) => ({
+					shelterCode: String(a.SHELTERCODE ?? ''),
+					movedAt: String(a.ACTIVEMOVEMENTDATE ?? '')
+				}));
+		},
+
 		async readState<T>(key: string, fallback: T): Promise<T> {
 			const snap = await db.collection(STATE_COLLECTION).doc(key).get();
 			const value = snap.exists ? (snap.data()?.value as T | undefined) : undefined;

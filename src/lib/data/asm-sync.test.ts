@@ -3,7 +3,7 @@ import { syncAnimalsFromASM, type AsmAnimal, type SyncEnvironment } from './asm-
 
 function fakeEnv(
 	docs: Record<string, Record<string, unknown>>,
-	opts: { animals?: Partial<AsmAnimal>[]; deaths?: { shelterCode: string; deceasedAt: string }[] } = {}
+	opts: { animals?: Partial<AsmAnimal>[]; deaths?: { shelterCode: string; deceasedAt: string }[]; transfers?: { shelterCode: string; movedAt: string }[] } = {}
 ) {
 	const store = new Map(Object.entries(docs).map(([id, d]) => [id, { ...d }]));
 	const state = new Map<string, unknown>();
@@ -22,6 +22,9 @@ function fakeEnv(
 		},
 		async fetchRecentDeaths() {
 			return opts.deaths ?? [];
+		},
+		async fetchRecentTransfers() {
+			return opts.transfers ?? [];
 		},
 		async readState<T>(key: string, fallback: T) {
 			return (state.get(key) as T) ?? fallback;
@@ -73,6 +76,41 @@ describe('deaths from ASM', () => {
 		);
 		await syncAnimalsFromASM(env);
 		expect(store.get('8')?.status).toBe('adopted');
+	});
+});
+
+describe('transfers from ASM', () => {
+	it('archives a transferred dog as transferred, with the movement date', async () => {
+		const { env, store } = fakeEnv(
+			{ '9': { name: 'Bus Rider', status: 'active', asmId: 9, asmShelterCode: 'A9' } },
+			{ animals: [stayer], transfers: [{ shelterCode: 'A9', movedAt: '2026-09-21 00:00:00' }] }
+		);
+		const { changes } = await syncAnimalsFromASM(env);
+		expect(store.get('9')?.status).toBe('transferred');
+		expect(store.get('9')?.leftShelterDate).toBe('2026-09-21');
+		expect(changes.find((c) => c.id === '9')).toMatchObject({ isTransferredOut: true, isArchived: false });
+	});
+
+	it('a death still wins over a transfer', async () => {
+		const { env, store } = fakeEnv(
+			{ '10': { name: 'Both', status: 'active', asmId: 10, asmShelterCode: 'A10' } },
+			{
+				animals: [stayer],
+				transfers: [{ shelterCode: 'A10', movedAt: '2026-09-21' }],
+				deaths: [{ shelterCode: 'A10', deceasedAt: '2026-09-22' }]
+			}
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('10')?.status).toBe('euthanized');
+	});
+
+	it('corrects a transfer that was archived as an adoption', async () => {
+		const { env, store } = fakeEnv(
+			{ '11': { name: 'Misfiled', status: 'adopted', asmId: 11, asmShelterCode: 'A11', leftShelterDate: '2026-09-21T18:00:00.000Z' } },
+			{ animals: [stayer], transfers: [{ shelterCode: 'A11', movedAt: '2026-09-21' }] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('11')?.status).toBe('transferred');
 	});
 });
 

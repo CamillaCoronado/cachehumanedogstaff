@@ -39,6 +39,12 @@ export interface SyncEnvironment {
 	 */
 	fetchRecentDeaths?(): Promise<{ shelterCode: string; deceasedAt: string }[]>;
 	/**
+	 * Dogs whose current ASM movement is a transfer out (json_recent_changes). Without
+	 * this a transfer looks like any other disappearance and gets archived as an adoption,
+	 * which inflates adoption numbers on the stats page.
+	 */
+	fetchRecentTransfers?(): Promise<{ shelterCode: string; movedAt: string }[]>;
+	/**
 	 * Cross-sync bookkeeping (which dog and adoption ids were already seen). This used to
 	 * live in localStorage, which made "new arrival" a per-browser notion — every browser
 	 * discovered the same arrival separately, and a shared record could not exist.
@@ -504,6 +510,19 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		}
 	} catch { /* ignore */ }
 
+	// Transfers out: the adoptions feed never lists them, so without this they'd be
+	// archived as adoptions. Applied before deaths so a death still wins.
+	let recentTransfers: { shelterCode: string; movedAt: string }[] = [];
+	try {
+		recentTransfers = (await env.fetchRecentTransfers?.()) ?? [];
+	} catch { /* ignore — falls back to adopted */ }
+	for (const t of recentTransfers) {
+		if (!t.shelterCode) continue;
+		shelterCodeOutcomes.set(t.shelterCode, 'transferred');
+		const moved = normalizeDateStr(t.movedAt);
+		if (moved) movementDateByShelterCode.set(t.shelterCode, moved);
+	}
+
 	// Deceased dogs: archive as euthanized, with the deceased date as the movement
 	// date. This must win over the adoptions feed so a passed dog is never mislabeled
 	// "adopted". The recent-changes feed is where they normally show up, since the
@@ -529,6 +548,7 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 
 	const archived = await markStaleAsmDogsArchived(env, currentAsmIds, shelterCodeOutcomes, movementDateByShelterCode);
 	await correctMislabeledDeaths(env, existingDocs, shelterCodeOutcomes, movementDateByShelterCode);
+	await correctMislabeledDeaths(env, existingDocs, shelterCodeOutcomes, movementDateByShelterCode, 'transferred');
 
 	const archivedChanges: SyncChange[] = archived.map(({ id, name, outcome }) => ({
 		id,
@@ -574,9 +594,9 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 }
 
 /**
- * Dogs archived as adopted that ASM records as deceased. Before the sync read the
- * recent-changes feed, every death was archived as an adoption, so this puts those
- * right. It only moves adopted to euthanized, never the other way, and only when the
+ * Dogs archived as adopted that ASM records as deceased (or, with outcome
+ * 'transferred', as transferred out). Before the sync read the recent-changes feed,
+ * every death and transfer was archived as an adoption, so this puts those right. It only moves adopted to euthanized, never the other way, and only when the
  * death was around the day the dog was archived: a dog adopted months ago that later
  * died at home was genuinely adopted.
  */
@@ -586,14 +606,15 @@ export async function correctMislabeledDeaths(
 	env: SyncEnvironment,
 	allDocs: Map<string, Record<string, unknown>>,
 	shelterCodeOutcomes: Map<string, ArchiveOutcome>,
-	movementDateByShelterCode: Map<string, string>
+	movementDateByShelterCode: Map<string, string>,
+	outcome: 'euthanized' | 'transferred' = 'euthanized'
 ): Promise<string[]> {
 	const writes: { id: string; data: Record<string, unknown> }[] = [];
 	const now = new Date().toISOString();
 	for (const [id, data] of allDocs) {
 		if (data.status !== 'adopted') continue;
 		const shelterCode = data.asmShelterCode as string | undefined;
-		if (!shelterCode || shelterCodeOutcomes.get(shelterCode) !== 'euthanized') continue;
+		if (!shelterCode || shelterCodeOutcomes.get(shelterCode) !== outcome) continue;
 		const deceased = movementDateByShelterCode.get(shelterCode);
 		const leftAt = new Date(String(data.leftShelterDate ?? '')).getTime();
 		const diedAt = deceased ? new Date(deceased).getTime() : NaN;
@@ -602,7 +623,7 @@ export async function correctMislabeledDeaths(
 		writes.push({
 			id,
 			data: {
-				status: 'euthanized',
+				status: outcome,
 				...(deceased ? { leftShelterDate: deceased } : {}),
 				updatedAt: now,
 				_lastSyncedAt: now
