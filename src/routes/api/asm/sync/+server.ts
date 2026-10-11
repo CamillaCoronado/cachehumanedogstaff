@@ -72,19 +72,10 @@ export async function POST({ request }: RequestEvent) {
 		await recordSyncLog(result.changes).catch((e) => console.error('[sync log]', e));
 	}
 
-	// The Medical page from ASM's medical book, in the same slot. It signs in to ASM's
-	// website, which can fail on its own; that must not fail the animal sync.
-	let medical: MedicalSyncResult;
-	try {
-		medical = await syncMedicalFromASM();
-	} catch (e) {
-		console.error('[asm medical]', e);
-		medical = { status: 'failed', error: e instanceof Error ? e.message : String(e) };
-	}
-
 	// Same five-minute slot, so feeding reports reach the approval queue within minutes
 	// of someone opening the app rather than waiting for the daily cron. A Slack failure
-	// must not fail the ASM sync, which is the reason this request exists.
+	// must not fail the ASM sync, which is the reason this request exists. They run before the
+	// medical pass, which signs in to ASM's website and can use up the time limit on its own.
 	try {
 		await pollSlackFeedings();
 	} catch (e) {
@@ -94,6 +85,16 @@ export async function POST({ request }: RequestEvent) {
 		await pollSlackPlaygroups();
 	} catch (e) {
 		console.error('[slack playgroups]', e);
+	}
+
+	// The Medical page from ASM's medical book, in the same slot. It signs in to ASM's
+	// website, which can fail on its own; that must not fail the animal sync.
+	let medical: MedicalSyncResult;
+	try {
+		medical = await syncMedicalFromASM();
+	} catch (e) {
+		console.error('[asm medical]', e);
+		medical = { status: 'failed', error: e instanceof Error ? e.message : String(e) };
 	}
 
 	// Return the changes themselves, not just a count — the sync log panel lists them.
