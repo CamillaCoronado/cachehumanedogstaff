@@ -240,7 +240,11 @@
 		[, sessions, pendingPlaygroups] = await Promise.all([
 			forceDogs ? refreshDogs() : ensureDogsLoaded(),
 			listPlaygroupSessions(),
-			listPendingPlaygroups()
+			// Only feeds the pointer to the Admin page; a failure there must not blank the page.
+			listPendingPlaygroups().catch((e) => {
+				console.error('[pending playgroups]', e);
+				return [];
+			})
 		]);
 		loading = false;
 	}

@@ -2,7 +2,7 @@ import type { PlaygroupOutcome, PlaygroupSession, UserProfile } from '$lib/types
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { toDate, toDateString } from '$lib/utils/dates';
 import { db } from '$lib/firebase/config';
-import { collection, deleteDoc, doc, getDocs, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 
 const PLAYGROUP_SESSIONS_KEY = 'shelter.playgroupSessions';
 
@@ -99,19 +99,18 @@ export async function listPlaygroupSessions() {
 		.sort((a, b) => (toDate(b.date)?.getTime() ?? 0) - (toDate(a.date)?.getTime() ?? 0));
 }
 
+/**
+ * Sorted here rather than by Firestore, like the feeding queue: pairing the `processed`
+ * filter with an order needs a composite index, and without it the query throws. The
+ * error was swallowed into an empty list, so every Slack playgroup waiting for review
+ * looked like nothing waiting and never reached the history.
+ */
 export async function listPendingPlaygroups(): Promise<PendingPlaygroup[]> {
 	if (!db) return [];
-	try {
-		const q = query(
-			collection(db, 'pendingPlaygroups'),
-			where('processed', '==', false),
-			orderBy('receivedAt', 'desc')
-		);
-		const snapshot = await getDocs(q);
-		return snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingPlaygroup, 'id'>) }));
-	} catch {
-		return [];
-	}
+	const snapshot = await getDocs(query(collection(db, 'pendingPlaygroups'), where('processed', '==', false)));
+	return snapshot.docs
+		.map((d) => ({ id: d.id, ...(d.data() as Omit<PendingPlaygroup, 'id'>) }))
+		.sort((a, b) => pendingPostedAt(b).getTime() - pendingPostedAt(a).getTime());
 }
 
 export async function markPendingProcessed(id: string): Promise<void> {
