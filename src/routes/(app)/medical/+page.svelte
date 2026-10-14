@@ -452,6 +452,31 @@
 
 	// Sick is the outbreak flag — independent of treatment. It red-zones the dog on the
 	// kennel maps and blocks playgroups/day-trips/yard until cleared.
+	// One tap off the list: no treatments, not on monitor, not sick. Monitor and sick
+	// are only ever set here or from Slack, so nothing brings the dog back on its own;
+	// an ASM treatment still running does come back on the next sync.
+	async function takeOffList(dog: Dog) {
+		if (!confirm(`Take ${dog.name} off the medical list? This clears treatments, monitor and sick.`)) return;
+		savingSickId = dog.id;
+		try {
+			await updateDogSickStatus(dog.id, {
+				treatments: [],
+				sickMonitor: false,
+				sickMonitorReason: null,
+				sickMonitorSince: null,
+				sickHold: false,
+				sickHoldReason: null,
+				sickHoldSince: null
+			});
+			toast.success(`${dog.name} is off the medical list.`);
+		} catch {
+			toast.error(`Could not update ${dog.name}.`);
+		} finally {
+			await refreshDogs();
+			savingSickId = '';
+		}
+	}
+
 	async function toggleSick(dog: Dog) {
 		savingSickId = dog.id;
 		try {
@@ -1251,6 +1276,13 @@
 												on:click={() => toggleSick(dog)}
 											>Sick</button>
 										{/if}
+										<button
+											type="button"
+											class="med-switch med-switch-done"
+											disabled={savingSickId === dog.id}
+											title="Take {dog.name} off the medical list"
+											on:click={() => takeOffList(dog)}
+										>Done</button>
 									</div>
 								</div>
 								{#if suggestSick}
@@ -2129,6 +2161,11 @@
 	.med-switch:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+
+	.med-switch-done {
+		border-color: #b9b0c9;
+		color: #4f4763;
 	}
 
 	.med-switch-on-monitor {
