@@ -198,8 +198,9 @@ export function planDogMedical(doc: Doc, regimens: AsmRegimen[], given: AsmGiven
 	const patch: Doc = {};
 	const kind = (r: { treatmentName: string; openEnded: boolean }) => regimenKind(r.treatmentName, r.openEnded);
 
-	// Under Care: ASM's regimens replace their app copies; ones ASM has finished go; the
-	// app's own entries stay. An app entry named like an ASM regimen becomes its copy.
+	// Under Care: treatments come from ASM only (Camilla, 2026-10-15: monitor is the one
+	// thing marked by hand). ASM's regimens replace their app copies, keeping the id and
+	// condition; anything ASM doesn't have, finished or never there, comes off.
 	const txRegimens = regimens.filter((r) => kind(r) === 'treatment' && r.treatmentName);
 	const current = (Array.isArray(doc.treatments) ? doc.treatments : []) as StoredTreatment[];
 	const used = new Set<number>();
@@ -217,7 +218,7 @@ export function planDogMedical(doc: Doc, regimens: AsmRegimen[], given: AsmGiven
 		if (r) {
 			used.add(r.regimenId);
 			next.push(treatmentFrom(r, t, newId));
-		} else next.push(t);
+		}
 	}
 	for (const r of txRegimens) if (!used.has(r.regimenId)) next.push(treatmentFrom(r, undefined, newId));
 	const norm = (list: StoredTreatment[]) => JSON.stringify(list.map((t) => ({ ...t, asmRegimenId: t.asmRegimenId ?? null })));

@@ -69,9 +69,10 @@ describe('treatments', () => {
 		expect(p?.treatments).toMatchObject([{ id: 't1', name: 'Doxy', condition: 'URI', notes: '100mg · 2 treatments every 1 days', asmRegimenId: 10 }]);
 	});
 
-	it('drops treatments ASM has finished and keeps the app-only ones', () => {
+	it("drops every treatment ASM doesn't have: finished, or only ever in the app", () => {
 		const p = plan({ treatments: [{ id: 't1', name: 'Doxy', asmRegimenId: 9 }, { id: 't2', name: 'ear flush' }] });
-		expect(p?.treatments).toEqual([{ id: 't2', name: 'ear flush' }]);
+		expect(p?.treatments).toEqual([]);
+		expect(plan({ treatments: [{ id: 't2', name: 'ear flush' }] }, [reg({})])?.treatments).toMatchObject([{ name: 'Doxycycline', asmRegimenId: 10 }]);
 	});
 
 	it('writes nothing when the app already matches ASM', () => {

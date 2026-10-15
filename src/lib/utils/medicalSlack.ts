@@ -130,16 +130,15 @@ export function planSlackMedical(
 				const name = drugName(a.drug);
 				const existing = treatments.find((t) => sameDrug(t.name, name) || sameDrug(t.name, a.drug));
 				if (existing) {
-					// Already on it (ASM or by hand): only fill in what it's for, if missing.
+					// ASM has it: fill in what it's for, which ASM doesn't record.
 					if (!existing.condition && a.condition) {
 						treatments = treatments.map((t) => (t === existing ? { ...t, condition: a.condition } : t));
 					}
 					break;
 				}
-				treatments = [
-					...treatments,
-					{ id: newId(), name, condition: a.condition ?? null, notes: null, startDate: storedNoon(day), endDate: null }
-				];
+				// Treatments come from ASM only, so the sync would drop one added here; the
+				// post goes on the dog's notes instead.
+				notes.push(`Started ${name}${a.condition ? ` for ${a.condition}` : ''}`);
 				break;
 			}
 			case 'fortiflora':

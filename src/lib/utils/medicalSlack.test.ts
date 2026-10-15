@@ -57,12 +57,9 @@ describe('drugName', () => {
 });
 
 describe('planSlackMedical', () => {
-	it('adds a treatment with what it is for, from the day of the post', () => {
-		const { patch } = plan({ treatments: [] }, [act({ drug: 'doxy', condition: 'URI' }), act({ drug: 'cough tabs', condition: 'URI' })]);
-		expect(patch?.treatments).toEqual([
-			{ id: 'new-id', name: 'Doxycycline', condition: 'URI', notes: null, startDate: '2026-10-08T18:00:00.000Z', endDate: null },
-			{ id: 'new-id', name: 'Cough tabs', condition: 'URI', notes: null, startDate: '2026-10-08T18:00:00.000Z', endDate: null }
-		]);
+	it('notes a drug ASM does not have yet rather than adding a treatment (treatments are ASM-only)', () => {
+		const r = plan({ treatments: [] }, [act({ drug: 'doxy', condition: 'URI' }), act({ drug: 'cough tabs' })]);
+		expect(r).toEqual({ patch: null, notes: ['Started Doxycycline for URI', 'Started Cough tabs'] });
 	});
 
 	it('leaves a drug the dog is already on, only filling in the condition', () => {
@@ -96,16 +93,16 @@ describe('planSlackMedical', () => {
 });
 
 describe('slack treatment, then asm', () => {
-	it("is replaced by ASM's regimen for the same drug, keeping the condition", () => {
-		const { patch } = plan({ treatments: [] }, [act({ drug: 'doxy', condition: 'URI' })]);
+	it("adds the reason to ASM's treatment, and the next sync keeps it", () => {
 		const regimen: AsmRegimen = {
 			regimenId: 10, animalId: 1, shelterCode: '', shortCode: '', treatmentName: 'Doxycycline', dosage: '100mg', frequency: '', comments: '',
 			startDate: '2026-10-08', nextDue: '2026-10-09', nextDueHour: null, remaining: 6, perPeriod: 2, unit: 0, every: 1, totalPeriods: 7, openEnded: false
 		};
-		const after = planDogMedical({ status: 'active', ...patch }, [regimen], [], '2026-10-09', () => 'asm-id');
-		const list = after?.treatments as { id: string; name: string; condition: string; asmRegimenId: number }[];
-		expect(list).toHaveLength(1);
-		expect(list[0]).toMatchObject({ id: 'new-id', name: 'Doxycycline', condition: 'URI', asmRegimenId: 10 });
+		const synced = planDogMedical({ status: 'active' }, [regimen], [], '2026-10-09', () => 'asm-id')!;
+		const { patch } = plan({ treatments: synced.treatments }, [act({ drug: 'doxy', condition: 'URI' })]);
+		const after = planDogMedical({ status: 'active', ...patch }, [regimen], [], '2026-10-09', () => 'other-id');
+		expect(after).toBeNull();
+		expect(patch?.treatments).toMatchObject([{ id: 'asm-id', name: 'Doxycycline', condition: 'URI', asmRegimenId: 10 }]);
 	});
 });
 
