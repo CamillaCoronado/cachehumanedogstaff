@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { env } from '$env/dynamic/private';
 import { getAdminDb } from '$lib/firebase/admin';
@@ -12,7 +11,6 @@ import {
 	type RosterDog,
 	type RosterGroup
 } from '$lib/utils/medicalSlack';
-import { shelterToday } from '$lib/utils/medicalSync';
 
 /** Where the last-read message timestamp lives, so each run starts where the last stopped. */
 const CURSOR_DOC = 'syncState/slackMedicalCursor';
@@ -58,18 +56,8 @@ export async function medicalRoster(db: Firestore): Promise<{ roster: RosterDog[
 	return { roster, groups };
 }
 
-/**
- * Writes a post's actions to its dogs. Additive only (see planSlackMedical); one-off
- * doses go to the dog's notes, keyed by the post so a re-read doesn't repeat them.
- * Returns how many dogs changed.
- */
-export async function applyMedicalActions(
-	db: Firestore,
-	actions: MedicalAction[],
-	postedAt: Date,
-	author: string,
-	slackTs: string
-): Promise<number> {
+/** Puts a post's dogs on monitor (see planSlackMedical). Returns how many dogs changed. */
+export async function applyMedicalActions(db: Firestore, actions: MedicalAction[], postedAt: Date): Promise<number> {
 	const byDog = new Map<string, MedicalAction[]>();
 	for (const a of actions) byDog.set(a.dogId, [...(byDog.get(a.dogId) ?? []), a]);
 
@@ -78,27 +66,16 @@ export async function applyMedicalActions(
 		const ref = db.collection('dogs').doc(dogId);
 		const snap = await ref.get();
 		if (!snap.exists) continue;
-		const { patch, notes } = planSlackMedical(snap.data() ?? {}, list, shelterToday(postedAt), postedAt.toISOString(), randomUUID);
-		if (patch) {
-			await ref.set({ ...patch, updatedAt: new Date().toISOString() }, { merge: true });
-		}
-		for (const [i, note] of notes.entries()) {
-			const id = `slack-med-${slackTs.replace('.', '-')}-${i}`;
-			await ref.collection('behavioralNotes').doc(id).set({
-				id,
-				note: `Medical: ${note}`,
-				createdAt: postedAt.toISOString(),
-				loggedBy: 'slack',
-				loggedByName: author
-			});
-		}
-		if (patch || notes.length > 0) changed++;
+		const patch = planSlackMedical(snap.data() ?? {}, list, postedAt.toISOString());
+		if (!patch) continue;
+		await ref.set({ ...patch, updatedAt: new Date().toISOString() }, { merge: true });
+		changed++;
 	}
 	return changed;
 }
 
 /**
- * Reads new #medical-updates posts into the Medical page. Called by the ASM sync every
+ * Reads new #medical-updates posts for dogs put on monitor. Called by the ASM sync every
  * user triggers and by the daily cron, like the feeding and playgroup polls.
  */
 export async function pollSlackMedical(): Promise<MedicalPollResult> {
@@ -169,7 +146,7 @@ export async function pollSlackMedical(): Promise<MedicalPollResult> {
 			queued++;
 			continue;
 		}
-		await applyMedicalActions(db, actions, postedAt, author, slackTs);
+		await applyMedicalActions(db, actions, postedAt);
 		applied++;
 	}
 

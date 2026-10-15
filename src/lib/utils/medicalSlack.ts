@@ -1,24 +1,17 @@
-// #medical-updates in Slack, read into the Medical page. The model turns a post into
-// actions (parse); these pure steps match the names to dogs and work out each dog's
-// writes, so the poll and the admin queue apply a post the same way.
+// #medical-updates in Slack, read into the Medical page. Only "on monitor" comes from
+// Slack (Camilla, 2026-10-15): treatments and the rest come from ASM. The model finds
+// the monitor calls in a post (parse); these pure steps match the names to dogs and
+// work out each dog's write, so the poll and the admin queue apply a post the same way.
 
-import { storedDay, storedNoon } from '$lib/utils/medicalSync';
+export type MedicalActionType = 'monitor';
 
-export type MedicalActionType = 'treatment' | 'fortiflora' | 'fleas' | 'monitor' | 'isolation' | 'note';
-
-/** One thing a post says about one dog, before the name is matched. */
+/** A post putting one dog (or a named group) on monitor, before the name is matched. */
 export interface RawMedicalAction {
 	type: MedicalActionType;
 	/** As written: a dog, or a name standing for several ("van trap puppies"). */
 	dogName: string;
-	/** treatment: the drug as written ("doxy", "cough tabs"). */
-	drug: string | null;
-	/** treatment / monitor / isolation: what it's for ("URI", "diarrhea"). */
+	/** What to watch for ("diarrhea"), or null. */
 	condition: string | null;
-	/** fortiflora: course length when the post gives one. */
-	days: number | null;
-	/** note: the one-off ("given triple dewormer for tapeworms"). */
-	note: string | null;
 }
 
 export interface MedicalAction extends Omit<RawMedicalAction, 'dogName'> {
@@ -78,125 +71,19 @@ export function resolveMedicalActions(
 }
 
 type Doc = Record<string, unknown>;
-type StoredTreatment = { id: string; name: string; condition?: string | null; startDate?: string | null; endDate?: string | null } & Doc;
-
-/** Shorthand staff write for what ASM names in full, so ASM's entry replaces the Slack one. */
-const DRUG_ALIASES: [RegExp, string][] = [
-	[/^doxy$/i, 'Doxycycline'],
-	[/^metro$/i, 'Metronidazole'],
-	[/^clav(amox)?$/i, 'Clavamox'],
-	[/^ceph(alexin)?$/i, 'Cephalexin'],
-	[/^kp$/i, 'Kaopectate'],
-	[/^lax(atone)?$/i, 'Laxatone']
-];
-
-export function drugName(drug: string): string {
-	const d = drug.trim();
-	const alias = DRUG_ALIASES.find(([re]) => re.test(d));
-	if (alias) return alias[1];
-	return d.charAt(0).toUpperCase() + d.slice(1);
-}
-
-const nameKey = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const sameDrug = (a: unknown, b: unknown) => {
-	const x = nameKey(a);
-	const y = nameKey(b);
-	return Boolean(x && y) && (x.includes(y) || y.includes(x));
-};
-
-export const DEFAULT_FORTIFLORA_DAYS = 3;
 
 /**
- * One dog's writes for a post's actions on that dog. Additive only: nothing already on
- * the dog is undone, so a re-read post or one ASM got to first changes nothing.
- * `day` is the post's shelter day (YYYY-MM-DD); `notes` go to the dog's notes.
+ * One dog's write for a post: on monitor with the reason, from when it was posted.
+ * A dog already on monitor or flagged sick is left as is, so a re-read post changes
+ * nothing; taking a dog off monitor stays with staff.
  */
-export function planSlackMedical(
-	doc: Doc,
-	actions: MedicalAction[],
-	day: string,
-	postedAtIso: string,
-	newId: () => string
-): { patch: Doc | null; notes: string[] } {
-	const patch: Doc = {};
-	const notes: string[] = [];
-	const current = (Array.isArray(doc.treatments) ? doc.treatments : []) as StoredTreatment[];
-	let treatments = current;
-
-	for (const a of actions) {
-		switch (a.type) {
-			case 'treatment': {
-				if (!a.drug?.trim()) break;
-				const name = drugName(a.drug);
-				const existing = treatments.find((t) => sameDrug(t.name, name) || sameDrug(t.name, a.drug));
-				if (existing) {
-					// ASM has it: fill in what it's for, which ASM doesn't record.
-					if (!existing.condition && a.condition) {
-						treatments = treatments.map((t) => (t === existing ? { ...t, condition: a.condition } : t));
-					}
-					break;
-				}
-				// Treatments come from ASM only, so the sync would drop one added here; the
-				// post goes on the dog's notes instead.
-				notes.push(`Started ${name}${a.condition ? ` for ${a.condition}` : ''}`);
-				break;
-			}
-			case 'fortiflora':
-				// A course already on (ASM's or one started here) is left as is.
-				if (doc.fortifloraAsmRegimenId || fortifloraRunning(doc, day)) break;
-				Object.assign(patch, {
-					fortifloraDate: storedNoon(day),
-					fortifloraDays: a.days && a.days > 0 ? a.days : DEFAULT_FORTIFLORA_DAYS,
-					fortifloraTime: 'both'
-				});
-				break;
-			case 'fleas':
-				if (doc.hasFleas !== true) patch.hasFleas = true;
-				break;
-			case 'monitor':
-				if (!doc.sickMonitor && !doc.sickHold && !patch.sickMonitor) {
-					Object.assign(patch, { sickMonitor: true, sickMonitorReason: a.condition ?? null, sickMonitorSince: postedAtIso });
-				}
-				break;
-			case 'isolation':
-				if ((doc.isolationStatus ?? 'none') === 'none' && !patch.isolationStatus) {
-					Object.assign(patch, { isolationStatus: 'iso', isolationReason: 'sick' });
-				}
-				break;
-			case 'note':
-				if (a.note?.trim()) notes.push(a.note.trim());
-				break;
-		}
-	}
-
-	if (treatments !== current) patch.treatments = treatments;
-	return { patch: Object.keys(patch).length > 0 ? patch : null, notes };
+export function planSlackMedical(doc: Doc, actions: MedicalAction[], postedAtIso: string): Doc | null {
+	const monitor = actions.find((a) => a.type === 'monitor');
+	if (!monitor || doc.sickMonitor || doc.sickHold) return null;
+	return { sickMonitor: true, sickMonitorReason: monitor.condition ?? null, sickMonitorSince: postedAtIso };
 }
 
-function fortifloraRunning(doc: Doc, day: string): boolean {
-	const start = storedDay(doc.fortifloraDate);
-	if (!start) return false;
-	const days = typeof doc.fortifloraDays === 'number' ? doc.fortifloraDays : 0;
-	const end = new Date(`${start}T12:00:00Z`);
-	end.setUTCDate(end.getUTCDate() + days);
-	return day < end.toISOString().slice(0, 10);
-}
-
-/** A one-line reading of a post's actions, for the admin queue. */
-export function describeAction(a: { type: MedicalActionType; dogName: string; drug: string | null; condition: string | null; days: number | null; note: string | null }): string {
-	const why = a.condition ? ` for ${a.condition}` : '';
-	switch (a.type) {
-		case 'treatment':
-			return `${a.dogName}: ${a.drug ? drugName(a.drug) : 'treatment'}${why}`;
-		case 'fortiflora':
-			return `${a.dogName}: FortiFlora ${a.days ?? DEFAULT_FORTIFLORA_DAYS} days`;
-		case 'fleas':
-			return `${a.dogName}: fleas`;
-		case 'monitor':
-			return `${a.dogName}: monitor${why}`;
-		case 'isolation':
-			return `${a.dogName}: into ISO${why}`;
-		case 'note':
-			return `${a.dogName}: note "${a.note ?? ''}"`;
-	}
+/** A one-line reading of an action, for the admin queue. */
+export function describeAction(a: { dogName: string; condition: string | null }): string {
+	return `${a.dogName}: monitor${a.condition ? ` for ${a.condition}` : ''}`;
 }

@@ -59,7 +59,7 @@ export async function POST({ request }: RequestEvent) {
 		const dog = roster.find((d) => d.id === assign[raw.dogName]);
 		if (dog) actions.push({ ...raw, dogId: dog.id, dogName: dog.name });
 	}
-	const changed = await applyMedicalActions(db, actions, new Date(pending.postedAt), pending.author, pending.slackTs);
+	const changed = await applyMedicalActions(db, actions, new Date(pending.postedAt));
 	await ref.set({ processed: true, outcome: 'applied' }, { merge: true });
 	return json({ ok: true, changed });
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeAction, dogsNamed, drugName, planSlackMedical, resolveMedicalActions, type MedicalAction, type RawMedicalAction } from './medicalSlack';
-import { planDogMedical, type AsmRegimen } from './medicalSync';
+import { describeAction, dogsNamed, planSlackMedical, resolveMedicalActions, type MedicalAction, type RawMedicalAction } from './medicalSlack';
 
 const roster = [
 	{ id: '1', name: 'Bruiser' },
@@ -14,11 +13,9 @@ const roster = [
 ];
 const groups = [{ name: 'Van trap puppies', dogIds: ['7', '8'] }];
 
-const raw = (o: Partial<RawMedicalAction>): RawMedicalAction => ({ type: 'treatment', dogName: 'Bruiser', drug: null, condition: null, days: null, note: null, ...o });
+const raw = (o: Partial<RawMedicalAction>): RawMedicalAction => ({ type: 'monitor', dogName: 'Bruiser', condition: null, ...o });
 const act = (o: Partial<MedicalAction>): MedicalAction => ({ ...raw(o), dogId: '1', dogName: 'Bruiser', ...o });
-const DAY = '2026-10-08';
 const AT = '2026-10-08T19:27:00.000Z';
-const plan = (doc: Record<string, unknown>, actions: MedicalAction[]) => planSlackMedical(doc, actions, DAY, AT, () => 'new-id');
 
 describe('dogsNamed', () => {
 	it('matches a dog by name, nickname, or name plus surname', () => {
@@ -39,76 +36,27 @@ describe('dogsNamed', () => {
 
 describe('resolveMedicalActions', () => {
 	it('resolves known dogs and lists the names it could not', () => {
-		const r = resolveMedicalActions(
-			[raw({ type: 'monitor', dogName: 'Loki', condition: 'diarrhea' }), raw({ type: 'monitor', dogName: 'Luno' }), raw({ dogName: 'Zane', drug: 'metro' })],
-			roster
-		);
+		const r = resolveMedicalActions([raw({ dogName: 'Loki', condition: 'diarrhea' }), raw({ dogName: 'Luno' }), raw({ dogName: 'Zane' })], roster);
 		expect(r.actions.map((a) => a.dogId)).toEqual(['2', '3']);
 		expect(r.unmatched).toEqual(['Zane']);
 	});
 });
 
-describe('drugName', () => {
-	it('spells out the shorthand staff use', () => {
-		expect(drugName('doxy')).toBe('Doxycycline');
-		expect(drugName('metro')).toBe('Metronidazole');
-		expect(drugName('cough tabs')).toBe('Cough tabs');
-	});
-});
-
 describe('planSlackMedical', () => {
-	it('notes a drug ASM does not have yet rather than adding a treatment (treatments are ASM-only)', () => {
-		const r = plan({ treatments: [] }, [act({ drug: 'doxy', condition: 'URI' }), act({ drug: 'cough tabs' })]);
-		expect(r).toEqual({ patch: null, notes: ['Started Doxycycline for URI', 'Started Cough tabs'] });
+	it('puts the dog on monitor with the reason, from when it was posted', () => {
+		expect(planSlackMedical({}, [act({ condition: 'diarrhea' })], AT)).toEqual({ sickMonitor: true, sickMonitorReason: 'diarrhea', sickMonitorSince: AT });
 	});
 
-	it('leaves a drug the dog is already on, only filling in the condition', () => {
-		const t = { id: 'a', name: 'Doxycycline 100mg', condition: null, asmRegimenId: 10 };
-		expect(plan({ treatments: [t] }, [act({ drug: 'doxy', condition: 'URI' })]).patch?.treatments).toEqual([{ ...t, condition: 'URI' }]);
-		expect(plan({ treatments: [{ ...t, condition: 'kennel cough' }] }, [act({ drug: 'doxy', condition: 'URI' })]).patch).toBeNull();
-	});
-
-	it('starts FortiFlora unless a course is already running', () => {
-		expect(plan({}, [act({ type: 'fortiflora', days: null })]).patch).toEqual({
-			fortifloraDate: '2026-10-08T18:00:00.000Z',
-			fortifloraDays: 3,
-			fortifloraTime: 'both'
-		});
-		expect(plan({ fortifloraDate: '2026-10-05T18:00:00.000Z', fortifloraDays: 14 }, [act({ type: 'fortiflora' })]).patch).toBeNull();
-		expect(plan({ fortifloraAsmRegimenId: 3 }, [act({ type: 'fortiflora' })]).patch).toBeNull();
-	});
-
-	it('sets monitor, iso and fleas without undoing anything', () => {
-		expect(plan({}, [act({ type: 'monitor', condition: 'diarrhea' })]).patch).toEqual({ sickMonitor: true, sickMonitorReason: 'diarrhea', sickMonitorSince: AT });
-		expect(plan({ sickHold: true }, [act({ type: 'monitor' })]).patch).toBeNull();
-		expect(plan({ isolationStatus: 'none' }, [act({ type: 'isolation', condition: 'giardia' })]).patch).toEqual({ isolationStatus: 'iso', isolationReason: 'sick' });
-		expect(plan({ isolationStatus: 'iso', isolationReason: 'bite_quarantine' }, [act({ type: 'isolation' })]).patch).toBeNull();
-		expect(plan({}, [act({ type: 'fleas' })]).patch).toEqual({ hasFleas: true });
-	});
-
-	it('sends one-offs to notes', () => {
-		const r = plan({}, [act({ type: 'note', note: 'Given triple dewormer for tapeworms' })]);
-		expect(r).toEqual({ patch: null, notes: ['Given triple dewormer for tapeworms'] });
-	});
-});
-
-describe('slack treatment, then asm', () => {
-	it("adds the reason to ASM's treatment, and the next sync keeps it", () => {
-		const regimen: AsmRegimen = {
-			regimenId: 10, animalId: 1, shelterCode: '', shortCode: '', treatmentName: 'Doxycycline', dosage: '100mg', frequency: '', comments: '',
-			startDate: '2026-10-08', nextDue: '2026-10-09', nextDueHour: null, remaining: 6, perPeriod: 2, unit: 0, every: 1, totalPeriods: 7, openEnded: false
-		};
-		const synced = planDogMedical({ status: 'active' }, [regimen], [], '2026-10-09', () => 'asm-id')!;
-		const { patch } = plan({ treatments: synced.treatments }, [act({ drug: 'doxy', condition: 'URI' })]);
-		const after = planDogMedical({ status: 'active', ...patch }, [regimen], [], '2026-10-09', () => 'other-id');
-		expect(after).toBeNull();
-		expect(patch?.treatments).toMatchObject([{ id: 'asm-id', name: 'Doxycycline', condition: 'URI', asmRegimenId: 10 }]);
+	it('leaves a dog already on monitor or flagged sick alone', () => {
+		expect(planSlackMedical({ sickMonitor: true, sickMonitorReason: 'cough' }, [act({ condition: 'diarrhea' })], AT)).toBeNull();
+		expect(planSlackMedical({ sickHold: true }, [act({})], AT)).toBeNull();
+		expect(planSlackMedical({}, [], AT)).toBeNull();
 	});
 });
 
 describe('describeAction', () => {
 	it('reads an action back in a line', () => {
-		expect(describeAction(raw({ drug: 'doxy', condition: 'URI' }))).toBe('Bruiser: Doxycycline for URI');
-		expect(describeAction(raw({ type: 'isolation', dogName: 'Zane', condition: 'giardia' }))).toBe('Zane: into ISO for giardia');
+		expect(describeAction(raw({ dogName: 'Loki', condition: 'diarrhea' }))).toBe('Loki: monitor for diarrhea');
+		expect(describeAction(raw({}))).toBe('Bruiser: monitor');
 	});
 });
