@@ -1152,7 +1152,7 @@
 			{/if}
 		</div>
 
-		<div class="grid gap-4 lg:grid-cols-2">
+		<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
 			<div class="rounded-3xl bg-white p-6 shadow-card">
 				<div class="flex flex-wrap items-center justify-between gap-2">
 					<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Behavioral Notes</h3>
@@ -1180,7 +1180,7 @@
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Bath Logs</h3>
-						<div class="flex items-center gap-2 text-xs">
+						<div class="flex flex-wrap items-center gap-2 text-xs">
 							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newBathDate} />
 							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveBath} disabled={savingBath || !bathIsEligible}>Save</button>
 						</div>
@@ -1214,7 +1214,7 @@
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Yard Time</h3>
-						<div class="flex items-center gap-2 text-xs">
+						<div class="flex flex-wrap items-center gap-2 text-xs">
 							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newYardDate} />
 							<input type="number" min="5" step="5" class="w-16 rounded-full border border-ink-100 px-3 py-1" bind:value={newYardMinutes} title="Minutes in the yard" />
 							<span class="text-ink-400">min</span>
@@ -1452,6 +1452,10 @@
 
 	.dog-detail-board {
 		display: grid;
+		/* minmax(0, 1fr), not the implicit auto column: an auto column grows to the widest
+		 * child's min-content (a log table, a row of date inputs), which pushes the whole
+		 * page past the right edge of a phone. */
+		grid-template-columns: minmax(0, 1fr);
 		gap: 1.05rem;
 		max-width: 100%;
 		min-width: 0;
@@ -2253,6 +2257,7 @@
 
 	.go-home-input {
 		flex: 1 1 auto;
+		min-width: 0;
 		border: 1px solid #d9e0e8;
 		border-radius: 999px;
 		padding: 8px 16px;
