@@ -127,6 +127,23 @@ function hasMedicalSupport(dog: Dog): boolean {
 	return Boolean(dog.healthProblems?.trim());
 }
 
+/**
+ * Came back after leaving. The ASM sync never writes reentryDates; it records a return
+ * as a most-recent entry date that differs from the first intake, so read both.
+ */
+function wasReturned(dog: Dog): boolean {
+	if ((dog.reentryDates?.length ?? 0) > 0) return true;
+	const first = toDate(dog.originalIntakeDate);
+	const latest = toDate(dog.intakeDate);
+	return Boolean(first && latest && first.toDateString() !== latest.toDateString());
+}
+
+/**
+ * Placeholder records the day trip import creates for names it can't match. They are
+ * saved as adopted with no real intake or departure, so they'd count as outcomes.
+ */
+const IMPORT_PLACEHOLDER = /^Auto-created during day trip import/;
+
 function median(values: number[]): number | null {
 	if (values.length === 0) return null;
 	const sorted = [...values].sort((a, b) => a - b);
@@ -196,6 +213,8 @@ function rate(row: Omit<PartnerRow, 'rating' | 'confidence'>, shelterMedian: num
 }
 
 export function analyzeTransferPartners(dogs: Dog[], today = new Date()): PartnerAnalysis {
+	dogs = dogs.filter((d) => !IMPORT_PLACEHOLDER.test(d.hiddenComments ?? ''));
+
 	const groups = new Map<string, Dog[]>();
 	const originsByPartner = new Map<string, Set<string>>();
 	const unmatched = new Set<string>();
@@ -227,7 +246,7 @@ export function analyzeTransferPartners(dogs: Dog[], today = new Date()): Partne
 
 	const rows: PartnerRow[] = [];
 	for (const [partner, list] of groups) {
-		const current = list.filter((d) => d.status === 'active' && !d.permanentFoster);
+		const current = list.filter((d) => d.status === 'active' && !d.permanentFoster && !d.isIncoming);
 		const adopted = list.filter((d) => d.status === 'adopted');
 		const transferredOut = list.filter((d) => d.status === 'transferred');
 		const euthanized = list.filter((d) => d.status === 'euthanized');
@@ -249,7 +268,7 @@ export function analyzeTransferPartners(dogs: Dog[], today = new Date()): Partne
 			adopted: adopted.length,
 			transferredOut: transferredOut.length,
 			euthanized: euthanized.length,
-			returned: list.filter((d) => (d.reentryDates?.length ?? 0) > 0).length,
+			returned: list.filter(wasReturned).length,
 			behaviorSupport: list.filter(hasBehaviorSupport).length,
 			medicalSupport: list.filter(hasMedicalSupport).length,
 			needsSupport: list.filter((d) => hasBehaviorSupport(d) || hasMedicalSupport(d)).length,

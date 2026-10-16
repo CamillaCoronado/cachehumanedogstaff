@@ -169,6 +169,8 @@
 	});
 
 	$: selectedYearStat = sheetStatsData.find((y) => y.year === statsYearFilter) ?? null;
+	// A tab that failed to load comes back as zeros; never show those as real numbers.
+	$: sheetOk = Boolean(selectedYearStat && !selectedYearStat.error);
 
 
 	let statsCanvas: HTMLCanvasElement | null = null;
@@ -337,8 +339,8 @@
 		});
 	}
 
-	$: if (statsCanvas && selectedYearStat) buildMonthlyChart();
-	$: if (cumulativeCanvas && selectedYearStat) buildCumulativeChart();
+	$: if (statsCanvas && selectedYearStat && sheetOk) buildMonthlyChart();
+	$: if (cumulativeCanvas && selectedYearStat && sheetOk) buildCumulativeChart();
 	$: if (weekdayCanvas) {
 		weekdayStats;
 		buildWeekdayChart();
@@ -381,11 +383,16 @@
 		return { count: maxCount, label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) };
 	})();
 
+	// Same stretch of each month (1st through today's date), so a month in progress isn't
+	// measured against a whole one.
 	$: thisVsLastMonth = (() => {
 		const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 		const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-		const thisCount = logs.filter(l => { const d = toDate(l.startedAt); return d && l.endedAt && d >= thisMonthStart; }).length;
-		const lastCount = logs.filter(l => { const d = toDate(l.startedAt); return d && l.endedAt && d >= lastMonthStart && d < thisMonthStart; }).length;
+		const sameDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate(), now.getHours(), now.getMinutes(), now.getSeconds());
+		// Mar 31 → "Feb 31" rolls into March; cap at the end of last month.
+		const lastCutoff = sameDayLastMonth < thisMonthStart ? sameDayLastMonth : thisMonthStart;
+		const thisCount = logs.filter(l => { const d = toDate(l.startedAt); return d && l.endedAt && d >= thisMonthStart && d <= now; }).length;
+		const lastCount = logs.filter(l => { const d = toDate(l.startedAt); return d && l.endedAt && d >= lastMonthStart && d < lastCutoff; }).length;
 		return { thisCount, lastCount, diff: thisCount - lastCount };
 	})();
 
@@ -454,14 +461,20 @@
 			.slice(0, 8);
 	})();
 
+	// Imported trips carry no volunteer; they're counted separately rather than ranked as
+	// a person. Names group case-insensitively ("jane" and "Jane" are one volunteer).
+	$: tripsWithoutVolunteer = statsYearLogs.filter((log) => !log.volunteerName?.trim()).length;
+
 	$: topVolunteerRows = (() => {
 		const rows = new Map<string, { name: string; trips: number; hours: number }>();
 		for (const log of statsYearLogs) {
-			const name = log.volunteerName?.trim() || 'Unassigned';
-			const existing = rows.get(name) ?? { name, trips: 0, hours: 0 };
+			const name = log.volunteerName?.trim().replace(/\s+/g, ' ');
+			if (!name) continue;
+			const key = name.toLowerCase();
+			const existing = rows.get(key) ?? { name, trips: 0, hours: 0 };
 			existing.trips += 1;
 			existing.hours += durationHours(log);
-			rows.set(name, existing);
+			rows.set(key, existing);
 		}
 		return [...rows.values()]
 			.sort((a, b) => b.trips - a.trips || b.hours - a.hours || a.name.localeCompare(b.name))
@@ -486,6 +499,9 @@
 							>{y.year}</button>
 						{/each}
 					</div>
+					{#if !sheetOk}
+						<p class="dt-import-error">Couldn't load the {statsYearFilter} spreadsheet tab ({selectedYearStat.error}). Spreadsheet totals are hidden; app-logged stats below still work.</p>
+					{:else}
 					<div class="dt-stats-totals">
 						<span class="dt-stats-total-num">{selectedYearStat.totalTrips}</span>
 						<span class="dt-stats-total-label">trips</span>
@@ -498,13 +514,14 @@
 							<span class="dt-stats-total-label">avg per trip</span>
 						{/if}
 					</div>
+					{/if}
 				</div>
 
 				<div class="dt-stats-kpi-grid">
 					<div class="dt-stats-kpi">
 						<span class="dt-stats-kpi-label">Busiest month</span>
-						<span class="dt-stats-kpi-value">{busiestMonth?.name ?? '—'}</span>
-						<span class="dt-stats-kpi-sub">{busiestMonth ? `${busiestMonth.trips} trips · ${Math.round(busiestMonth.hours)}h` : 'No trips'}</span>
+						<span class="dt-stats-kpi-value">{sheetOk ? (busiestMonth?.name ?? '—') : '—'}</span>
+						<span class="dt-stats-kpi-sub">{!sheetOk ? 'Spreadsheet unavailable' : busiestMonth ? `${busiestMonth.trips} trips · ${Math.round(busiestMonth.hours)}h` : 'No trips'}</span>
 					</div>
 					<div class="dt-stats-kpi">
 						<span class="dt-stats-kpi-label">Busiest weekday</span>
@@ -519,7 +536,7 @@
 					<div class="dt-stats-kpi">
 						<span class="dt-stats-kpi-label">This month vs last</span>
 						<span class="dt-stats-kpi-value">{thisVsLastMonth.thisCount} <span class="dt-stats-kpi-trend" class:kpi-up={thisVsLastMonth.diff > 0} class:kpi-down={thisVsLastMonth.diff < 0}>{thisVsLastMonth.diff > 0 ? `+${thisVsLastMonth.diff}` : thisVsLastMonth.diff < 0 ? `${thisVsLastMonth.diff}` : '='}</span></span>
-						<span class="dt-stats-kpi-sub">{thisVsLastMonth.lastCount} trips last month</span>
+						<span class="dt-stats-kpi-sub">{thisVsLastMonth.lastCount} by this date last month</span>
 					</div>
 					<div class="dt-stats-kpi">
 						<span class="dt-stats-kpi-label">Longest trip {statsYearFilter}</span>
@@ -529,10 +546,12 @@
 					<div class="dt-stats-kpi">
 						<span class="dt-stats-kpi-label">Most frequent dog</span>
 						<span class="dt-stats-kpi-value">{mostFrequentActiveDog?.name ?? '—'}</span>
-						<span class="dt-stats-kpi-sub">{mostFrequentActiveDog ? `${mostFrequentActiveDog.trips} trips this year` : 'No active dog logs'}</span>
+						<span class="dt-stats-kpi-sub">{mostFrequentActiveDog ? `${mostFrequentActiveDog.trips} trips in ${statsYearFilter}` : 'No active dog logs'}</span>
 					</div>
 				</div>
+				<p class="dt-stats-source-note">Totals, busiest month and the monthly charts come from the spreadsheet. Every other number comes from trips logged in the app, so the two won't always match.</p>
 
+				{#if sheetOk}
 				<div class="dt-stats-grid">
 					<div class="dt-panel dt-stats-chart-panel">
 						<div class="dt-stats-panel-head">
@@ -554,6 +573,7 @@
 						</div>
 					</div>
 				</div>
+				{/if}
 
 				<div class="dt-stats-grid">
 					<div class="dt-panel dt-stats-chart-panel">
@@ -585,7 +605,7 @@
 					<div class="dt-panel dt-stats-list-panel">
 						<div class="dt-stats-panel-head">
 							<p class="dt-panel-title">Top dogs</p>
-							<p class="dt-panel-sub">Repeat trip volume for the selected year</p>
+							<p class="dt-panel-sub">Repeat trip volume for the selected year. Hours only count trips logged with times; imported trips have none.</p>
 						</div>
 						{#if topDogRows.length > 0}
 							<div class="dt-stats-rank-list">
@@ -605,7 +625,7 @@
 					<div class="dt-panel dt-stats-list-panel">
 						<div class="dt-stats-panel-head">
 							<p class="dt-panel-title">Volunteer activity</p>
-							<p class="dt-panel-sub">Who logged completed trips this year</p>
+							<p class="dt-panel-sub">Who took dogs out in {statsYearFilter}{#if tripsWithoutVolunteer > 0} · {tripsWithoutVolunteer} trips have no volunteer recorded{/if}</p>
 						</div>
 						{#if topVolunteerRows.length > 0}
 							<div class="dt-stats-rank-list">
@@ -623,6 +643,7 @@
 					</div>
 				</div>
 
+				{#if sheetOk}
 				<div class="dt-panel dt-stats-list-panel">
 					<div class="dt-stats-panel-head">
 						<p class="dt-panel-title">Monthly detail</p>
@@ -651,6 +672,7 @@
 						</table>
 					</div>
 				</div>
+				{/if}
 			{:else if sheetStatsLoaded}
 				<p class="dt-panel-empty">No stats found for {statsYearFilter}.</p>
 			{/if}
@@ -750,6 +772,12 @@
 					<p class="tp-foot">
 						*Returns are shown but deliberately left out of the rating — a dog coming back
 						reflects the match we made and the adopter, not the shelter that sent it.
+					</p>
+					<p class="tp-foot">
+						"Adopted" includes any dog that left ASM by a route the sync can't tell apart from an
+						adoption (reclaimed by owner, escaped). Transfers out and deaths are recorded as such.
+						Days to adoption run from the dog's most recent intake, so a returned dog's clock
+						restarts on return.
 					</p>
 
 					{#if partnerAnalysis.unmatchedOrigins.length > 0}
@@ -1007,6 +1035,13 @@
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.7rem;
+	}
+
+
+	.dt-stats-source-note {
+		margin: 0.5rem 0 0;
+		font-size: 0.72rem;
+		color: #5f6368;
 	}
 
 

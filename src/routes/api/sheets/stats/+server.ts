@@ -1,11 +1,19 @@
 import { json } from '@sveltejs/kit';
 import { fetchTabRows } from '$lib/server/googleSheets';
+import { parseSheetNumber } from '$lib/utils/sheetNumbers';
 
-const CHART_TABS = [
-	{ year: 2024, title: '2024 Day Trip Data Chart', gid: '2048243758' },
-	{ year: 2025, title: '2025 Day Trip Data Chart', gid: '1275517464' },
-	{ year: 2026, title: '2026 Day Trip Data Chart', gid: '747552302' },
-] as const;
+const FIRST_YEAR = 2024;
+
+/**
+ * Tab ids for the CSV fallback (used when there are no API credentials). A year missing
+ * here still loads by title through the API; without credentials it reports an error
+ * instead of reading the wrong tab.
+ */
+const TAB_GIDS: Record<number, string> = {
+	2024: '2048243758',
+	2025: '1275517464',
+	2026: '747552302'
+};
 
 const MONTH_NAMES = [
 	'January', 'February', 'March', 'April', 'May', 'June',
@@ -23,24 +31,29 @@ async function fetchChartTab(title: string, gid: string): Promise<{ name: string
 		const name = row[0]?.trim();
 		if (!name || !MONTH_NAMES.includes(name)) continue;
 
-		const hours = parseFloat(row[1]) || 0;
-		const trips = parseInt(row[2], 10) || 0;
+		const hours = parseSheetNumber(row[1]);
+		const trips = Math.round(parseSheetNumber(row[2]));
 		results.push({ name, hours, trips });
 	}
 
+	if (results.length === 0) throw new Error(`No month rows found in "${title}"`);
 	return results;
 }
 
 export async function GET() {
+	const years: number[] = [];
+	for (let y = FIRST_YEAR; y <= new Date().getFullYear(); y++) years.push(y);
+
 	const results = await Promise.all(
-		CHART_TABS.map(async ({ year, title, gid }) => {
+		years.map(async (year) => {
+			const title = `${year} Day Trip Data Chart`;
 			try {
-				const months = await fetchChartTab(title, gid);
+				const months = await fetchChartTab(title, TAB_GIDS[year] ?? '');
 				const totalHours = months.reduce((s, m) => s + m.hours, 0);
 				const totalTrips = months.reduce((s, m) => s + m.trips, 0);
 				return { year, months, totalHours, totalTrips, error: null };
 			} catch (e) {
-				return { year, months: [] as { name: string; hours: number; trips: number }[], totalHours: 0, totalTrips: 0, error: String(e) };
+				return { year, months: [] as { name: string; hours: number; trips: number }[], totalHours: 0, totalTrips: 0, error: e instanceof Error ? e.message : String(e) };
 			}
 		})
 	);

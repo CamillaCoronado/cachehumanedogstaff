@@ -5,7 +5,7 @@ import { parseYardMessage } from './parseYardMessage';
 const ROSTER = [
 	'Mia', 'Jack', 'Junior', 'Sally', 'Pickles', 'Thrifted Emmy Award (Emmy)', 'Straggler',
 	'Zinnia', 'Ann', 'Dot (Freya)', 'Paisley', 'Dream', 'Myla', 'Zane', 'Roe', 'Shorty',
-	'Ace is the Place', 'Luna'
+	'Ace is the Place', 'Luna', 'Kyan', 'Natalie', 'Sheba', 'Rex', 'Natasha'
 ];
 const parse = (t: string) => parseYardMessage(t, ROSTER);
 
@@ -99,6 +99,38 @@ describe('parseYardMessage', () => {
 		expect(parse('Can someone work with Sally?').dogNames).toEqual([]);
 		expect(parse('someone should take Sally out').dogNames).toEqual([]);
 		expect(parse('I worked with the new volunteer today').dogNames).toEqual([]);
+	});
+
+	it('reads the yard named as a place, with or without "the"', () => {
+		expect(parse('Kyan natilie Sheba got time out in yard today').dogNames).toEqual(['Kyan', 'Natalie', 'Sheba']);
+		expect(parse('took Sheba to the yard').dogNames).toEqual(['Sheba']);
+		expect(parse('Sheba went to the yard').dogNames).toEqual(['Sheba']);
+		expect(parse('Took sheba to yard').dogNames).toEqual(['Sheba']);
+		expect(parse('sheba went to the play yard').dogNames).toEqual(['Sheba']);
+		expect(parse('Sheba out in yard').dogNames).toEqual(['Sheba']);
+		expect(parse('Sheba went to yard 2').dogNames).toEqual(['Sheba']);
+		expect(parse('Took Sheba and Rex to the yard').dogNames).toEqual(['Sheba', 'Rex']);
+	});
+
+	it('does not read a request to take a dog to the yard', () => {
+		expect(parse('Take Sheba to the yard after lunch').dogNames).toEqual([]);
+		expect(parse('bring Rex to the yard').dogNames).toEqual([]);
+		expect(parse('please put Sheba in the yard').dogNames).toEqual([]);
+		expect(parse('can someone take Sheba to the yard').dogNames).toEqual([]);
+	});
+
+	it('matches a name one letter off, only when one dog is that close', () => {
+		expect(parse('Shebaa got yard time').dogNames).toEqual(['Sheba']);
+		// Short names are too easy to hit by accident.
+		expect(parse('Rexx got yard time').dogNames).toEqual([]);
+		// Natalia is one letter from Natalie and two from Natasha: still one dog.
+		expect(parse('Natalia got yard time').dogNames).toEqual(['Natalie']);
+		// A word that is just a word stays one.
+		expect(parse('Sheba got yard time today').dogNames).toEqual(['Sheba']);
+	});
+
+	it('does not guess between two dogs a typo is equally close to', () => {
+		expect(parseYardMessage('Bella got yard time', ['Bellb', 'Bellc']).dogNames).toEqual([]);
 	});
 
 	it('returns nothing for a message that is not about the yard', () => {
