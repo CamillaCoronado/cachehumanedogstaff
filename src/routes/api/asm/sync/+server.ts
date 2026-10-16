@@ -87,7 +87,7 @@ export async function POST({ request }: RequestEvent) {
 	} catch (e) {
 		console.error('[slack playgroups]', e);
 	}
-	// After the ASM medical pass, so a drug ASM already has isn't added again from Slack.
+	// Who #medical-updates put on monitor; only monitor comes from Slack.
 	try {
 		await pollSlackMedical();
 	} catch (e) {
