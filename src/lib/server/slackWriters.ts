@@ -36,8 +36,10 @@ export async function applySurgeryList(
 	const batch = db.batch();
 	surgery.forEach((dog, i) => {
 		if (onlyForward) {
-			const existing = current[i].data()?.surgeryDate;
-			if (existing && new Date(existing).getTime() >= postedAt.getTime()) return;
+			// Nor put back a surgery that was since cleared off the list.
+			const { surgeryDate, lastSurgeryDate } = current[i].data() ?? {};
+			const latest = Math.max(surgeryDate ? new Date(surgeryDate).getTime() : 0, lastSurgeryDate ? new Date(lastSurgeryDate).getTime() : 0);
+			if (latest >= postedAt.getTime()) return;
 		}
 		batch.set(
 			db.collection('dogs').doc(dog.dogId),

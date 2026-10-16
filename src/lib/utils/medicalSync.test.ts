@@ -121,9 +121,17 @@ describe('surgery', () => {
 		expect(plan({}, [reg({ treatmentName: 'Spay', regimenId: 20, nextDue: '2026-10-12', perPeriod: 0 })])).toMatchObject({ surgeryDate: '2026-10-12T18:00:00.000Z', surgeryAsmRegimenId: 20 });
 	});
 
-	it('keeps a surgery ASM shows done, by a dose given or a neuter date', () => {
-		expect(plan({ surgeryDate: '2026-10-08T18:00:00.000Z' }, [], [dose({ given: '2026-10-08' })])).toBeNull();
-		expect(plan({ surgeryDate: '2026-10-08T18:00:00.000Z', fixedDate: '2026-10-08' })).toBeNull();
+	it('keeps a surgery ASM shows done while the dog is resting, by a dose given or a neuter date', () => {
+		expect(plan({ surgeryDate: '2026-10-08T18:00:00.000Z', surgeryRestDays: 3 }, [], [dose({ given: '2026-10-08' })])).toBeNull();
+		expect(plan({ surgeryDate: '2026-10-08T18:00:00.000Z', surgeryRestDays: 3, fixedDate: '2026-10-08' })).toBeNull();
+	});
+
+	it('takes a done surgery off once its rest is over, kept as the last surgery', () => {
+		const off = { lastSurgeryDate: '2026-09-21T18:00:00.000Z', surgeryDate: null, surgeryRestDays: null, surgeryAsmRegimenId: null };
+		expect(plan({ surgeryDate: '2026-09-21T18:00:00.000Z', surgeryRestDays: 14, fixedDate: '2026-09-21' })).toEqual(off);
+		expect(plan({ surgeryDate: '2026-09-21T18:00:00.000Z', fixedDate: '2026-09-21' })).toEqual(off);
+		// Rest ends today: the page already reads it complete.
+		expect(plan({ surgeryDate: '2026-10-06T18:00:00.000Z', surgeryRestDays: 3, fixedDate: '2026-10-06' })).toMatchObject({ surgeryDate: null });
 	});
 
 	it('drops a surgery whose day is over without ASM showing it done', () => {
