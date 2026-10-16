@@ -7,6 +7,7 @@ import { syncMedicalFromASM, type MedicalSyncResult } from '$lib/server/asmMedic
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
+import { pollSlackMedical } from '$lib/server/slackMedicalPoll';
 import { recordSyncLog, syncLogSince } from '$lib/server/syncLog';
 
 /**
@@ -85,6 +86,12 @@ export async function POST({ request }: RequestEvent) {
 		await pollSlackPlaygroups();
 	} catch (e) {
 		console.error('[slack playgroups]', e);
+	}
+	// Who #medical-updates put on monitor; only monitor comes from Slack.
+	try {
+		await pollSlackMedical();
+	} catch (e) {
+		console.error('[slack medical]', e);
 	}
 
 	// The Medical page from ASM's medical book, in the same slot. It signs in to ASM's

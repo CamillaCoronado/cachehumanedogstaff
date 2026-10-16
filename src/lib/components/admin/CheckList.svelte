@@ -18,6 +18,19 @@
 	} from '$lib/data/playgroups';
 	import { matchDogOnDate, wasInShelterOn } from '$lib/utils/dogs';
 	import { formatDateTime } from '$lib/utils/dates';
+	import { authUser } from '$lib/stores/auth';
+	import { describeAction, type RawMedicalAction } from '$lib/utils/medicalSlack';
+
+	/** A #medical-updates post the poll held back (server: slackMedicalPoll). */
+	type PendingMedical = {
+		id: string;
+		rawText: string;
+		author: string;
+		postedAt: string;
+		reason: string;
+		actions: RawMedicalAction[];
+		unmatched: string[];
+	};
 
 	/** Every dog, for matching names and for adding a dog when editing. */
 	export let dogs: Dog[] = [];
@@ -27,10 +40,14 @@
 
 	type Item =
 		| { kind: 'feeding'; id: string; at: Date; feeding: PendingFeeding }
-		| { kind: 'playgroup'; id: string; at: Date; playgroup: PendingPlaygroup };
+		| { kind: 'playgroup'; id: string; at: Date; playgroup: PendingPlaygroup }
+		| { kind: 'medical'; id: string; at: Date; medical: PendingMedical };
 
 	let feedings: PendingFeeding[] = [];
 	let playgroups: PendingPlaygroup[] = [];
+	let medical: PendingMedical[] = [];
+	/** For a medical post: the dog an admin picked for each name the app couldn't match. */
+	let assign: Record<string, Record<string, string>> = {};
 	let loading = false;
 	let loadError = '';
 	let busyId: string | null = null;
@@ -40,19 +57,29 @@
 	$: count = items.length;
 	$: items = [
 		...feedings.map((f) => ({ kind: 'feeding' as const, id: `f-${f.id}`, at: new Date(f.postedAt), feeding: f })),
-		...playgroups.map((p) => ({ kind: 'playgroup' as const, id: `p-${p.id}`, at: pendingPostedAt(p), playgroup: p }))
+		...playgroups.map((p) => ({ kind: 'playgroup' as const, id: `p-${p.id}`, at: pendingPostedAt(p), playgroup: p })),
+		...medical.map((m) => ({ kind: 'medical' as const, id: `m-${m.id}`, at: new Date(m.postedAt), medical: m }))
 	].sort((a, b) => b.at.getTime() - a.at.getTime()) as Item[];
 
 	export async function load() {
 		loading = true;
 		loadError = '';
 		try {
-			const [f, p] = await Promise.all([
+			const [f, p, m] = await Promise.all([
 				listPendingFeedings().then(withCurrentReading),
-				listPendingPlaygroups()
+				listPendingPlaygroups(),
+				// A failure here must not hide the feedings and playgroups above it.
+				medicalApi('GET')
+					.then((r) => (r.pending ?? []) as PendingMedical[])
+					.catch((e) => {
+						console.error(e);
+						toast.error('Could not load held-back medical posts.');
+						return [] as PendingMedical[];
+					})
 			]);
 			feedings = f;
 			playgroups = p;
+			medical = m;
 		} catch (error) {
 			console.error(error);
 			// Shown, not toasted: a failure here would otherwise look like an empty list.
@@ -84,6 +111,11 @@
 		addAmount: AmountEaten;
 	};
 	let feedingDraft: FeedingDraft | null = null;
+
+	// Dogs in short-term foster still get medical updates (meds go with them).
+	$: medicalDogs = dogs
+		.filter((d) => d.status === 'active' && !d.permanentFoster)
+		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: shelterDogs = dogs
 		.filter((d) => d.status === 'active' && !d.inFoster && !d.permanentFoster)
@@ -143,6 +175,35 @@
 		} catch (error) {
 			console.error(error);
 			toast.error('Could not dismiss that message.');
+		} finally {
+			busyId = null;
+		}
+	}
+
+	// --- Medical ---------------------------------------------------------------
+
+	// Held-back #medical-updates posts are read and applied on the server, with the
+	// same code the poll writes with.
+	async function medicalApi(method: 'GET' | 'POST', body?: unknown) {
+		const token = await $authUser?.getIdToken();
+		const res = await fetch('/api/slack/medical', {
+			method,
+			headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+			...(body ? { body: JSON.stringify(body) } : {})
+		});
+		if (!res.ok) throw new Error(`Medical posts (${res.status}): ${(await res.text()).slice(0, 160)}`);
+		return res.json();
+	}
+
+	async function resolveMedical(item: Item & { kind: 'medical' }, action: 'apply' | 'dismiss') {
+		busyId = item.id;
+		try {
+			const r = await medicalApi('POST', { id: item.medical.id, action, assign: assign[item.medical.id] ?? {} });
+			medical = medical.filter((m) => m.id !== item.medical.id);
+			if (action === 'apply') toast.success(`Updated ${r.changed} dog${r.changed === 1 ? '' : 's'}.`);
+		} catch (error) {
+			console.error(error);
+			toast.error(action === 'apply' ? 'Could not apply that post.' : 'Could not dismiss that post.');
 		} finally {
 			busyId = null;
 		}
@@ -272,15 +333,41 @@
 				{@const editing = editingId === item.id}
 				<li class="check-item">
 					<p class="check-meta">
-						<span class={`check-tag check-tag-${item.kind}`}>{item.kind === 'feeding' ? 'Feeding' : 'Playgroup'}</span>
-						<strong>{item.kind === 'feeding' ? item.feeding.author : item.playgroup.author ?? 'Slack'}</strong>
+						<span class={`check-tag check-tag-${item.kind}`}>{item.kind === 'feeding' ? 'Feeding' : item.kind === 'medical' ? 'Medical' : 'Playgroup'}</span>
+						<strong>{item.kind === 'feeding' ? item.feeding.author : item.kind === 'medical' ? item.medical.author : item.playgroup.author ?? 'Slack'}</strong>
 						<span>{formatDateTime(item.at)}</span>
 					</p>
 					<blockquote class="check-quote">
-						{item.kind === 'feeding' ? item.feeding.rawText : item.playgroup.rawText}
+						{item.kind === 'feeding' ? item.feeding.rawText : item.kind === 'medical' ? item.medical.rawText : item.playgroup.rawText}
 					</blockquote>
 
-					{#if item.kind === 'feeding'}
+					{#if item.kind === 'medical'}
+						{@const m = item.medical}
+						{#if m.actions.length}
+							<ul class="check-medical">
+								{#each m.actions as a}<li>{describeAction(a)}</li>{/each}
+							</ul>
+						{/if}
+						{#if m.reason}<p class="check-why">{m.reason}</p>{/if}
+						{#each m.unmatched as name (name)}
+							<label class="check-field">
+								<span>Which dog is "{name}"?</span>
+								<select
+									value={assign[m.id]?.[name] ?? ''}
+									on:change={(e) => (assign = { ...assign, [m.id]: { ...(assign[m.id] ?? {}), [name]: e.currentTarget.value } })}
+								>
+									<option value="">Skip</option>
+									{#each medicalDogs as d (d.id)}<option value={d.id}>{d.name}</option>{/each}
+								</select>
+							</label>
+						{/each}
+						<div class="check-actions">
+							<button class="action-btn" type="button" disabled={busy || m.actions.length === 0} on:click={() => resolveMedical(item, 'apply')}>
+								{busy ? 'Saving…' : '✓ Right'}
+							</button>
+							<button class="ghost-btn" type="button" disabled={busy} on:click={() => resolveMedical(item, 'dismiss')}>✗ Wrong</button>
+						</div>
+					{:else if item.kind === 'feeding'}
 						{@const f = item.feeding}
 						{#if !editing}
 							<p class="check-reading">
@@ -529,6 +616,16 @@
 	.check-tag-feeding {
 		background: #fff4cc;
 		color: #7a4f00;
+	}
+	.check-tag-medical {
+		background: #fbe4e4;
+		color: #8a2f2f;
+	}
+	.check-medical {
+		margin: 0;
+		padding-left: 1.1rem;
+		font-size: 0.88rem;
+		line-height: 1.5;
 	}
 	.check-tag-playgroup {
 		background: #e3f0fb;

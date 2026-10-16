@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lastDoseDate, planDogMedical, planMedicalSync, regimenKind, storedDay, type AsmGivenDose, type AsmRegimen } from './medicalSync';
+import { contagionOf, dogContagion, lastDoseDate, planDogMedical, planMedicalSync, regimenKind, storedDay, type AsmGivenDose, type AsmRegimen } from './medicalSync';
 
 const reg = (o: Partial<AsmRegimen>): AsmRegimen => ({
 	regimenId: 10,
@@ -69,9 +69,10 @@ describe('treatments', () => {
 		expect(p?.treatments).toMatchObject([{ id: 't1', name: 'Doxy', condition: 'URI', notes: '100mg · 2 treatments every 1 days', asmRegimenId: 10 }]);
 	});
 
-	it('drops treatments ASM has finished and keeps the app-only ones', () => {
+	it("drops every treatment ASM doesn't have: finished, or only ever in the app", () => {
 		const p = plan({ treatments: [{ id: 't1', name: 'Doxy', asmRegimenId: 9 }, { id: 't2', name: 'ear flush' }] });
-		expect(p?.treatments).toEqual([{ id: 't2', name: 'ear flush' }]);
+		expect(p?.treatments).toEqual([]);
+		expect(plan({ treatments: [{ id: 't2', name: 'ear flush' }] }, [reg({})])?.treatments).toMatchObject([{ name: 'Doxycycline', asmRegimenId: 10 }]);
 	});
 
 	it('writes nothing when the app already matches ASM', () => {
@@ -152,5 +153,19 @@ describe('planMedicalSync', () => {
 		const regimens = [reg({}), reg({ regimenId: 11, animalId: 999, shelterCode: '2026D0099' }), reg({ regimenId: 12, animalId: 501 }), reg({ regimenId: 13, animalId: 502 })];
 		const writes = planMedicalSync(docs, { regimens, given: [] }, TODAY, () => 'x');
 		expect(writes.map((w) => w.id)).toEqual(['500', 'app1']);
+	});
+});
+
+describe('contagion', () => {
+	it('names what a treatment suggests the dog could spread, from its name, reason or notes', () => {
+		expect(contagionOf('Doxycycline')).toBe('URI');
+		expect(contagionOf('Clavamox', null, 'for kennel cough')).toBe('URI');
+		expect(contagionOf('Clavamox', null, 'skin infection')).toBeNull();
+		expect(dogContagion([{ name: 'Metronidazole' }, { name: 'Doxy' }, { name: 'Carprofen' }])).toBe('URI, giardia');
+		expect(dogContagion([{ name: 'Carprofen' }])).toBeNull();
+	});
+
+	it('never puts a dog on sick hold from the sync', () => {
+		expect(plan({}, [reg({})])?.sickHold).toBeUndefined();
 	});
 });

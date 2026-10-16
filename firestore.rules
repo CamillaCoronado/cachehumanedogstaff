@@ -103,6 +103,15 @@ service cloud.firestore {
       allow update: if isApproved() &&
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['lastBathDate', 'lastBathBy', 'lastYardDate']);
+      // Any staff member (not volunteers) can mark a dog sick or on monitor, and edit why.
+      // Matches SICK_STATUS_KEYS in data/dogs.ts: monitor finishes treatment, and a hold
+      // carries handling level and the enrichment clock with it.
+      allow update: if isApproved() && getUserRole() != 'volunteer' &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['sickHold', 'sickHoldReason', 'sickHoldSince', 'sickMonitor',
+                    'sickMonitorReason', 'sickMonitorSince', 'sickSuggestDismissed',
+                    'treatments', 'enrichmentResetDate', 'handlingLevel',
+                    'handlingLevelBeforeHold', 'updatedAt']);
 
       match /behavioralNotes/{noteId} {
         allow read, create: if isApproved();
