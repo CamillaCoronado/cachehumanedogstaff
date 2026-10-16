@@ -64,6 +64,14 @@
 	let asmAttempted = false;
 	let overlayCheckStarted = false;
 	let overlayCheckInFlight = false;
+	/** A check asked for while one was running; it runs again once that one finishes. */
+	let overlayCheckAgain = false;
+	/**
+	 * Sync events already queued or shown this visit. The stamp only moves as each overlay
+	 * is dismissed, so a later check (the sync finishing) still sees the ones on screen as
+	 * unseen and queued them a second time.
+	 */
+	const queuedEventIds = new Set<string>();
 	let seenStamp: DateValue | null = null;
 	let batchNewest: Date | null = null;
 	let asmSyncing = false;
@@ -191,13 +199,18 @@
 
 	async function showUnseenSyncEvents() {
 		const uid = $authUser?.uid;
-		// The sync path calls this too. Serialise both callers through one in-flight
-		// promise so a sync finishing mid-check cannot replay the same events.
-		if (!uid || overlayCheckInFlight) return;
+		// The sync path calls this too. One check at a time; a call that lands mid-check
+		// runs after it, so the sync's new events are not dropped either.
+		if (!uid) return;
+		if (overlayCheckInFlight) {
+			overlayCheckAgain = true;
+			return;
+		}
 		overlayCheckInFlight = true;
 		try {
-			const events = await listUnseenSyncEvents(seenStamp);
+			const events = (await listUnseenSyncEvents(seenStamp)).filter((e) => !queuedEventIds.has(e.id));
 			if (events.length === 0) return;
+			for (const e of events) queuedEventIds.add(e.id);
 
 			const built = await Promise.all(
 				events.map(async (event) => {
@@ -233,6 +246,10 @@
 			console.error('[sync events]', err);
 		} finally {
 			overlayCheckInFlight = false;
+			if (overlayCheckAgain) {
+				overlayCheckAgain = false;
+				void showUnseenSyncEvents();
+			}
 		}
 	}
 
