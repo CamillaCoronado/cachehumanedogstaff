@@ -542,8 +542,8 @@
 			.slice(0, 5);
 	}
 
-	// The same rules the dog cards use (dogAttention), for every dog at the shelter —
-	// transfers still marked Incoming included.
+	// The same rules the dog cards use (dogAttention), for every dog at the shelter;
+	// incoming dogs are left out there.
 	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
 		const lastPlaygroup = buildLastPlaygroupMap(sessions);
 		const items: AttentionItem[] = [];

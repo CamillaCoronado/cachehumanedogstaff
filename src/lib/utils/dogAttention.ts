@@ -78,9 +78,10 @@ const dayWord = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
 export function dogAttention(dog: Dog, ctx: AttentionContext): AttentionFlag[] {
 	const { today, lastPlaygroupDate } = ctx;
 	const flags: AttentionFlag[] = [];
-	// Foster dogs are cared for elsewhere, and isolation dogs by the clinic: neither is
-	// on the shelter's to-do list. Incoming dogs are — transfers arrive through Incoming.
-	if (dog.status !== 'active' || dog.inFoster || dog.permanentFoster) return flags;
+	// Foster dogs are cared for elsewhere, isolation dogs by the clinic, and incoming dogs
+	// aren't on the floor yet: none is on the shelter's to-do list. A transfer starts
+	// showing once ASM moves it off Incoming, which also restarts its clocks.
+	if (dog.status !== 'active' || dog.inFoster || dog.permanentFoster || dog.isIncoming) return flags;
 	if (dog.isolationStatus !== 'none') return flags;
 
 	// Days since the clocks started: reaching the floor, or back from foster.
