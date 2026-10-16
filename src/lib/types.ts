@@ -3,6 +3,17 @@ import type { Timestamp } from 'firebase/firestore';
 export type DateValue = Date | Timestamp;
 export type UserRole = 'admin' | 'manager' | 'coordinator' | 'staff' | 'volunteer';
 
+/** A sync popup put aside for later. Dogs are looked up again when it is opened. */
+export interface SavedPopup {
+	/** The sync event's id plus the popup type (an incoming event can split into two). */
+	key: string;
+	type: 'adoption' | 'permanentFoster' | 'foster' | 'transfer' | 'incoming' | 'returned';
+	dogIds: string[];
+	dogNames: string[];
+	/** ISO time of the sync event. */
+	eventAt: string;
+}
+
 export interface UserProfile {
 	uid: string;
 	email: string;
@@ -17,6 +28,10 @@ export interface UserProfile {
 	phoneNumber?: string | null;
 	/** Newest syncEvents entry this user has been shown, so celebrations play once per person. */
 	lastSeenSyncEventAt?: DateValue | null;
+	/** Sync popups this user put aside to look at later (the 🐾 list in the top bar). */
+	savedPopups?: SavedPopup[];
+	/** Send sync popups straight to that list instead of showing them. */
+	popupsToList?: boolean;
 	createdAt: DateValue;
 	updatedAt: DateValue;
 }

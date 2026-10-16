@@ -84,11 +84,94 @@
 	let asmLogVisible = false;
 
 	import { getDog } from '$lib/data/dogs';
-	import type { DateValue, Dog } from '$lib/types';
+	import type { DateValue, Dog, SavedPopup } from '$lib/types';
 	import { confetti } from '@neoconfetti/svelte';
-	type OverlayItem = { type: 'adoption' | 'permanentFoster' | 'foster' | 'transfer' | 'incoming' | 'returned'; dogs: Dog[]; eventAt?: Date };
+	type OverlayItem = {
+		type: SavedPopup['type'];
+		dogs: Dog[];
+		eventAt?: Date;
+		key?: string;
+		/** Opened again from the saved list: closing it shows nothing else. */
+		replay?: boolean;
+	};
 	let overlayQueue: OverlayItem[] = [];
 	let currentOverlay: OverlayItem | null = null;
+
+	/** Saved popups drop off after this long, the same window the unseen check looks back. */
+	const SAVED_POPUP_DAYS = 14;
+	let savedPopups: SavedPopup[] = [];
+	let popupsToList = false;
+	let savedListVisible = false;
+
+	const POPUP_LABELS: Record<SavedPopup['type'], string> = {
+		adoption: 'Adopted',
+		permanentFoster: 'Permanent foster',
+		foster: 'Went to foster',
+		transfer: 'Transferred',
+		incoming: 'New arrival',
+		returned: 'Returned'
+	};
+
+	function freshSaved(list: SavedPopup[]): SavedPopup[] {
+		const cutoff = Date.now() - SAVED_POPUP_DAYS * 24 * 60 * 60 * 1000;
+		return list.filter((p) => new Date(p.eventAt).getTime() > cutoff);
+	}
+
+	function writeSaved(next: SavedPopup[]) {
+		savedPopups = next;
+		if (next.length === 0) savedListVisible = false;
+		const uid = $authUser?.uid;
+		if (uid) void updateUserProfile(uid, { savedPopups: next }).catch((err) => console.error('[saved popups]', err));
+	}
+
+	/** Puts popups in the saved list, newest first, skipping any already there. */
+	function savePopups(items: OverlayItem[]) {
+		const have = new Set(savedPopups.map((p) => p.key));
+		const added: SavedPopup[] = items
+			.filter((i) => i.key && i.eventAt && !have.has(i.key))
+			.map((i) => ({
+				key: i.key!,
+				type: i.type,
+				dogIds: i.dogs.map((d) => d.id),
+				dogNames: i.dogs.map((d) => d.name),
+				eventAt: i.eventAt!.toISOString()
+			}));
+		if (added.length === 0) return;
+		writeSaved(
+			freshSaved([...added, ...savedPopups]).sort((a, b) => b.eventAt.localeCompare(a.eventAt))
+		);
+	}
+
+	/** "Save for later": this popup and everything queued behind it go to the list. */
+	function saveRestForLater() {
+		savePopups([...(currentOverlay ? [currentOverlay] : []), ...overlayQueue]);
+		overlayQueue = [];
+		currentOverlay = null;
+		// Saved counts as seen, so they don't pop up again next visit.
+		if (batchNewest) {
+			void markSyncEventsSeen(batchNewest);
+			batchNewest = null;
+		}
+	}
+
+	async function openSaved(p: SavedPopup) {
+		savedListVisible = false;
+		const dogs = (await Promise.all(p.dogIds.map((id) => getDog(id)))).filter((d): d is Dog => d !== null);
+		if (dogs.length === 0) return;
+		// A popup arriving in the meantime keeps its place; this one shows first.
+		if (currentOverlay && !currentOverlay.replay) overlayQueue = [currentOverlay, ...overlayQueue];
+		currentOverlay = { type: p.type, dogs, eventAt: new Date(p.eventAt), key: p.key, replay: true };
+	}
+
+	function setPopupsToList(on: boolean) {
+		popupsToList = on;
+		const uid = $authUser?.uid;
+		if (uid) void updateUserProfile(uid, { popupsToList: on }).catch((err) => console.error('[saved popups]', err));
+	}
+
+	function popupDate(iso: string) {
+		return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(iso));
+	}
 
 	function incomingPhotoError(e: Event) {
 		const img = e.currentTarget as HTMLImageElement;
@@ -97,6 +180,10 @@
 	}
 
 	function advanceOverlay() {
+		if (currentOverlay?.replay) {
+			currentOverlay = null;
+			if (overlayQueue.length === 0) return;
+		}
 		// Record progress as each one is dismissed. Stamping the whole batch on arrival
 		// meant closing the tab after the first overlay marked the rest seen, and they
 		// were never shown again.
@@ -192,6 +279,10 @@
 	$: if ($authReady && $authUser && $authProfile && !overlayCheckStarted) {
 		overlayCheckStarted = true;
 		seenStamp = $authProfile.lastSeenSyncEventAt ?? null;
+		popupsToList = $authProfile.popupsToList ?? false;
+		const saved = $authProfile.savedPopups ?? [];
+		savedPopups = freshSaved(saved);
+		if (savedPopups.length !== saved.length) writeSaved(savedPopups);
 		// No stamp is fine — the lookback window covers that case, so a first login
 		// picks up from roughly where the browser's local state left off.
 		void showUnseenSyncEvents();
@@ -226,17 +317,24 @@
 						const back = dogs.filter(isReturning);
 						const fresh = dogs.filter((d) => !isReturning(d));
 						return [
-							...(fresh.length ? [{ type: 'incoming' as const, dogs: fresh, eventAt: event.createdAt }] : []),
-							...(back.length ? [{ type: 'returned' as const, dogs: back, eventAt: event.createdAt }] : [])
+							...(fresh.length ? [{ type: 'incoming' as const, dogs: fresh, eventAt: event.createdAt, key: `${event.id}:incoming` }] : []),
+							...(back.length ? [{ type: 'returned' as const, dogs: back, eventAt: event.createdAt, key: `${event.id}:returned` }] : [])
 						];
 					}
-					return [{ type: event.type, dogs, eventAt: event.createdAt }];
+					return [{ type: event.type, dogs, eventAt: event.createdAt, key: `${event.id}:${event.type}` }];
 				})
 			);
 			const pending: OverlayItem[] = built.flat();
 			if (pending.length === 0) return;
 
 			batchNewest = events[events.length - 1].createdAt;
+
+			if (popupsToList) {
+				savePopups(pending);
+				void markSyncEventsSeen(batchNewest);
+				batchNewest = null;
+				return;
+			}
 
 			// Append rather than replace: a sync landing while someone is still clicking
 			// through an earlier batch used to discard the new one entirely.
@@ -478,6 +576,17 @@
 								<span class="sync-label">Sync failed</span>
 							</button>
 						{/if}
+						{#if savedPopups.length > 0 || popupsToList}
+							<button
+								class="sync-badge saved-badge sync-badge-clickable"
+								title="Popups saved for later"
+								aria-label={`${savedPopups.length} popup${savedPopups.length === 1 ? '' : 's'} saved for later`}
+								on:click={() => { savedListVisible = !savedListVisible; asmLogVisible = false; }}
+							>
+								<span aria-hidden="true">🐾</span>
+								<span>{savedPopups.length}</span>
+							</button>
+						{/if}
 					</div>
 					<div class="topbar-meta">
 						<p class="board-meta whiteboard-hand erase-marker-blue">{todayLabel} {shiftLabel}</p>
@@ -537,6 +646,47 @@
 					{/each}
 				</ul>
 				</div>
+				{/if}
+
+				{#if savedListVisible}
+					<div class="sync-log-dismiss" on:click={() => { savedListVisible = false; }} aria-hidden="true"></div>
+					<div class="sync-log saved-list" role="dialog" aria-label="Saved popups">
+						<div class="sync-log-header saved-list-header">
+							<span class="sync-log-title saved-list-title">Saved for later</span>
+							{#if savedPopups.length > 0}
+								<button class="sync-log-now saved-list-clear" type="button" on:click={() => writeSaved([])}>Clear all</button>
+							{/if}
+							<button class="sync-log-close" aria-label="Close" on:click={() => { savedListVisible = false; }}>
+								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+							</button>
+						</div>
+						{#if savedPopups.length === 0}
+							<p class="sync-log-medical">Nothing saved. New popups will land here.</p>
+						{:else}
+							<ul class="sync-log-list">
+								{#each savedPopups as p (p.key)}
+									<li class="sync-log-item saved-item">
+										<button class="saved-open" type="button" on:click={() => openSaved(p)}>
+											<span class="saved-type">{POPUP_LABELS[p.type]}</span>
+											<span class="saved-dogs">{p.dogNames.join(', ')}</span>
+											<span class="saved-date">{popupDate(p.eventAt)}</span>
+										</button>
+										<button
+											class="sync-log-close"
+											aria-label={`Remove ${POPUP_LABELS[p.type]} · ${p.dogNames.join(', ')}`}
+											on:click={() => writeSaved(savedPopups.filter((x) => x.key !== p.key))}
+										>
+											<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+										</button>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+						<label class="saved-toggle">
+							<input type="checkbox" checked={popupsToList} on:change={(e) => setPopupsToList(e.currentTarget.checked)} />
+							Always send popups here instead of showing them
+						</label>
+					</div>
 				{/if}
 
 				<div class="app-layout">
@@ -680,7 +830,12 @@
 					{currentOverlay.dogs.length === 1 ? 'Found their forever home!' : `${currentOverlay.dogs.length} dogs found their forever homes!`} 🎉
 				{/if}
 			</p>
-			<button class="adoption-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+			<div class="overlay-actions">
+				<button class="adoption-close typewriter" on:click|stopPropagation={advanceOverlay}>{!currentOverlay.replay && overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+				{#if !currentOverlay.replay}
+					<button class="adoption-close typewriter" on:click|stopPropagation={saveRestForLater}>{overlayQueue.length > 0 ? `Save ${overlayQueue.length + 1} for later` : 'Save for later'}</button>
+				{/if}
+			</div>
 		</div>
 	</div>
 {:else if currentOverlay?.type === 'transfer'}
@@ -700,7 +855,12 @@
 				{/each}
 			</div>
 			<p class="transfer-subtext">A new chance to find their forever home</p>
-			<button class="transfer-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+			<div class="overlay-actions">
+				<button class="transfer-close typewriter" on:click|stopPropagation={advanceOverlay}>{!currentOverlay.replay && overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+				{#if !currentOverlay.replay}
+					<button class="transfer-close typewriter" on:click|stopPropagation={saveRestForLater}>{overlayQueue.length > 0 ? `Save ${overlayQueue.length + 1} for later` : 'Save for later'}</button>
+				{/if}
+			</div>
 		</div>
 	</div>
 {:else if currentOverlay?.type === 'foster'}
@@ -719,7 +879,12 @@
 					</div>
 				{/each}
 			</div>
-			<button class="foster-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+			<div class="overlay-actions">
+				<button class="foster-close typewriter" on:click|stopPropagation={advanceOverlay}>{!currentOverlay.replay && overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+				{#if !currentOverlay.replay}
+					<button class="foster-close typewriter" on:click|stopPropagation={saveRestForLater}>{overlayQueue.length > 0 ? `Save ${overlayQueue.length + 1} for later` : 'Save for later'}</button>
+				{/if}
+			</div>
 		</div>
 	</div>
 {:else if currentOverlay?.type === 'incoming' || currentOverlay?.type === 'returned'}
@@ -756,7 +921,12 @@
 					</div>
 				{/if}
 			</div>
-			<button class="incoming-close typewriter" on:click|stopPropagation={advanceOverlay}>{overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+			<div class="overlay-actions">
+				<button class="incoming-close typewriter" on:click|stopPropagation={advanceOverlay}>{!currentOverlay.replay && overlayQueue.length > 0 ? 'Next' : 'Close'}</button>
+				{#if !currentOverlay.replay}
+					<button class="incoming-close typewriter" on:click|stopPropagation={saveRestForLater}>{overlayQueue.length > 0 ? `Save ${overlayQueue.length + 1} for later` : 'Save for later'}</button>
+				{/if}
+			</div>
 		</div>
 	</div>
 {/if}
@@ -1094,6 +1264,86 @@
 		color: var(--layout-muted);
 		font-size: 0.67rem;
 		min-width: 0;
+	}
+
+	.saved-badge {
+		background: rgba(147, 57, 128, 0.08);
+		color: var(--layout-accent);
+		border: 1px solid rgba(147, 57, 128, 0.22);
+	}
+
+	.saved-badge.sync-badge-clickable:hover {
+		background: rgba(147, 57, 128, 0.16);
+	}
+
+	.saved-list-header {
+		background: rgba(147, 57, 128, 0.06);
+	}
+
+	.saved-list-title {
+		color: var(--layout-accent);
+	}
+
+	.saved-list-clear {
+		border-color: rgba(147, 57, 128, 0.35);
+		color: var(--layout-accent);
+	}
+
+	.saved-item {
+		align-items: center;
+	}
+
+	.saved-open {
+		flex: 1 1 auto;
+		min-width: 0;
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+		border: 0;
+		background: transparent;
+		padding: 0.1rem 0;
+		text-align: left;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.saved-open:hover .saved-dogs {
+		text-decoration: underline;
+	}
+
+	.saved-type {
+		flex-shrink: 0;
+		font-size: 0.6rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--layout-accent);
+	}
+
+	.saved-dogs {
+		min-width: 0;
+		font-weight: 700;
+		color: var(--layout-ink);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.saved-date {
+		margin-left: auto;
+		flex-shrink: 0;
+		color: var(--layout-muted);
+	}
+
+	.saved-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.5rem 0.7rem;
+		border-top: 1px solid #dce8f2;
+		font-family: var(--font-ui);
+		font-size: 0.7rem;
+		color: #34495e;
 	}
 
 	.board-meta {
@@ -2027,6 +2277,13 @@
 	margin: 0;
 	font-size: 1.05rem;
 	color: rgba(255, 255, 255, 0.85);
+}
+
+.overlay-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 0.5rem;
 }
 
 .adoption-close {
