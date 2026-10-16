@@ -20,8 +20,12 @@ export interface ParsedYardMessage {
 	exceptNames: string[];
 }
 
-/** The activity itself, however it is spelled. "tine" is a real and frequent typo. */
-const YARD_TIME = /\byard\s*(?:time|tine|tim)\b|\bin\s+the\s+yards?\b/i;
+/**
+ * The activity itself, however it is spelled. "tine" is a real and frequent typo. The
+ * place counts too, with or without "the" and with a word for which yard: "got time out
+ * in yard", "took Sheba to the play yard", "went to yard 2".
+ */
+const YARD_TIME = /\byard\s*(?:time|tine|tim)\b|\b(?:in|into|to)\s+(?:the\s+)?(?:[a-z]+\s+)?yards?\b/i;
 
 /**
  * The other way it gets said, without naming the yard at all: "all dogs went out",
@@ -72,7 +76,7 @@ const NEGATED =
  * yards", "Jack is terrified … in the meet and greet yard".
  */
 const NOT_A_REPORT =
-	/\bdo\s*n'?t\s+leave\b|\bdo\s+not\s+leave\b|\bwhen\s+you\b|\bmake\s+sure\b|\bneeds?\s+to\b|\bwill\s+have\s+to\b|\bshould\b|\bcan\s+be\b|\bis\s+terrified\b|\bcould\s+take\s+out\b|\bbed\s+rest\b|\btake\s+out\s+for\b/i;
+	/\bdo\s*n'?t\s+leave\b|\bdo\s+not\s+leave\b|\bwhen\s+you\b|\bmake\s+sure\b|\bneeds?\s+to\b|\bwill\s+have\s+to\b|\bshould\b|\bcan\s+be\b|\bis\s+terrified\b|\bcould\s+take\s+out\b|\bbed\s+rest\b|\btake\s+out\s+for\b|\bplease\b|\bcan\s+(?:some|any)one\b|^\s*(?:bring|take|put|let)\b/i;
 
 /**
  * The whole shelter at once. One adjective is allowed through — "all adult dogs", "all
@@ -111,7 +115,15 @@ function aliasesFor(name: string): { canonical: string[]; derived: string[] } {
 	return { canonical, derived };
 }
 
-function buildRoster(knownDogNames: string[]): Map<string, string> {
+interface Roster {
+	/** Every alias, normalized, to its dog. */
+	aliases: Map<string, string>;
+	/** Real names only, normalized: the ones a misspelling is checked against. */
+	canonical: Map<string, string>;
+}
+
+function buildRoster(knownDogNames: string[]): Roster {
+	const canonicalKeys = new Map<string, string>();
 	const roster = new Map<string, string>();
 	const all = knownDogNames.map((name) => ({ name, ...aliasesFor(name) }));
 	// Canonical names first, so a derived alias never displaces a real dog of that name.
@@ -119,6 +131,7 @@ function buildRoster(knownDogNames: string[]): Map<string, string> {
 		for (const alias of canonical) {
 			const key = normalizeForCompare(alias);
 			if (key && !roster.has(key)) roster.set(key, name);
+			if (key && !canonicalKeys.has(key)) canonicalKeys.set(key, name);
 		}
 	}
 	for (const { name, derived } of all) {
@@ -127,17 +140,48 @@ function buildRoster(knownDogNames: string[]): Map<string, string> {
 			if (key && !roster.has(key)) roster.set(key, name);
 		}
 	}
-	return roster;
+	return { aliases: roster, canonical: canonicalKeys };
 }
 
-function namesIn(fragment: string, roster: Map<string, string>): string[] {
+/** Words long enough to pass for a misspelled name that are just words. */
+const NOT_NAMES = new Set([
+	'today', 'after', 'again', 'there', 'their', 'these', 'those', 'where', 'which', 'while',
+	'about', 'other', 'every', 'never', 'later', 'first', 'great', 'happy', 'thank', 'thanks',
+	'morning', 'outside', 'inside', 'yesterday', 'tonight', 'played', 'walked'
+]);
+
+/** One letter added, dropped or changed. */
+function oneEditApart(a: string, b: string): boolean {
+	if (a === b || Math.abs(a.length - b.length) > 1) return false;
+	let i = 0;
+	while (i < a.length && i < b.length && a[i] === b[i]) i++;
+	if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+	return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/**
+ * A misspelled name: "natilie" for Natalie. Only a real name, only one letter off, only
+ * five letters or more with the first letter right, and only when exactly one dog is that
+ * close, so a typo never has to choose between two dogs.
+ */
+function misspelledName(word: string, roster: Roster): string | null {
+	const key = normalizeForCompare(word);
+	if (key.length < 5 || NOT_NAMES.has(key)) return null;
+	const hits = new Set<string>();
+	for (const [name, dog] of roster.canonical) {
+		if (name[0] === key[0] && oneEditApart(key, name)) hits.add(dog);
+	}
+	return hits.size === 1 ? [...hits][0] : null;
+}
+
+function namesIn(fragment: string, roster: Roster): string[] {
 	const words = fragment.split(/[^A-Za-z'-]+/).filter(Boolean);
 	const found: string[] = [];
 	let i = 0;
 	while (i < words.length) {
 		let matched = false;
 		for (let span = Math.min(3, words.length - i); span >= 1; span--) {
-			const hit = roster.get(normalizeForCompare(words.slice(i, i + span).join('')));
+			const hit = roster.aliases.get(normalizeForCompare(words.slice(i, i + span).join('')));
 			if (hit) {
 				if (!found.includes(hit)) found.push(hit);
 				i += span;
@@ -145,7 +189,11 @@ function namesIn(fragment: string, roster: Map<string, string>): string[] {
 				break;
 			}
 		}
-		if (!matched) i++;
+		if (!matched) {
+			const typo = misspelledName(words[i], roster);
+			if (typo && !found.includes(typo)) found.push(typo);
+			i++;
+		}
 	}
 	return found;
 }
