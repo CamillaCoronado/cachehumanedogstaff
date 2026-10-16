@@ -250,7 +250,8 @@ export function planDogMedical(doc: Doc, regimens: AsmRegimen[], given: AsmGiven
 	// Surgery: a spay/neuter (or other surgery) ASM has booked for today or later goes on
 	// the list on its day. One ASM shows done today goes on as today's. Any surgery whose
 	// day is over without ASM showing it done — a surgery dose given or a neuter date on
-	// or after that day — didn't happen and comes off.
+	// or after that day — didn't happen and comes off. One that did comes off once its
+	// rest is over.
 	let surgeryDay = storedDay(doc.surgeryDate);
 	const booked = regimens.filter((r) => kind(r) === 'surgery' && r.nextDue && r.nextDue >= today).sort(byDue)[0];
 	const doneDays = [...given.filter((g) => kind(g) === 'surgery').map((g) => g.given), storedDay(doc.fixedDate)].filter((d): d is string => Boolean(d));
@@ -264,6 +265,9 @@ export function planDogMedical(doc: Doc, regimens: AsmRegimen[], given: AsmGiven
 	}
 	if (surgeryDay && surgeryDay < today && !doneDays.some((d) => d >= surgeryDay! && d <= today)) {
 		Object.assign(patch, { surgeryDate: null, surgeryRestDays: null, surgeryAsmRegimenId: null });
+	} else if (surgeryDay && surgeryDay < today && addDays(surgeryDay, Number(doc.surgeryRestDays ?? 0)) <= today) {
+		// Done and rested: off the list, kept as the last surgery the way Clear keeps it.
+		Object.assign(patch, { lastSurgeryDate: storedNoon(surgeryDay), surgeryDate: null, surgeryRestDays: null, surgeryAsmRegimenId: null });
 	}
 
 	return Object.keys(patch).length > 0 ? patch : null;
