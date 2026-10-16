@@ -42,8 +42,8 @@ describe('dogAttention', () => {
 		expect(kinds(makeDog())).toEqual([]);
 	});
 
-	it('includes transfers still marked Incoming', () => {
-		expect(kinds(makeDog({ isIncoming: true, lastBathDate: null }))).toEqual(['bath']);
+	it('leaves out dogs still marked Incoming', () => {
+		expect(kinds(makeDog({ isIncoming: true, lastBathDate: null }))).toEqual([]);
 	});
 
 	it('leaves out foster, isolation and archived dogs entirely', () => {
