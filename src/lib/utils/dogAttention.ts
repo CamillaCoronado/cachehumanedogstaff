@@ -1,5 +1,5 @@
 import type { Dog, UserRole } from '$lib/types';
-import { checkDayTripEligibility, daysSince } from '$lib/utils/dates';
+import { checkDayTripEligibility, daysSince, dogColorReason, dogStripeColor, tripColorReasonLabel } from '$lib/utils/dates';
 import { clockStart, enrichmentOverdueDays, getBathStatus, isBathDue, needsDogTest } from '$lib/utils/attention';
 
 /**
@@ -10,8 +10,19 @@ import { clockStart, enrichmentOverdueDays, getBathStatus, isBathDue, needsDogTe
 
 export type TripEligibility = ReturnType<typeof checkDayTripEligibility>;
 
-/** Day-trip eligibility for this dog as `role` sees it — handling rules depend on the viewer. */
+/**
+ * Day-trip eligibility for this dog as `role` sees it — handling rules depend on the viewer.
+ * A red dog is never eligible, the same rule the day-trips board sorts by; without it the
+ * dog list called a red dog Eligible while the board held it back.
+ */
 export function tripEligibilityFor(dog: Dog, role: UserRole | null | undefined, today: Date): TripEligibility {
+	const result = profileTripEligibility(dog, role, today);
+	if (dogStripeColor(dog) !== 'red' || !result.eligible) return result;
+	const why = tripColorReasonLabel(dogColorReason(dog));
+	return { eligible: false, status: 'ineligible', reasons: [why ? `Red: ${why}` : 'Red', ...result.reasons] };
+}
+
+function profileTripEligibility(dog: Dog, role: UserRole | null | undefined, today: Date): TripEligibility {
 	return checkDayTripEligibility(
 		dog.intakeDate,
 		dog.isVaccinated,

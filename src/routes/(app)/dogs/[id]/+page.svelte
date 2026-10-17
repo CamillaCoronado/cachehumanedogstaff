@@ -37,10 +37,10 @@
 		formatDate,
 		formatDateTime,
 		isSurgeryToday,
-		toDate,
-		checkDayTripEligibility
+		toDate
 	} from '$lib/utils/dates';
 	import { getDayTripGapDays } from '$lib/utils/attention';
+	import { tripEligibilityFor } from '$lib/utils/dogAttention';
 	import { shelterTimeLabel, stoolColor, stoolLabel, reentryDatesLabel } from '$lib/utils/labels';
 	import { durationHours as dayTripHours } from '$lib/utils/daytrips';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
@@ -111,27 +111,7 @@
 		return t.endDate ? `${label} (until ${formatDate(t.endDate)})` : label;
 	});
 	$: dayTripEligibility = dog
-		? checkDayTripEligibility(
-				dog.intakeDate,
-				dog.isVaccinated,
-				dog.isFixed,
-				dog.dayTripStatus,
-				dog.isolationStatus,
-				dog.dayTripIneligibleReason,
-				dog.dayTripManagerOnlyReason,
-				dog.dayTripNotes,
-				dog.handlingLevel,
-				dog.surgeryDate,
-				dog.surgeryRestDays,
-				dog.awaitingEvaluation,
-				role,
-				today,
-				dog.dateOfBirth,
-				dog.vaccineCount,
-				dog.vaccinesOutstanding,
-				dog.dayTripPuppyOverride,
-				dog.sickHold
-			)
+		? tripEligibilityFor(dog, role, today)
 		: { eligible: false, status: 'ineligible' as const, reasons: [] };
 	$: dayTripBadgeClass =
 		dayTripEligibility.status === 'eligible'
