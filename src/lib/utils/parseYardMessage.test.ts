@@ -137,4 +137,19 @@ describe('parseYardMessage', () => {
 		expect(parse('Straggler was adopted!').dogNames).toEqual([]);
 		expect(parse('Mia didn’t eat').dogNames).toEqual([]);
 	});
+
+	it('does not read a day trip as yard time', () => {
+		expect(
+			parse('Allison reinfelt was day tripped that took sally out i really like her she dose amazing with are dogs, she took sally today').dogNames
+		).toEqual([]);
+	});
+
+	it('only takes dogs from the sentence that mentions the yard', () => {
+		expect(
+			parse('Sally eval: nothing I would call aggression. She’s been great. Mia and Jack got yard time').dogNames
+		).toEqual(['Mia', 'Jack']);
+		expect(
+			parse('Luna showed a lot of discomfort but nothing I would call aggression. Later we were in the yard and it was fine').dogNames
+		).toEqual([]);
+	});
 });
