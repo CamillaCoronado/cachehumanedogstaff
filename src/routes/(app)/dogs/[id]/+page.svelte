@@ -27,7 +27,7 @@
 		listDayTripLogs,
 		setDogTripStatus
 	} from '$lib/data/dogs';
-	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, FeedingLog, MealTime, StoolLog, UserRole, YardLog } from '$lib/types';
+	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, EnrichmentKind, FeedingLog, MealTime, StoolLog, UserRole, YardLog } from '$lib/types';
 	import {
 		formatAge,
 		bathEligible,
@@ -79,7 +79,10 @@
 	let savingBath = false;
 	let newYardDate = todayStr();
 	let newYardMinutes = 30;
+	let newYardKind: EnrichmentKind = 'yard';
+	let newYardNote = '';
 	let savingYard = false;
+	const ENRICHMENT_LABELS: Record<EnrichmentKind, string> = { yard: 'Yard', cuddle: 'Cuddle time', other: 'Other' };
 	let newFeedingDate = todayStr();
 	let newFeedingMealTime: MealTime = 'am';
 	let newFeedingAmount: AmountEaten = 'all';
@@ -585,14 +588,17 @@
 
 	async function handleSaveYard() {
 		if (!dog || !newYardDate || savingYard) return;
+		// "Other" needs a word on what it was, or the log says nothing.
+		if (newYardKind === 'other' && !newYardNote.trim()) { toast.error('Say what the enrichment was.'); return; }
 		savingYard = true;
 		try {
 			const minutes = Number.isFinite(newYardMinutes) && newYardMinutes > 0 ? Math.round(newYardMinutes) : null;
-			await logYardTime(dog.id, minutes, $authProfile, new Date(newYardDate + 'T12:00:00'));
-			toast.success('Yard time logged.');
+			await logYardTime(dog.id, minutes, $authProfile, new Date(newYardDate + 'T12:00:00'), newYardKind, newYardNote);
+			toast.success('Enrichment logged.');
 			newYardDate = todayStr();
+			newYardNote = '';
 			await loadAll();
-		} catch (e) { console.error(e); toast.error('Unable to log yard time.'); }
+		} catch (e) { console.error(e); toast.error('Unable to log enrichment.'); }
 		finally { savingYard = false; }
 	}
 
@@ -1213,10 +1219,18 @@
 				</div>
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
-						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Yard Time</h3>
+						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Enrichment</h3>
 						<div class="flex flex-wrap items-center gap-2 text-xs">
 							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newYardDate} />
-							<input type="number" min="5" step="5" class="w-16 rounded-full border border-ink-100 px-3 py-1" bind:value={newYardMinutes} title="Minutes in the yard" />
+							<select class="rounded-full border border-ink-100 px-3 py-1" bind:value={newYardKind}>
+								<option value="yard">Yard</option>
+								<option value="cuddle">Cuddle time</option>
+								<option value="other">Other</option>
+							</select>
+							{#if newYardKind === 'other'}
+								<input type="text" class="w-32 rounded-full border border-ink-100 px-3 py-1" bind:value={newYardNote} placeholder="What?" />
+							{/if}
+							<input type="number" min="5" step="5" class="w-16 rounded-full border border-ink-100 px-3 py-1" bind:value={newYardMinutes} title="Minutes" />
 							<span class="text-ink-400">min</span>
 							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveYard} disabled={savingYard}>Save</button>
 						</div>
@@ -1226,17 +1240,19 @@
 							<thead class="text-[11px] uppercase tracking-[0.2em] text-ink-400">
 								<tr>
 									<th class="py-2">Time</th>
+									<th class="py-2">Type</th>
 									<th class="py-2">Duration</th>
 									<th class="py-2">Logged By</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y divide-ink-100">
 								{#if yardLogs.length === 0}
-									<tr><td colspan="4" class="py-3 text-xs text-ink-500">No yard time logged.</td></tr>
+									<tr><td colspan="5" class="py-3 text-xs text-ink-500">No enrichment logged.</td></tr>
 								{:else}
 									{#each yardLogs as log}
 										<tr>
 											<td class="py-2">{formatDateTime(log.timestamp)}</td>
+											<td class="py-2">{ENRICHMENT_LABELS[log.kind]}{log.note ? ` · ${log.note}` : ''}</td>
 											<td class="py-2">{log.durationMinutes ? `${log.durationMinutes} min` : '—'}</td>
 											<td class="py-2">{log.loggedByName}</td>
 											<td class="py-2 text-right">

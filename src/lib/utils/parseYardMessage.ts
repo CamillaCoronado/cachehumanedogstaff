@@ -115,14 +115,14 @@ function aliasesFor(name: string): { canonical: string[]; derived: string[] } {
 	return { canonical, derived };
 }
 
-interface Roster {
+export interface Roster {
 	/** Every alias, normalized, to its dog. */
 	aliases: Map<string, string>;
 	/** Real names only, normalized: the ones a misspelling is checked against. */
 	canonical: Map<string, string>;
 }
 
-function buildRoster(knownDogNames: string[]): Roster {
+export function buildRoster(knownDogNames: string[]): Roster {
 	const canonicalKeys = new Map<string, string>();
 	const roster = new Map<string, string>();
 	const all = knownDogNames.map((name) => ({ name, ...aliasesFor(name) }));
@@ -174,7 +174,7 @@ function misspelledName(word: string, roster: Roster): string | null {
 	return hits.size === 1 ? [...hits][0] : null;
 }
 
-function namesIn(fragment: string, roster: Roster): string[] {
+export function namesIn(fragment: string, roster: Roster): string[] {
 	const words = fragment.split(/[^A-Za-z'-]+/).filter(Boolean);
 	const found: string[] = [];
 	let i = 0;

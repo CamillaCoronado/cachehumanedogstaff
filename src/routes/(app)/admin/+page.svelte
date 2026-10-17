@@ -201,10 +201,10 @@
 	$: mergeDeleteDog = allDogs.find((d) => d.id === mergeDeleteId) ?? null;
 	$: mergeValid = mergeKeepId && mergeDeleteId && mergeKeepId !== mergeDeleteId;
 
-	// #dog-staff backfill: past baths and yard time (thread replies included), read and
+	// #dog-staff backfill: past baths, yard time and cuddle time (thread replies included), read and
 	// written the way the live Slack poll does. Dry run first; every row starts ticked.
 	// Feedings and surgery lists are not backfilled.
-	type StaffKind = 'surgery' | 'bath' | 'yard' | 'feeding';
+	type StaffKind = 'surgery' | 'bath' | 'yard' | 'cuddle' | 'feeding';
 	type StaffRow = { key: string; kind: StaffKind; at: string; author: string; text: string; summary: string; uncertain: string[] };
 	type StaffResult = {
 		scanned: number;
@@ -215,10 +215,10 @@
 		threadsSkipped: number;
 		skipped?: string;
 	};
-	const STAFF_KIND_LABELS: Record<StaffKind, string> = { feeding: 'Feedings', surgery: 'Surgery lists', bath: 'Baths', yard: 'Yard time' };
-	const STAFF_KIND_ORDER: StaffKind[] = ['bath', 'yard'];
+	const STAFF_KIND_LABELS: Record<StaffKind, string> = { feeding: 'Feedings', surgery: 'Surgery lists', bath: 'Baths', yard: 'Yard time', cuddle: 'Cuddle time' };
+	const STAFF_KIND_ORDER: StaffKind[] = ['bath', 'yard', 'cuddle'];
 	let staffSince = '2026-03-01';
-	let staffKinds: StaffKind[] = ['bath', 'yard'];
+	let staffKinds: StaffKind[] = ['bath', 'yard', 'cuddle'];
 	let staffBusy = false;
 	let staffWasDryRun = true;
 	let staffResult: StaffResult | null = null;
@@ -1190,10 +1190,12 @@
 								{staffResult.scanned} messages and thread replies since {formatDate(staffSince)}:
 								<strong>{staffResult.rows.length}</strong> to log.
 								Already logged: {staffResult.alreadyLogged.bath} baths,
-								{staffResult.alreadyLogged.yard} yard.
+								{staffResult.alreadyLogged.yard} yard,
+								{staffResult.alreadyLogged.cuddle} cuddle.
 							{:else}
 								Logged {staffResult.written.bath} baths,
-								{staffResult.written.yard} yard times.
+								{staffResult.written.yard} yard times,
+								{staffResult.written.cuddle} cuddle times.
 							{/if}
 							{#if staffResult.truncated}
 								Over 3,000 messages in that range: only the newest were read, so the earliest were
@@ -1843,6 +1845,7 @@
 	.staff-tag-surgery { background: #fde7e7; color: #9b2c2c; }
 	.staff-tag-bath { background: #e3f0fb; color: #1a4f7a; }
 	.staff-tag-yard { background: #e9f6ec; color: #256640; }
+	.staff-tag-cuddle { background: #fbe9f3; color: #8a2a5c; }
 
 	.staff-unsure {
 		color: #a8501b;

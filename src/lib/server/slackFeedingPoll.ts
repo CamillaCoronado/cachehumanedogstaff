@@ -5,6 +5,7 @@ import {
 	buildDogIndex,
 	planBaths,
 	planYardTime,
+	planCuddleTime,
 	planFeedingsDetailed,
 	planSurgery,
 	type DogRecord
@@ -128,6 +129,12 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		const inYard = planYardTime(String(m.text), postedAt, index);
 		if (inYard.length > 0) {
 			yard += await writeYard(db, inYard, postedAt, authors[String(m.user ?? '')] ?? 'Unknown', slackTs);
+		}
+
+		// "Spent time with Miles" is cuddle time — the same enrichment, its own log.
+		const cuddled = planCuddleTime(String(m.text), postedAt, index);
+		if (cuddled.length > 0) {
+			yard += await writeYard(db, cuddled, postedAt, authors[String(m.user ?? '')] ?? 'Unknown', slackTs, 'cuddle');
 		}
 
 		const plan = planFeedingsDetailed(String(m.text), postedAt, index);

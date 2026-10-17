@@ -11,6 +11,8 @@ import {
 	planFeedingsDetailed,
 	planSurgery,
 	planYardTime,
+	planCuddleTime,
+	cuddleLogId,
 	shelterDay,
 	yardLogId,
 	type DogRecord
@@ -19,8 +21,8 @@ import {
 /** Stops a very long range from running past the function's time limit (3,000 messages). */
 const MAX_PAGES = 15;
 
-export type StaffKind = 'surgery' | 'bath' | 'yard' | 'feeding';
-export const STAFF_KINDS: StaffKind[] = ['surgery', 'bath', 'yard', 'feeding'];
+export type StaffKind = 'surgery' | 'bath' | 'yard' | 'cuddle' | 'feeding';
+export const STAFF_KINDS: StaffKind[] = ['surgery', 'bath', 'yard', 'cuddle', 'feeding'];
 
 export interface StaffBackfillRow {
 	/** `${kind}|${slackTs}` — what the admin ticks to keep. */
@@ -48,13 +50,13 @@ export interface StaffBackfillResult {
 	skipped?: string;
 }
 
-const zero = (): Record<StaffKind, number> => ({ surgery: 0, bath: 0, yard: 0, feeding: 0 });
+const zero = (): Record<StaffKind, number> => ({ surgery: 0, bath: 0, yard: 0, cuddle: 0, feeding: 0 });
 const names = (list: { dogName: string }[]) => list.map((d) => d.dogName).join(', ');
 const MEAL = { am: 'morning', pm: 'afternoon', second: 'second meal' } as const;
 
 /**
  * Replays #dog-staff (thread replies included) from `since` through the live poll's own
- * readers and writers: surgery lists, baths, yard time and feedings. Anything already
+ * readers and writers: surgery lists, baths, yard time, cuddle time and feedings. Anything already
  * logged is skipped. With dryRun nothing is written; otherwise only rows in `keep` are.
  *
  * Uncertain feeding readings — the ones the live poll holds for review — are listed
@@ -96,6 +98,7 @@ export async function backfillDogStaff(
 		if (planSurgery(text, postedAt, index).length > 0) continue;
 		if (kinds.includes('bath')) planBaths(text, postedAt, index).forEach((b) => mentioned.add(b.dogId));
 		if (kinds.includes('yard')) planYardTime(text, postedAt, index).forEach((y) => mentioned.add(y.dogId));
+		if (kinds.includes('cuddle')) planCuddleTime(text, postedAt, index).forEach((y) => mentioned.add(y.dogId));
 		if (kinds.includes('feeding')) planFeedingsDetailed(text, postedAt, index).entries.forEach((e) => mentioned.add(e.dogId));
 	}
 	const dogIds = [...mentioned];
@@ -105,7 +108,7 @@ export async function backfillDogStaff(
 			ids.map((id) =>
 				Promise.all([
 					kinds.includes('bath') ? db.collection('dogs').doc(id).collection('bathLogs').select().get() : null,
-					kinds.includes('yard') ? db.collection('dogs').doc(id).collection('yardLogs').select().get() : null,
+					kinds.includes('yard') || kinds.includes('cuddle') ? db.collection('dogs').doc(id).collection('yardLogs').select().get() : null,
 					kinds.includes('feeding') ? db.collection('dogs').doc(id).collection('feedingLogs').select('date', 'mealTime').get() : null
 				])
 			)
@@ -175,6 +178,19 @@ export async function backfillDogStaff(
 					...base, key: `yard|${ts}`, kind: 'yard', at: postedAt.toISOString(),
 					summary: `yard time: ${names(todo)}`,
 					run: () => writeYard(db, todo, postedAt, author, ts)
+				});
+			}
+		}
+
+		if (kinds.includes('cuddle')) {
+			const all = planCuddleTime(text, postedAt, index);
+			const todo = all.filter((y) => !has(y.dogId, 'yard', cuddleLogId(postedAt, y.dogId)));
+			if (all.length > 0 && todo.length === 0) alreadyLogged.cuddle++;
+			if (todo.length > 0) {
+				plans.push({
+					...base, key: `cuddle|${ts}`, kind: 'cuddle', at: postedAt.toISOString(),
+					summary: `cuddle time: ${names(todo)}`,
+					run: () => writeYard(db, todo, postedAt, author, ts, 'cuddle')
 				});
 			}
 		}
