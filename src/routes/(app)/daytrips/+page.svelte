@@ -15,10 +15,11 @@
 	import BoardTab from '$lib/components/daytrips/BoardTab.svelte';
 	import DogsTab from '$lib/components/daytrips/DogsTab.svelte';
 	import ColorsTab from '$lib/components/daytrips/ColorsTab.svelte';
-	import { checkDayTripEligibility, daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
+	import { daysSince, sinceReturn, dogStripeColor, formatDateTime, toDate } from '$lib/utils/dates';
 	import { getDayTripGapDays, isDayTripEligible, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { durationHours, formatDuration, formatTime, formatShortDate } from '$lib/utils/daytrips';
 	import { matchDogByName } from '$lib/utils/dogs';
+	import { tripEligibilityFor } from '$lib/utils/dogAttention';
 
 	const now = new Date();
 	const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -137,27 +138,7 @@
 	});
 
 	function getEligibility(dog: Dog) {
-		return checkDayTripEligibility(
-			dog.intakeDate,
-			dog.isVaccinated,
-			dog.isFixed,
-			dog.dayTripStatus,
-			dog.isolationStatus,
-			dog.dayTripIneligibleReason,
-			dog.dayTripManagerOnlyReason,
-			dog.dayTripNotes,
-			dog.handlingLevel,
-			dog.surgeryDate,
-			dog.surgeryRestDays,
-			dog.awaitingEvaluation,
-			role,
-			new Date(),
-			dog.dateOfBirth,
-			dog.vaccineCount,
-			dog.vaccinesOutstanding,
-			dog.dayTripPuppyOverride,
-			dog.sickHold
-		);
+		return tripEligibilityFor(dog, role, new Date());
 	}
 
 	async function refresh(forceDogs = true) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog } from '$lib/types';
-import { dogAttention, type TripEligibility } from './dogAttention';
+import { dogAttention, tripEligibilityFor, type TripEligibility } from './dogAttention';
 import { pendingItems } from './dogCard';
 
 const today = new Date(2026, 5, 12);
@@ -114,5 +114,15 @@ describe('bath for transfers', () => {
 	it('flags a bath 30+ days after the last one this stay', () => {
 		const due = makeDog({ intakeDate: new Date(2026, 3, 1), lastBathDate: new Date(2026, 4, 1) });
 		expect(kinds(due)).toContain('bath');
+	});
+});
+
+describe('tripEligibilityFor', () => {
+	it('never calls a red dog eligible, as the day-trips board does not', () => {
+		const red = tripEligibilityFor(makeDog({ manualTripColor: 'red', manualTripColorReason: 'behavior' }), 'admin', today);
+		expect(red.eligible).toBe(false);
+		expect(red.status).toBe('ineligible');
+		expect(red.reasons[0]).toBe('Red: Behavior');
+		expect(tripEligibilityFor(makeDog({ manualTripColor: 'green' }), 'admin', today).eligible).toBe(true);
 	});
 });
