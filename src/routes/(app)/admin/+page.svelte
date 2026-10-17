@@ -1165,7 +1165,7 @@
 					<div>
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Backfill #dog-staff from Slack</h3>
-						<p class="section-copy">Log past baths and yard time from #dog-staff.</p>
+						<p class="section-copy">Log past baths, yard time and one-on-one time from #dog-staff.</p>
 						<details class="how-it-works"><summary>How it works</summary><p>Reads #dog-staff, thread replies included, from the date below and logs what it finds the way the live Slack poll does: baths and yard time. Anything already logged is left alone, and last-bath / last-yard dates only move forward. <strong>Dry run first — nothing is logged until you apply, and only ticked rows.</strong></p></details>
 					</div>
 				</div>
