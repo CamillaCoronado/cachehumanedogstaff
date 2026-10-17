@@ -4,7 +4,7 @@ import {
 	feedingLogId,
 	shelterDay,
 	yardLogId,
-	cuddleLogId,
+	oneOnOneLogId,
 	type PlannedBath,
 	type PlannedFeeding,
 	type PlannedSurgery,
@@ -92,7 +92,7 @@ export async function writeBaths(db: Db, bathed: PlannedBath[], author: string, 
 }
 
 /**
- * Logs yard time, or cuddle time; both are enrichment and share the yard log. A dog's
+ * Logs yard time, or one-on-one time; both are enrichment and share the yard log. A dog's
  * lastYardDate only moves forward.
  */
 export async function writeYard(
@@ -101,12 +101,12 @@ export async function writeYard(
 	postedAt: Date,
 	author: string,
 	slackTs: string,
-	kind: 'yard' | 'cuddle' = 'yard'
+	kind: 'yard' | 'one_on_one' = 'yard'
 ): Promise<number> {
 	const current = await Promise.all(inYard.map((d) => db.collection('dogs').doc(d.dogId).get()));
 	const batch = db.batch();
 	inYard.forEach((dog, i) => {
-		const id = kind === 'cuddle' ? cuddleLogId(postedAt, dog.dogId) : yardLogId(postedAt, dog.dogId);
+		const id = kind === 'one_on_one' ? oneOnOneLogId(postedAt, dog.dogId) : yardLogId(postedAt, dog.dogId);
 		batch.set(db.collection('dogs').doc(dog.dogId).collection('yardLogs').doc(id), {
 			id,
 			timestamp: postedAt.toISOString(),

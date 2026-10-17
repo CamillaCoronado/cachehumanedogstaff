@@ -1,6 +1,6 @@
 /**
- * Reads cuddle-time reports out of shelter chat: "spent time with Miles", "spent some
- * time with Rex and Luna today", "spent 20 min with Sheba". Cuddle time is enrichment,
+ * Reads one-on-one reports out of shelter chat: "spent time with Miles", "spent some
+ * time with Rex and Luna today", "spent 20 min with Sheba". One-on-one is enrichment,
  * like the yard, and is said one way often enough to read on its own.
  *
  * The dogs come after "with", up to the end of that sentence. Past tense only, so
@@ -10,7 +10,7 @@
 
 import { buildRoster, namesIn } from './parseYardMessage';
 
-export interface ParsedCuddleMessage {
+export interface ParsedOneOnOneMessage {
 	/** Dogs the message says someone spent time with. */
 	dogNames: string[];
 	/** From "spent 20 min with", when stated. */
@@ -40,7 +40,7 @@ function durationIn(text: string): number | null {
 	return null;
 }
 
-export function parseCuddleMessage(text: string, knownDogNames: string[] = []): ParsedCuddleMessage {
+export function parseOneOnOneMessage(text: string, knownDogNames: string[] = []): ParsedOneOnOneMessage {
 	const empty = { dogNames: [], durationMinutes: null };
 	const match = SPENT_WITH.exec(text);
 	if (!match || text.includes('?')) return empty;

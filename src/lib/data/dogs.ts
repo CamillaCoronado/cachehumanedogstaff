@@ -797,7 +797,7 @@ function deserializeYardLog(log: StoredYardLog): YardLog {
 		timestamp: toDate(log.timestamp) ?? new Date(),
 		durationMinutes: typeof log.durationMinutes === 'number' ? log.durationMinutes : null,
 		// Logs from before there were kinds are all yard time.
-		kind: log.kind === 'cuddle' || log.kind === 'other' ? log.kind : 'yard',
+		kind: log.kind === 'one_on_one' || log.kind === 'other' ? log.kind : 'yard',
 		note: typeof log.note === 'string' && log.note.trim() ? log.note : null,
 		loggedBy: log.loggedBy,
 		loggedByName: log.loggedByName

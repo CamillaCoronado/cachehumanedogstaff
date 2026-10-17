@@ -82,7 +82,7 @@
 	let newYardKind: EnrichmentKind = 'yard';
 	let newYardNote = '';
 	let savingYard = false;
-	const ENRICHMENT_LABELS: Record<EnrichmentKind, string> = { yard: 'Yard', cuddle: 'Cuddle time', other: 'Other' };
+	const ENRICHMENT_LABELS: Record<EnrichmentKind, string> = { yard: 'Yard', one_on_one: 'One-on-one', other: 'Other' };
 	let newFeedingDate = todayStr();
 	let newFeedingMealTime: MealTime = 'am';
 	let newFeedingAmount: AmountEaten = 'all';
@@ -1224,7 +1224,7 @@
 							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newYardDate} />
 							<select class="rounded-full border border-ink-100 px-3 py-1" bind:value={newYardKind}>
 								<option value="yard">Yard</option>
-								<option value="cuddle">Cuddle time</option>
+								<option value="one_on_one">One-on-one</option>
 								<option value="other">Other</option>
 							</select>
 							{#if newYardKind === 'other'}

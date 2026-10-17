@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseCuddleMessage } from './parseCuddleMessage';
+import { parseOneOnOneMessage } from './parseOneOnOneMessage';
 
 const ROSTER = ['Miles', 'Rex', 'Luna', 'Sheba', 'Dot (Freya)', 'Natalie'];
-const parse = (t: string) => parseCuddleMessage(t, ROSTER);
+const parse = (t: string) => parseOneOnOneMessage(t, ROSTER);
 
-describe('parseCuddleMessage', () => {
+describe('parseOneOnOneMessage', () => {
 	it('reads "spent time with"', () => {
 		expect(parse('spent time with Miles').dogNames).toEqual(['Miles']);
 		expect(parse('I spent some time with Rex and Luna today').dogNames).toEqual(['Rex', 'Luna']);

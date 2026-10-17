@@ -11,8 +11,8 @@ import {
 	planFeedingsDetailed,
 	planSurgery,
 	planYardTime,
-	planCuddleTime,
-	cuddleLogId,
+	planOneOnOne,
+	oneOnOneLogId,
 	shelterDay,
 	yardLogId,
 	type DogRecord
@@ -21,8 +21,8 @@ import {
 /** Stops a very long range from running past the function's time limit (3,000 messages). */
 const MAX_PAGES = 15;
 
-export type StaffKind = 'surgery' | 'bath' | 'yard' | 'cuddle' | 'feeding';
-export const STAFF_KINDS: StaffKind[] = ['surgery', 'bath', 'yard', 'cuddle', 'feeding'];
+export type StaffKind = 'surgery' | 'bath' | 'yard' | 'one_on_one' | 'feeding';
+export const STAFF_KINDS: StaffKind[] = ['surgery', 'bath', 'yard', 'one_on_one', 'feeding'];
 
 export interface StaffBackfillRow {
 	/** `${kind}|${slackTs}` — what the admin ticks to keep. */
@@ -50,13 +50,13 @@ export interface StaffBackfillResult {
 	skipped?: string;
 }
 
-const zero = (): Record<StaffKind, number> => ({ surgery: 0, bath: 0, yard: 0, cuddle: 0, feeding: 0 });
+const zero = (): Record<StaffKind, number> => ({ surgery: 0, bath: 0, yard: 0, one_on_one: 0, feeding: 0 });
 const names = (list: { dogName: string }[]) => list.map((d) => d.dogName).join(', ');
 const MEAL = { am: 'morning', pm: 'afternoon', second: 'second meal' } as const;
 
 /**
  * Replays #dog-staff (thread replies included) from `since` through the live poll's own
- * readers and writers: surgery lists, baths, yard time, cuddle time and feedings. Anything already
+ * readers and writers: surgery lists, baths, yard time, one-on-one time and feedings. Anything already
  * logged is skipped. With dryRun nothing is written; otherwise only rows in `keep` are.
  *
  * Uncertain feeding readings — the ones the live poll holds for review — are listed
@@ -98,7 +98,7 @@ export async function backfillDogStaff(
 		if (planSurgery(text, postedAt, index).length > 0) continue;
 		if (kinds.includes('bath')) planBaths(text, postedAt, index).forEach((b) => mentioned.add(b.dogId));
 		if (kinds.includes('yard')) planYardTime(text, postedAt, index).forEach((y) => mentioned.add(y.dogId));
-		if (kinds.includes('cuddle')) planCuddleTime(text, postedAt, index).forEach((y) => mentioned.add(y.dogId));
+		if (kinds.includes('one_on_one')) planOneOnOne(text, postedAt, index).forEach((y) => mentioned.add(y.dogId));
 		if (kinds.includes('feeding')) planFeedingsDetailed(text, postedAt, index).entries.forEach((e) => mentioned.add(e.dogId));
 	}
 	const dogIds = [...mentioned];
@@ -108,7 +108,7 @@ export async function backfillDogStaff(
 			ids.map((id) =>
 				Promise.all([
 					kinds.includes('bath') ? db.collection('dogs').doc(id).collection('bathLogs').select().get() : null,
-					kinds.includes('yard') || kinds.includes('cuddle') ? db.collection('dogs').doc(id).collection('yardLogs').select().get() : null,
+					kinds.includes('yard') || kinds.includes('one_on_one') ? db.collection('dogs').doc(id).collection('yardLogs').select().get() : null,
 					kinds.includes('feeding') ? db.collection('dogs').doc(id).collection('feedingLogs').select('date', 'mealTime').get() : null
 				])
 			)
@@ -182,15 +182,15 @@ export async function backfillDogStaff(
 			}
 		}
 
-		if (kinds.includes('cuddle')) {
-			const all = planCuddleTime(text, postedAt, index);
-			const todo = all.filter((y) => !has(y.dogId, 'yard', cuddleLogId(postedAt, y.dogId)));
-			if (all.length > 0 && todo.length === 0) alreadyLogged.cuddle++;
+		if (kinds.includes('one_on_one')) {
+			const all = planOneOnOne(text, postedAt, index);
+			const todo = all.filter((y) => !has(y.dogId, 'yard', oneOnOneLogId(postedAt, y.dogId)));
+			if (all.length > 0 && todo.length === 0) alreadyLogged.one_on_one++;
 			if (todo.length > 0) {
 				plans.push({
-					...base, key: `cuddle|${ts}`, kind: 'cuddle', at: postedAt.toISOString(),
-					summary: `cuddle time: ${names(todo)}`,
-					run: () => writeYard(db, todo, postedAt, author, ts, 'cuddle')
+					...base, key: `one_on_one|${ts}`, kind: 'one_on_one', at: postedAt.toISOString(),
+					summary: `one-on-one time: ${names(todo)}`,
+					run: () => writeYard(db, todo, postedAt, author, ts, 'one_on_one')
 				});
 			}
 		}
