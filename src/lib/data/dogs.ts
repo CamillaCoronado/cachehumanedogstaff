@@ -12,7 +12,8 @@ import type {
 	StoolLog,
 	Treatment,
 	UserProfile,
-	YardLog
+	YardLog,
+	EnrichmentKind
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
@@ -195,6 +196,8 @@ interface StoredYardLog {
 	id: string;
 	timestamp: string;
 	durationMinutes?: number | null;
+	kind?: EnrichmentKind;
+	note?: string | null;
 	loggedBy: string;
 	loggedByName: string;
 }
@@ -781,6 +784,8 @@ function serializeYardLog(log: YardLog): StoredYardLog {
 		id: log.id,
 		timestamp: toDateString(log.timestamp) ?? new Date().toISOString(),
 		durationMinutes: log.durationMinutes ?? null,
+		kind: log.kind,
+		note: log.note ?? null,
 		loggedBy: log.loggedBy,
 		loggedByName: log.loggedByName
 	};
@@ -791,6 +796,9 @@ function deserializeYardLog(log: StoredYardLog): YardLog {
 		id: log.id,
 		timestamp: toDate(log.timestamp) ?? new Date(),
 		durationMinutes: typeof log.durationMinutes === 'number' ? log.durationMinutes : null,
+		// Logs from before there were kinds are all yard time.
+		kind: log.kind === 'one_on_one' || log.kind === 'other' ? log.kind : 'yard',
+		note: typeof log.note === 'string' && log.note.trim() ? log.note : null,
 		loggedBy: log.loggedBy,
 		loggedByName: log.loggedByName
 	};
@@ -1689,7 +1697,9 @@ export async function logYardTime(
 	dogId: string,
 	durationMinutes: number | null,
 	profile?: UserProfile | null,
-	timestamp?: Date
+	timestamp?: Date,
+	kind: EnrichmentKind = 'yard',
+	note: string | null = null
 ) {
 	const identity = getUserIdentity(profile);
 	const now = timestamp ?? new Date();
@@ -1697,6 +1707,8 @@ export async function logYardTime(
 		id: createId('yard'),
 		timestamp: now,
 		durationMinutes,
+		kind,
+		note: kind === 'other' && note?.trim() ? note.trim() : null,
 		loggedBy: identity.uid,
 		loggedByName: identity.name
 	};

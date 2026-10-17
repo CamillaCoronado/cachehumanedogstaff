@@ -5,6 +5,7 @@ import {
 	buildDogIndex,
 	planBaths,
 	planYardTime,
+	planOneOnOne,
 	planFeedingsDetailed,
 	planSurgery,
 	type DogRecord
@@ -128,6 +129,12 @@ export async function pollSlackFeedings(): Promise<PollResult> {
 		const inYard = planYardTime(String(m.text), postedAt, index);
 		if (inYard.length > 0) {
 			yard += await writeYard(db, inYard, postedAt, authors[String(m.user ?? '')] ?? 'Unknown', slackTs);
+		}
+
+		// "Spent time with Miles" is one-on-one time — the same enrichment, its own log.
+		const oneOnOne = planOneOnOne(String(m.text), postedAt, index);
+		if (oneOnOne.length > 0) {
+			yard += await writeYard(db, oneOnOne, postedAt, authors[String(m.user ?? '')] ?? 'Unknown', slackTs, 'one_on_one');
 		}
 
 		const plan = planFeedingsDetailed(String(m.text), postedAt, index);

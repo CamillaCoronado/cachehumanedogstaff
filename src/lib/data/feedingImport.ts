@@ -2,6 +2,7 @@ import type { AmountEaten, MealTime } from '$lib/types';
 import { parseFeedingMessage } from '$lib/utils/parseFeedingMessage';
 import { parseBathMessage } from '$lib/utils/parseBathMessage';
 import { parseYardMessage } from '$lib/utils/parseYardMessage';
+import { parseOneOnOneMessage } from '$lib/utils/parseOneOnOneMessage';
 
 /** The shelter feeds again at 3pm; before that a report is about the morning feed. */
 const PM_FEED_HOUR = 15;
@@ -661,6 +662,29 @@ export function planYardTime(text: string, postedAt: Date, index: DogIndex): Pla
 	}
 
 	return out;
+}
+
+/**
+ * Reads a one-on-one report: "spent time with Miles". Logged beside yard time as
+ * enrichment. A message that is also a yard report ("spent time with Rex in the yard")
+ * is yard time, and is left to that reader.
+ */
+export function planOneOnOne(text: string, postedAt: Date, index: DogIndex): PlannedYard[] {
+	if (planYardTime(text, postedAt, index).length > 0) return [];
+	const parsed = parseOneOnOneMessage(text, rosterOn(index, postedAt));
+	const out: PlannedYard[] = [];
+	for (const name of parsed.dogNames) {
+		const dogId = resolveDogId(index, name, postedAt);
+		if (dogId && !out.some((d) => d.dogId === dogId)) {
+			out.push({ dogId, dogName: index.namesById.get(dogId) ?? name, durationMinutes: parsed.durationMinutes });
+		}
+	}
+	return out;
+}
+
+/** One one-on-one log per dog per day, kept apart from that day's yard log. */
+export function oneOnOneLogId(at: Date, dogId: string): string {
+	return `slack-oneonone-${shelterDay(at)}-${dogId}`;
 }
 
 /** One yard log per dog per day, so a re-poll does not add a second. */

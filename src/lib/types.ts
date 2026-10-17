@@ -142,7 +142,8 @@ export interface Dog {
 	handlingLevelBeforeHold?: DogHandlingLevel | null;
 	lastBathDate: DateValue | null;
 	lastBathBy: string | null;
-	/** Last logged yard time — counts as enrichment alongside day trips and playgroups. */
+	/** Last logged enrichment session (yard, one-on-one time or other) — counts alongside day
+	 *  trips and playgroups. Named for yard time, the only kind there was at first. */
 	lastYardDate?: DateValue | null;
 	lastDayTripDate: DateValue | null;
 	// Whether the dog is currently out on a day trip
@@ -346,10 +347,20 @@ export interface BathLog {
 	loggedByName: string;
 }
 
+/**
+ * What a logged enrichment session was. Yard time came first, so a log with no kind is
+ * yard time; one-on-one time and "other" (with a note saying what) were added beside it.
+ */
+export type EnrichmentKind = 'yard' | 'one_on_one' | 'other';
+
+/** One enrichment session. Kept in the yardLogs subcollection, whatever its kind. */
 export interface YardLog {
 	id: string;
 	timestamp: DateValue;
 	durationMinutes: number | null;
+	kind: EnrichmentKind;
+	/** What it was, for "other": "puzzle toy", "kong". */
+	note: string | null;
 	loggedBy: string;
 	loggedByName: string;
 }
