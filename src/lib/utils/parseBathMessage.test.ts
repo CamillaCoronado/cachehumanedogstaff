@@ -94,4 +94,16 @@ describe('parseBathMessage', () => {
 		expect(parse('Straggler was adopted!').dogNames).toEqual([]);
 		expect(parse('Myla on a drive hold').dogNames).toEqual([]);
 	});
+
+	it('tolerates a doubled or dropped letter in a name', () => {
+		// Real message: "Lilly" for Lily was not logged.
+		expect(parseBathMessage('Lilly got a bath', ['Lily', 'Koda']).dogNames).toEqual(['Lily']);
+		expect(parseBathMessage('Lily got a bath', ['Lilly', 'Koda']).dogNames).toEqual(['Lilly']);
+		expect(parse('Madonna and whogie got baths').dogNames).toEqual(['Madonna', 'Whoogie']);
+	});
+
+	it('does not stretch a doubled letter onto a short word or between two dogs', () => {
+		expect(parseBathMessage('Bell got a bath', ['Bel']).dogNames).toEqual([]);
+		expect(parseBathMessage('Lilly got a bath', ['Lily', 'Lilyy']).dogNames).toEqual([]);
+	});
 });

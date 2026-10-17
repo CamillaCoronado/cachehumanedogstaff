@@ -7,6 +7,8 @@
  * was given, and plans for later.
  */
 
+import { buildRoster, namesIn } from './parseYardMessage';
+
 export interface ParsedBathMessage {
 	/** Dogs the message says were bathed, in the order named. */
 	dogNames: string[];
@@ -58,66 +60,6 @@ const YESTERDAY = /\byesterday\b/i;
 
 /** Any mention of a bath at all, whether or not one happened. */
 const MENTIONS_BATH = /\bbaths?\b|\bbath(?:ed|ing)\b|\bbathe\b/i;
-
-function normalizeForCompare(value: string): string {
-	return value.toLowerCase().replace(/[^a-z]/g, '');
-}
-
-/** Same alias expansion the feeding parser uses: nicknames, first words, initials. */
-function aliasesFor(name: string): { canonical: string[]; derived: string[] } {
-	const parenthetical = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(name);
-	const base = (parenthetical ? parenthetical[1] : name).trim();
-	const canonical = [name, base];
-	const derived: string[] = [];
-	if (parenthetical) derived.push(parenthetical[2]);
-	if (base.includes(' ')) {
-		const words = base.split(/\s+/);
-		if (words[0].length >= 3) derived.push(words[0]);
-		const initials = words.map((w) => w[0]).join('');
-		if (initials.length >= 2) derived.push(initials);
-	}
-	return { canonical, derived };
-}
-
-function buildRoster(knownDogNames: string[]): Map<string, string> {
-	const roster = new Map<string, string>();
-	const all = knownDogNames.map((name) => ({ name, ...aliasesFor(name) }));
-	// Canonical names first, so a derived alias never displaces a real dog of that name.
-	for (const { name, canonical } of all) {
-		for (const alias of canonical) {
-			const key = normalizeForCompare(alias);
-			if (key && !roster.has(key)) roster.set(key, name);
-		}
-	}
-	for (const { name, derived } of all) {
-		for (const alias of derived) {
-			const key = normalizeForCompare(alias);
-			if (key && !roster.has(key)) roster.set(key, name);
-		}
-	}
-	return roster;
-}
-
-/** Roster dogs named in a fragment, longest name first so "Bento Box" is not "Bento". */
-function namesIn(fragment: string, roster: Map<string, string>): string[] {
-	const words = fragment.split(/[^A-Za-z'-]+/).filter(Boolean);
-	const found: string[] = [];
-	let i = 0;
-	while (i < words.length) {
-		let matched = false;
-		for (let span = Math.min(3, words.length - i); span >= 1; span--) {
-			const hit = roster.get(normalizeForCompare(words.slice(i, i + span).join('')));
-			if (hit) {
-				if (!found.includes(hit)) found.push(hit);
-				i += span;
-				matched = true;
-				break;
-			}
-		}
-		if (!matched) i++;
-	}
-	return found;
-}
 
 export function parseBathMessage(text: string, knownDogNames: string[] = []): ParsedBathMessage {
 	const empty = { dogNames: [], daysAgo: 0, notYet: false };

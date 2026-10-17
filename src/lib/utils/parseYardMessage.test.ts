@@ -28,6 +28,11 @@ describe('parseYardMessage', () => {
 		expect(parse('Paisley zane Jack mia Zinnia got yard tine').dogNames).toContain('Paisley');
 	});
 
+	it('tolerates a doubled letter, even on a short name', () => {
+		expect(parseYardMessage('Lily got yard time', ['Lilly', 'Rex']).dogNames).toEqual(['Lilly']);
+		expect(parseYardMessage('Lilly got yard time', ['Lily', 'Rex']).dogNames).toEqual(['Lily']);
+	});
+
 	it('reads a blanket over the whole shelter', () => {
 		expect(parse('All dogs got yard time').allDogs).toBe(true);
 		expect(parse('Yard time for all dogs').allDogs).toBe(true);

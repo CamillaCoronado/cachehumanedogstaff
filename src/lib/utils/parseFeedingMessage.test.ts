@@ -221,6 +221,11 @@ describe('parseFeedingMessage', () => {
 		expect(result.entries.map((e) => e.name)).toEqual(['Dexter', 'Straggler', 'Zane']);
 	});
 
+	it('recovers a name with a doubled letter', () => {
+		expect(parseFeedingMessage("Lilly didn't eat", ['Lily', 'Buck']).entries.map((e) => e.name)).toEqual(['Lily']);
+		expect(parseFeedingMessage("Lily didn't eat", ['Lilly', 'Buck']).entries.map((e) => e.name)).toEqual(['Lilly']);
+	});
+
 	it('will not guess between two equally close names', () => {
 		// "arley" is one insertion from both Marley and Harley; picking either is a coin flip.
 		expect(parseFeedingMessage("arley didn't eat", ['Marley', 'Harley']).entries).toEqual([]);

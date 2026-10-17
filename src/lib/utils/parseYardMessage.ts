@@ -153,7 +153,8 @@ export function buildRoster(knownDogNames: string[]): Roster {
 const NOT_NAMES = new Set([
 	'today', 'after', 'again', 'there', 'their', 'these', 'those', 'where', 'which', 'while',
 	'about', 'other', 'every', 'never', 'later', 'first', 'great', 'happy', 'thank', 'thanks',
-	'morning', 'outside', 'inside', 'yesterday', 'tonight', 'played', 'walked'
+	'morning', 'outside', 'inside', 'yesterday', 'tonight', 'played', 'walked',
+	'baths', 'bathed', 'bathing', 'gotten', 'shampoo', 'medicated'
 ]);
 
 /** One letter added, dropped or changed. */
@@ -165,17 +166,34 @@ function oneEditApart(a: string, b: string): boolean {
 	return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
 }
 
+/** "lilly" and "lily" are the same name once a doubled letter counts once. */
+function collapseDoubles(value: string): string {
+	return value.replace(/(.)\1+/g, '$1');
+}
+
 /**
- * A misspelled name: "natilie" for Natalie. Only a real name, only one letter off, only
- * five letters or more with the first letter right, and only when exactly one dog is that
- * close, so a typo never has to choose between two dogs.
+ * Differs only in doubled letters: "Lilly" for Lily, "Lily" for Lilly. The likeliest way
+ * a name gets misspelled, and safe on four-letter names where one free edit is not. Not
+ * on three: "will", "bell" and "good" would find a Wil, a Bel or a God.
+ */
+export function doubledLettersApart(a: string, b: string): boolean {
+	const collapsed = collapseDoubles(a);
+	return a !== b && collapsed.length >= 4 && collapsed === collapseDoubles(b);
+}
+
+/**
+ * A misspelled name: "natilie" for Natalie, "Lilly" for Lily. Only a real name, and only
+ * when exactly one dog is that close, so a typo never has to choose between two dogs.
+ * One letter off needs five letters or more with the first letter right; a doubled letter
+ * needs a name of four.
  */
 function misspelledName(word: string, roster: Roster): string | null {
 	const key = normalizeForCompare(word);
-	if (key.length < 5 || NOT_NAMES.has(key)) return null;
+	if (key.length < 4 || NOT_NAMES.has(key)) return null;
 	const hits = new Set<string>();
 	for (const [name, dog] of roster.canonical) {
-		if (name[0] === key[0] && oneEditApart(key, name)) hits.add(dog);
+		if (doubledLettersApart(key, name)) hits.add(dog);
+		else if (key.length >= 5 && name[0] === key[0] && oneEditApart(key, name)) hits.add(dog);
 	}
 	return hits.size === 1 ? [...hits][0] : null;
 }
