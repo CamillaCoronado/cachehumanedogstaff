@@ -1,4 +1,5 @@
 import type { AmountEaten, MealTime } from '$lib/types';
+import { doubledLettersApart } from './parseYardMessage';
 
 export interface ParsedFeedingEntry {
 	name: string;
@@ -228,7 +229,19 @@ function namesIn(
 			// Only single words, only long ones, only one edit away, and only when exactly
 			// one roster name is that close: two candidates means guessing which dog.
 			const word = normalizeForCompare(words[i]);
-			if (word.length >= 5 && !NEVER_A_NAME.has(word) && !roster.has(word)) {
+			// "Lilly" for Lily: only a doubled letter apart, which is safe on a short name
+			// where one free edit is not.
+			const doubled = new Set<string>();
+			if (word.length >= 4 && !NEVER_A_NAME.has(word)) {
+				for (const [key, name] of roster) {
+					if (!derivedKeys.has(key) && doubledLettersApart(word, key)) doubled.add(name);
+				}
+			}
+			if (doubled.size === 1) {
+				const name = [...doubled][0];
+				found.push(name);
+				fuzzyHits?.add(name);
+			} else if (doubled.size === 0 && word.length >= 5 && !NEVER_A_NAME.has(word) && !roster.has(word)) {
 				const max = word.length >= 7 ? 2 : 1;
 				// Nearest first: an exact-ish match should not be blocked by a looser one.
 				for (let d = 1; d <= max; d++) {
