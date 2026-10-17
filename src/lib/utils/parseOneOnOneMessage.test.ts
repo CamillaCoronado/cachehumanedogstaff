@@ -41,4 +41,24 @@ describe('parseOneOnOneMessage', () => {
 		expect(parse('spent time with the new volunteers').dogNames).toEqual([]);
 		expect(parse('spent all morning with Sarah cleaning kennels').dogNames).toEqual([]);
 	});
+
+	it('reads cuddling and petting', () => {
+		const jade = (t: string) => parseOneOnOneMessage(t, [...ROSTER, 'Jade']);
+		// Real, from #dog-staff.
+		const real = jade('I think Jade could really benefit from a foster. 10im cuddling/petting her calmed her down a lot');
+		expect(real.dogNames).toEqual(['Jade']);
+		expect(real.durationMinutes).toBe(10);
+		expect(parse('cuddled with Rex for 15 min').dogNames).toEqual(['Rex']);
+		expect(parse('Luna got some petting in this morning').dogNames).toEqual(['Luna']);
+		expect(parse('snuggling Sheba on the couch').dogNames).toEqual(['Sheba']);
+	});
+
+	it('ignores cuddling that did not happen', () => {
+		expect(parse('Rex loves cuddling').dogNames).toEqual([]);
+		expect(parse('Luna needs more petting').dogNames).toEqual([]);
+		expect(parse("I haven't cuddled Sheba yet").dogNames).toEqual([]);
+		expect(parse('Is anyone petting Miles today?').dogNames).toEqual([]);
+		// "her" with two dogs named is anyone's guess.
+		expect(parse('Rex and Luna were loud. Cuddling her helped').dogNames).toEqual([]);
+	});
 });
