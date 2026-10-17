@@ -53,6 +53,12 @@ const ESCAPED =
 const WORKED_WITH = /\bworked\s+with\b/i;
 const TOOK_OUT = /\btook\s+(.{1,60}?)\s+out(?:side)?\b/i;
 
+/**
+ * "took Sally out" said about a day trip — "Allison was day tripped that took sally out".
+ * Day trips are logged on their own; this is not time in the yard.
+ */
+const DAY_TRIP = /\bday[\s-]*trip/i;
+
 /** Dogs left out of a blanket: "all dogs went out except for punch". */
 const EXCEPT = /\bexcept\s+(?:for\s+)?|\bbut\s+(?:not\s+)?|\bother\s+than\s+/i;
 
@@ -226,8 +232,11 @@ export function parseYardMessage(text: string, knownDogNames: string[] = []): Pa
 	}
 
 	// The dogs are named before the activity, whether or not a verb comes between —
-	// "… sally Ann got yard time" and "… zane paisley junior yard time" both work.
-	const before = text.slice(0, marker.index);
+	// "… sally Ann got yard time" and "… zane paisley junior yard time" both work. Only
+	// in the same sentence: a long note that names a dog early and mentions the yard
+	// three sentences later is not saying that dog went out.
+	const sentenceStart = Math.max(...['.', '!', '?'].map((p) => text.lastIndexOf(p, marker.index - 1))) + 1;
+	const before = text.slice(sentenceStart, marker.index);
 	const dogNames = namesIn(before, roster);
 
 	// A verb is not required, but without one and without any dog named this is prose
@@ -239,7 +248,7 @@ export function parseYardMessage(text: string, knownDogNames: string[] = []): Pa
 
 /** "I worked with Miles today", "took Miles out": the dog is named after the verb. */
 function oneOnOne(text: string, knownDogNames: string[]): ParsedYardMessage | null {
-	if (ESCAPED.test(text) || NEGATED.test(text) || NOT_A_REPORT.test(text) || text.includes('?')) return null;
+	if (DAY_TRIP.test(text) || ESCAPED.test(text) || NEGATED.test(text) || NOT_A_REPORT.test(text) || text.includes('?')) return null;
 	const roster = buildRoster(knownDogNames);
 	let fragment: string | null = null;
 	const worked = WORKED_WITH.exec(text);

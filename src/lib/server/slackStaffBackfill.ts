@@ -138,7 +138,7 @@ export async function backfillDogStaff(
 		const text = String(m.text);
 		const postedAt = new Date(Number(ts) * 1000);
 		const author = authors[String(m.user ?? '')] ?? 'Unknown';
-		const base = { author, text: text.slice(0, 200), uncertain: [] as string[] };
+		const base = { author, text: text.slice(0, 1000), uncertain: [] as string[] };
 
 		// As in the live poll: a surgery list is only that — never also read as a feed.
 		const surgery = planSurgery(text, postedAt, index);
