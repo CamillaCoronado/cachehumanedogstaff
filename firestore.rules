@@ -110,7 +110,8 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['sickHold', 'sickHoldReason', 'sickHoldSince', 'sickMonitor',
                     'sickMonitorReason', 'sickMonitorSince', 'sickSuggestDismissed',
-                    'treatments', 'enrichmentResetDate', 'handlingLevel',
+                    'treatments', 'enrichmentResetDate', 'enrichmentHoldStart',
+                    'handlingLevel',
                     'handlingLevelBeforeHold', 'updatedAt']);
 
       match /behavioralNotes/{noteId} {

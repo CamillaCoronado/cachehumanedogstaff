@@ -251,10 +251,13 @@ export interface Dog {
 	sickMonitor?: boolean;
 	sickMonitorReason?: string | null;
 	sickMonitorSince?: DateValue | null;
-	/** When the enrichment clock was last reset — stamped when a dog comes off an
-	 *  isolation or sick hold, so it doesn't read as instantly overdue for enrichment
-	 *  (which it couldn't get while held). The enrichment clock ignores time before this. */
+	/** When the dog last came off an isolation or sick hold. With enrichmentHoldStart it
+	 *  marks the held stretch, which the enrichment clock doesn't count (a held dog couldn't
+	 *  get enrichment); time before the hold still counts. */
 	enrichmentResetDate?: DateValue | null;
+	/** When that hold began. A reset with no start (stamped before holds were timed) is
+	 *  ignored by the enrichment clock. */
+	enrichmentHoldStart?: DateValue | null;
 	treatments?: Treatment[];
 	/** When the ASM sync last wrote this dog (read-only — written by the sync,
 	 *  preserved across app edits). For archived dogs this approximates the

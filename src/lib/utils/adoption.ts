@@ -1,5 +1,5 @@
 import type { Dog } from '$lib/types';
-import { toDate } from '$lib/utils/dates';
+import { toDate, tripColorReasonLabel } from '$lib/utils/dates';
 import { resolveDogHandlingLevel } from '$lib/utils/permissions';
 
 export type AdoptionAvailabilityState =
@@ -46,6 +46,8 @@ export function getAdoptionAvailability(
 		| 'notAdoptableReason'
 		| 'sickHold'
 		| 'sickHoldReason'
+		| 'manualTripColor'
+		| 'manualTripColorReason'
 	>
 ): AdoptionAvailability {
 	const missingMedicalRequirements = missingAdoptionMedicalRequirements(dog);
@@ -113,6 +115,17 @@ export function getAdoptionAvailability(
 			state: 'handling_hold',
 			missingMedicalRequirements: [],
 			holdReason
+		};
+	}
+
+	// A red dog is staff-only and not adoptable, whatever its profile says.
+	if (dog.manualTripColor === 'red') {
+		const why = tripColorReasonLabel(dog.manualTripColorReason);
+		return {
+			available: false,
+			state: 'handling_hold',
+			missingMedicalRequirements: [],
+			holdReason: why ? `red: ${why.toLowerCase()}` : 'red'
 		};
 	}
 

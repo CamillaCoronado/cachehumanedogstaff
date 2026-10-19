@@ -148,21 +148,34 @@ describe('getOverdueEnrichmentDogs', () => {
 		).toEqual([]);
 	});
 
-	it('resets the clock from enrichmentResetDate when a hold lifts', () => {
-		// Long-overdue arrival, but the hold lifted 2 days ago → not yet overdue.
+	it("doesn't count a hold's days once it lifts, but counts the days before it", () => {
+		// Arrived Mar 25, sick Apr 1 → Apr 8: 7 days before the hold + 2 since → 9.
 		const dog = makeDog({
-			intakeDate: new Date(2026, 1, 1),
+			intakeDate: new Date(2026, 2, 25),
+			enrichmentHoldStart: new Date(2026, 3, 1),
 			enrichmentResetDate: new Date(2026, 3, 8)
 		});
-		expect(getOverdueEnrichmentDogs([dog], [], today)).toEqual([]);
-
-		// If the reset was 8 days ago, it's overdue again — counted from the reset, not intake.
-		const older = makeDog({
-			intakeDate: new Date(2026, 1, 1),
-			enrichmentResetDate: new Date(2026, 3, 2)
-		});
-		const items = getOverdueEnrichmentDogs([older], [], today);
+		const items = getOverdueEnrichmentDogs([dog], [], today);
 		expect(items).toHaveLength(1);
-		expect(items[0].days).toBe(8);
+		expect(items[0].days).toBe(9);
+
+		// Enrichment during the hold's run-up only counts the days after it.
+		const recent = makeDog({
+			intakeDate: new Date(2026, 2, 25),
+			lastYardDate: new Date(2026, 2, 31),
+			enrichmentHoldStart: new Date(2026, 3, 1),
+			enrichmentResetDate: new Date(2026, 3, 8)
+		});
+		expect(getOverdueEnrichmentDogs([recent], [], today)).toEqual([]);
+	});
+
+	it('ignores a hold end stamped before hold starts were recorded', () => {
+		const dog = makeDog({
+			intakeDate: new Date(2026, 2, 25),
+			enrichmentResetDate: new Date(2026, 3, 8)
+		});
+		const items = getOverdueEnrichmentDogs([dog], [], today);
+		expect(items).toHaveLength(1);
+		expect(items[0].days).toBe(16);
 	});
 });
