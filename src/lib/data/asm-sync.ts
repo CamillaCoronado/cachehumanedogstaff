@@ -442,7 +442,17 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 				const intakeMs = asmFields.intakeDate ? new Date(asmFields.intakeDate).getTime() : 0;
 				const recentIntake = intakeMs > 0 && Date.now() - intakeMs < 7 * 86_400_000;
 				const needsEvalFlag = existing?.awaitingEvaluation === undefined && recentIntake && !isPuppy;
+				// ASM's isolation pauses the enrichment clock like the app's own holds do.
+				const wasHeld = (existing?.isolationStatus ?? 'none') !== 'none' || existing?.sickHold === true;
+				const enteringIso = !wasHeld && asmFields.isolationStatus !== 'none';
+				const leavingIso =
+					existing?.isolationStatus !== undefined && existing.isolationStatus !== 'none' &&
+					asmFields.isolationStatus === 'none' && existing.sickHold !== true;
 				const extra = {
+					...(enteringIso ? { enrichmentHoldStart: now } : {}),
+					...(leavingIso
+						? { enrichmentHoldStart: existing?.enrichmentHoldStart ?? existing?.shelterSince ?? existing?.intakeDate ?? now, enrichmentResetDate: now }
+						: {}),
 					// Back from foster is its own stamp: the stay did not restart, so
 					// shelterSince (how long the dog has been ours) is left alone.
 					...(returningFromFoster ? { fosterReturnedAt: now } : {}),

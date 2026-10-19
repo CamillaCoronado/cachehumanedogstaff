@@ -134,6 +134,27 @@ describe('stamps on arrival and foster return', () => {
 		expect(store.get('3')?.shelterSince).toBeTruthy();
 		expect(store.get('3')?.fosterReturnedAt).toBeUndefined();
 	});
+
+	it("times an ASM isolation stay so the enrichment clock skips it", async () => {
+		const { env, store } = fakeEnv(
+			{
+				'4': { name: 'Sniffles', status: 'active', asmId: 4, asmShelterCode: 'A4', isolationStatus: 'none' },
+				'5': { name: 'Better', status: 'active', asmId: 5, asmShelterCode: 'A5', isolationStatus: 'iso', enrichmentHoldStart: '2026-03-01T12:00:00.000Z' }
+			},
+			{
+				animals: [
+					stayer,
+					{ ID: 4, ANIMALNAME: 'Sniffles', SPECIESNAME: 'Dog', SHELTERCODE: 'A4', DISPLAYLOCATIONNAME: 'Iso 1' },
+					{ ID: 5, ANIMALNAME: 'Better', SPECIESNAME: 'Dog', SHELTERCODE: 'A5', DISPLAYLOCATIONNAME: 'Kennel 2' }
+				]
+			}
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('4')?.enrichmentHoldStart).toBeTruthy();
+		expect(store.get('4')?.enrichmentResetDate).toBeUndefined();
+		expect(store.get('5')?.enrichmentHoldStart).toBe('2026-03-01T12:00:00.000Z');
+		expect(store.get('5')?.enrichmentResetDate).toBeTruthy();
+	});
 });
 
 describe('permanent foster', () => {

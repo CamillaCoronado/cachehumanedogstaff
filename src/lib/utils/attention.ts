@@ -215,8 +215,8 @@ export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
 // incoming dogs are excluded, so their clock effectively restarts when they
 // land on the floor. Dogs on medical rest, manager-only, in isolation, or on a
 // sick hold are hidden (the clock is paused): they can't get enrichment, so they
-// aren't flagged. Coming off an isolation/sick hold stamps enrichmentResetDate,
-// which becomes the new clock baseline — so held time never counts against them.
+// aren't flagged. A hold's days (enrichmentHoldStart → enrichmentResetDate) don't count
+// against them once it lifts, but the days before it still do.
 
 export const ENRICHMENT_OVERDUE_DAYS = 7;
 
@@ -254,10 +254,7 @@ export function enrichmentOverdueDays(dog: Dog, lastPlaygroupDate: Date | null, 
 	if (dog.handlingLevel === 'manager_only') return null;
 
 	const availableSince = clockStart(dog);
-	const availableMs = toDate(availableSince)?.getTime() ?? 0;
-	// Coming off an isolation/sick hold reset the clock — ignore anything before it.
-	const resetMs = toDate(dog.enrichmentResetDate)?.getTime() ?? 0;
-	const baselineMs = Math.max(availableMs, resetMs);
+	const baselineMs = toDate(availableSince)?.getTime() ?? 0;
 
 	const activityDates = [toDate(dog.lastDayTripDate), lastPlaygroupDate, toDate(dog.lastYardDate)];
 	const lastEnrichmentMs = activityDates.reduce((latest, date) => {
@@ -265,6 +262,17 @@ export function enrichmentOverdueDays(dog: Dog, lastPlaygroupDate: Date | null, 
 		return Math.max(latest, date.getTime());
 	}, baselineMs);
 
-	const days = daysSince(new Date(lastEnrichmentMs), today) ?? 0;
+	const days = (daysSince(new Date(lastEnrichmentMs), today) ?? 0) - heldDaysSince(dog, lastEnrichmentMs, today);
 	return days >= ENRICHMENT_OVERDUE_DAYS ? days : null;
+}
+
+/** Days of the dog's last isolation/sick hold that fall after `sinceMs`; they don't count. */
+function heldDaysSince(dog: Dog, sinceMs: number, today: Date): number {
+	const start = toDate(dog.enrichmentHoldStart)?.getTime();
+	const end = toDate(dog.enrichmentResetDate)?.getTime();
+	if (start === undefined || end === undefined) return 0;
+	const from = Math.max(start, sinceMs);
+	const to = Math.min(end, today.getTime());
+	if (to <= from) return 0;
+	return daysSince(new Date(from), new Date(to)) ?? 0;
 }
