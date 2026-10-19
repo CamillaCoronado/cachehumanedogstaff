@@ -1,29 +1,24 @@
 // Shared server-side access to the day-trip/volunteer Google Sheet.
 //
-// Two modes:
-//  1. Service account (preferred): set GOOGLE_SERVICE_ACCOUNT_EMAIL,
-//     GOOGLE_SERVICE_ACCOUNT_KEY, and SHEETS_SPREADSHEET_ID, and share the
-//     real spreadsheet with the service-account email (Viewer). The sheet
-//     stays private — only the service account can read it.
-//  2. Fallback (no service account configured): reads Camilla's public copy
-//     via link-visible CSV export / API key, exactly as before.
+// Reads the real (private) spreadsheet with a service account. Set
+// GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_KEY, and
+// SHEETS_SPREADSHEET_ID, and share the spreadsheet with the service-account
+// email (Viewer). There is no fallback: a missing var is an error naming it.
 import { env } from '$env/dynamic/private';
-import { env as publicEnv } from '$env/dynamic/public';
 import { createSign } from 'node:crypto';
 
-// Camilla's public copy — used only until the service account is configured.
-const FALLBACK_SHEET_ID = '115x6-x7z4IXXKfSW71GQrxfhGEjVRICDl1zKOljGE80';
+const REQUIRED_VARS = ['SHEETS_SPREADSHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_EMAIL', 'GOOGLE_SERVICE_ACCOUNT_KEY'] as const;
 
-function apiKey(): string {
-	return publicEnv.PUBLIC_FIREBASE_API_KEY ?? 'AIzaSyBYBJpvxuZ1XZjym7cu_nWG2SR-e-lmAZM';
+function requireSheetsConfig(): void {
+	const missing = REQUIRED_VARS.filter((name) => !env[name]);
+	if (missing.length > 0) {
+		throw new Error(`Google Sheets not configured: missing ${missing.join(', ')}`);
+	}
 }
 
-export function sheetId(): string {
-	return env.SHEETS_SPREADSHEET_ID || FALLBACK_SHEET_ID;
-}
-
-function serviceAccountConfigured(): boolean {
-	return Boolean(env.GOOGLE_SERVICE_ACCOUNT_EMAIL && env.GOOGLE_SERVICE_ACCOUNT_KEY);
+function sheetId(): string {
+	requireSheetsConfig();
+	return env.SHEETS_SPREADSHEET_ID!;
 }
 
 // ─── Service-account OAuth (JWT bearer flow, no external deps) ───────────────
@@ -34,8 +29,8 @@ function base64url(input: string | Buffer): string {
 	return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-async function getAccessToken(): Promise<string | null> {
-	if (!serviceAccountConfigured()) return null;
+async function getAccessToken(): Promise<string> {
+	requireSheetsConfig();
 	if (cachedToken && Date.now() < cachedToken.expiresAtMs - 60_000) return cachedToken.token;
 
 	const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL!;
@@ -74,53 +69,23 @@ async function getAccessToken(): Promise<string | null> {
 	return cachedToken.token;
 }
 
-// ─── CSV parsing (RFC 4180 fields; rows split on newlines as before) ─────────
-
-export function parseCsvLine(line: string): string[] {
-	const fields: string[] = [];
-	let cur = '';
-	let inQuotes = false;
-	for (let i = 0; i < line.length; i++) {
-		const ch = line[i];
-		if (ch === '"') {
-			if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-			else inQuotes = !inQuotes;
-		} else if (ch === ',' && !inQuotes) {
-			fields.push(cur);
-			cur = '';
-		} else {
-			cur += ch;
-		}
-	}
-	fields.push(cur);
-	return fields;
-}
-
 // ─── Readers ──────────────────────────────────────────────────────────────────
 
 /**
- * Read a whole tab as rows of cells. Uses the Sheets values API (by tab title)
- * with the service account; falls back to public CSV export (by gid) against
- * the copy. Trailing empty cells may be absent — index defensively.
+ * Read a whole tab as rows of cells, by tab title. Trailing empty cells may be
+ * absent — index defensively.
  */
-export async function fetchTabRows(tabTitle: string, fallbackGid: string): Promise<string[][]> {
+export async function fetchTabRows(tabTitle: string): Promise<string[][]> {
 	const token = await getAccessToken();
-	if (token) {
-		const range = encodeURIComponent(`'${tabTitle}'`);
-		const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId()}/values/${range}?majorDimension=ROWS`;
-		const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-		if (!res.ok) throw new Error(`Sheets values API ${res.status} for tab "${tabTitle}"`);
-		const data = (await res.json()) as { values?: string[][] };
-		return (data.values ?? []).map((row) => row.map((cell) => cell ?? ''));
+	const range = encodeURIComponent(`'${tabTitle}'`);
+	const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId()}/values/${range}?majorDimension=ROWS`;
+	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+	if (!res.ok) {
+		const body = await res.text().catch(() => '');
+		throw new Error(`Sheets values API ${res.status} for tab "${tabTitle}": ${body.slice(0, 200)}`);
 	}
-
-	// Without a gid the CSV export silently serves the first tab, so fail instead.
-	if (!fallbackGid) throw new Error(`No sheet tab id known for "${tabTitle}"`);
-	const url = `https://docs.google.com/spreadsheets/d/${sheetId()}/export?format=csv&gid=${fallbackGid}`;
-	const res = await fetch(url, { redirect: 'follow' });
-	if (!res.ok) throw new Error(`Sheet CSV fetch failed: ${res.status} for tab "${tabTitle}"`);
-	const csv = await res.text();
-	return csv.split(/\r?\n/).map(parseCsvLine);
+	const data = (await res.json()) as { values?: string[][] };
+	return (data.values ?? []).map((row) => row.map((cell) => cell ?? ''));
 }
 
 /**
@@ -131,9 +96,8 @@ export async function fetchGridRowData(range: string): Promise<unknown[]> {
 	const token = await getAccessToken();
 	const encodedRange = encodeURIComponent(range);
 	const fields = encodeURIComponent('sheets(data(rowData(values(userEnteredFormat/backgroundColor,formattedValue))))');
-	const auth = token ? '' : `&key=${apiKey()}`;
-	const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId()}?ranges=${encodedRange}&fields=${fields}${auth}`;
-	const res = await fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+	const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId()}?ranges=${encodedRange}&fields=${fields}`;
+	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');
 		throw new Error(`Sheets API ${res.status}: ${body.slice(0, 200)}`);

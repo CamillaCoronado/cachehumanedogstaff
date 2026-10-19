@@ -23,7 +23,10 @@
 		importLog = [];
 		try {
 			const res = await fetch('/api/sheets/daytrips');
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			if (!res.ok) {
+				const body = await res.json().catch(() => null);
+				throw new Error(body?.message ?? `HTTP ${res.status}`);
+			}
 			sheetData = await res.json();
 		} catch (e) {
 			sheetError = e instanceof Error ? e.message : String(e);

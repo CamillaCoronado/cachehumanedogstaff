@@ -144,7 +144,9 @@
 	async function refresh(forceDogs = true) {
 		loading = true;
 		try {
-			({ logs, volunteers } = await loadDayTripData(forceDogs));
+			let colorsError: string | null;
+			({ logs, volunteers, colorsError } = await loadDayTripData(forceDogs));
+			if (colorsError) toast.error(`Couldn't read dog colors from the sheet: ${colorsError}`);
 		} catch (error) {
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
 			toast.error(code ? `Unable to load day trip data (${code}).` : 'Unable to load day trip data.');
