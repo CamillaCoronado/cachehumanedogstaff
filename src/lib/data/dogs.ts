@@ -17,6 +17,7 @@ import type {
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
+import { clockStart } from '$lib/utils/attention';
 import { db } from '$lib/firebase/config';
 import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, setDoc, where, writeBatch } from 'firebase/firestore';
 
@@ -155,6 +156,7 @@ interface StoredDog {
 	sickMonitorReason?: string | null;
 	sickMonitorSince?: string | null;
 	enrichmentResetDate?: string | null;
+	enrichmentHoldStart?: string | null;
 	treatments?: StoredTreatment[];
 	// Deprecated single-treatment fields — migrated into `treatments` on read.
 	treatmentName?: string | null;
@@ -331,19 +333,27 @@ function applyStatusTransition(current: Dog, updates: Partial<Dog>, now: Date): 
 		updatedAt: now
 	});
 
-	// Coming off an isolation or sick hold resets the enrichment clock — a held dog
-	// couldn't get enrichment, so it shouldn't read as instantly overdue on release.
-	const leftIsolation = current.isolationStatus !== 'none' && merged.isolationStatus === 'none';
-	const leftSickHold = Boolean(current.sickHold) && !merged.sickHold;
-	if (leftIsolation || leftSickHold) {
+	// An isolation or sick hold pauses the enrichment clock: a held dog couldn't get
+	// enrichment, so the held days don't count, but the days before the hold still do.
+	// Entering a hold stamps its start; leaving it stamps the end (enrichmentResetDate).
+	const wasPaused = current.isolationStatus !== 'none' || Boolean(current.sickHold);
+	const isPaused = merged.isolationStatus !== 'none' || Boolean(merged.sickHold);
+	if (!wasPaused && isPaused) {
+		merged.enrichmentHoldStart = toDate(merged.sickHold ? merged.sickHoldSince : null) ?? now;
+	}
+	if (wasPaused && !isPaused) {
+		// A hold that began before starts were stamped: count it from the start of the
+		// stay, which is how such holds were counted before.
+		merged.enrichmentHoldStart =
+			current.enrichmentHoldStart ?? current.sickHoldSince ?? toDate(clockStart(current)) ?? now;
 		merged.enrichmentResetDate = now;
 	}
 
-	// A sick or flea hold forces handling to staff-only (applied on read in deserializeDog,
-	// so it also covers dogs already marked). Once BOTH holds are cleared, restore the
-	// pre-hold level remembered in handlingLevelBeforeHold.
-	const wasHeld = Boolean(current.hasFleas) || Boolean(current.sickHold);
-	const stillHeld = Boolean(merged.hasFleas) || Boolean(merged.sickHold);
+	// A sick or flea hold, or a red day-trip color, forces handling to staff-only (applied
+	// on read in deserializeDog, so it also covers dogs already marked). Once all of them
+	// are cleared, restore the pre-hold level remembered in handlingLevelBeforeHold.
+	const wasHeld = forcesStaffOnly(current);
+	const stillHeld = forcesStaffOnly(merged);
 	if (wasHeld && !stillHeld && current.handlingLevelBeforeHold) {
 		merged.handlingLevel = current.handlingLevelBeforeHold;
 		merged.handlingLevelBeforeHold = null;
@@ -431,7 +441,7 @@ function serializeDog(dog: Dog): StoredDog {
 		microchipDate: toDateString(dog.microchipDate),
 		healthProblems: dog.healthProblems ?? '',
 		hasFleas: dog.hasFleas ?? false,
-		handlingLevelBeforeHold: dog.hasFleas || dog.sickHold ? (dog.handlingLevelBeforeHold ?? null) : null,
+		handlingLevelBeforeHold: forcesStaffOnly(dog) ? (dog.handlingLevelBeforeHold ?? null) : null,
 		lastBathDate: toDateString(dog.lastBathDate),
 		lastYardDate: toDateString(dog.lastYardDate) ?? null,
 		lastBathBy: dog.lastBathBy,
@@ -494,6 +504,7 @@ function serializeDog(dog: Dog): StoredDog {
 		sickMonitorReason: dog.sickMonitor ? (dog.sickMonitorReason ?? null) : null,
 		sickMonitorSince: dog.sickMonitor ? (toDateString(dog.sickMonitorSince) ?? null) : null,
 		enrichmentResetDate: toDateString(dog.enrichmentResetDate) ?? null,
+		enrichmentHoldStart: toDateString(dog.enrichmentHoldStart) ?? null,
 		treatments: (dog.treatments ?? []).map((t) => ({
 			id: t.id,
 			name: t.name,
@@ -542,6 +553,11 @@ function deserializeTreatments(stored: StoredDog): Treatment[] {
 	return [];
 }
 
+/** Sick and flea holds and a red day-trip color all make a volunteer dog staff-only. */
+function forcesStaffOnly(dog: Pick<StoredDog, 'hasFleas' | 'sickHold' | 'manualTripColor'>): boolean {
+	return Boolean(dog.hasFleas) || Boolean(dog.sickHold) || dog.manualTripColor === 'red';
+}
+
 function deserializeDog(stored: StoredDog): Dog {
 	const intakeDate = toDate(stored.intakeDate) ?? new Date();
 	const originalIntakeDate = toDate(stored.originalIntakeDate) ?? intakeDate;
@@ -554,11 +570,11 @@ function deserializeDog(stored: StoredDog): Dog {
 	// manager_only when it was checked, so a mismatch means the level was later lowered
 	// and the stale flag should not resurrect the restriction.
 	const normalizedHandlingLevel = normalizeDogHandlingLevel(stored.handlingLevel);
-	// A sick or flea hold forces handling to staff-only. Applied here on read so it covers
-	// every held dog (including ones marked before this rule), only bumping 'volunteer' up —
-	// staff-only and manager-only are left as-is. The pre-hold level is remembered so
-	// clearing the hold restores it.
-	const holdActive = (stored.hasFleas ?? false) || (stored.sickHold ?? false);
+	// A sick or flea hold, or a red day-trip color, forces handling to staff-only. Applied
+	// here on read so it covers every held dog (including ones marked before this rule),
+	// only bumping 'volunteer' up — staff-only and manager-only are left as-is. The
+	// pre-hold level is remembered so clearing the hold restores it.
+	const holdActive = forcesStaffOnly(stored);
 	const storedHoldStash =
 		stored.handlingLevelBeforeHold === 'manager_only' ||
 		stored.handlingLevelBeforeHold === 'staff_only' ||
@@ -705,6 +721,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		sickMonitorReason: stored.sickMonitor ? (stored.sickMonitorReason ?? null) : null,
 		sickMonitorSince: stored.sickMonitor && stored.sickMonitorSince ? toDate(stored.sickMonitorSince) : null,
 		enrichmentResetDate: stored.enrichmentResetDate ? toDate(stored.enrichmentResetDate) : null,
+		enrichmentHoldStart: stored.enrichmentHoldStart ? toDate(stored.enrichmentHoldStart) : null,
 		treatments: deserializeTreatments(stored),
 		lastSyncedAt: stored._lastSyncedAt ? toDate(stored._lastSyncedAt) : null,
 		status: stored.status,
@@ -1042,6 +1059,7 @@ const SICK_STATUS_KEYS = [
 	'sickSuggestDismissed',
 	'treatments',
 	'enrichmentResetDate',
+	'enrichmentHoldStart',
 	'handlingLevel',
 	'handlingLevelBeforeHold',
 	'updatedAt'
@@ -1059,7 +1077,14 @@ export async function updateDogSickStatus(id: string, updates: Partial<Dog>) {
 	const merged = applyStatusTransition(current, updates, new Date());
 	const stored = serializeDog(merged) as unknown as Record<string, unknown>;
 	const fields = Object.fromEntries(SICK_STATUS_KEYS.map((k) => [k, stored[k] ?? null]));
-	await setDoc(ref, fields, { merge: true });
+	try {
+		await setDoc(ref, fields, { merge: true });
+	} catch (error) {
+		// Rules deployed before enrichmentHoldStart was allowed refuse it; save the rest.
+		if ((error as { code?: string })?.code !== 'permission-denied') throw error;
+		const { enrichmentHoldStart: _skipped, ...rest } = fields;
+		await setDoc(ref, rest, { merge: true });
+	}
 	return merged;
 }
 

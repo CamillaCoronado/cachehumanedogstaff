@@ -57,3 +57,23 @@ describe('getAdoptionAvailability — sick hold', () => {
 		expect(getAdoptionAvailability(adoptableDog({ sickHold: false })).state).toBe('available');
 	});
 });
+
+describe('getAdoptionAvailability — red dog', () => {
+	it('blocks a red dog even when the profile is volunteer-handled and eligible', () => {
+		const result = getAdoptionAvailability(adoptableDog({ manualTripColor: 'red' }));
+		expect(result.available).toBe(false);
+		expect(result.holdReason).toBe('red');
+	});
+
+	it("names the color's reason", () => {
+		const result = getAdoptionAvailability(
+			adoptableDog({ manualTripColor: 'red', manualTripColorReason: 'behavior' })
+		);
+		expect(result.holdReason).toBe('red: behavior');
+	});
+
+	it('leaves a yellow or green dog available', () => {
+		expect(getAdoptionAvailability(adoptableDog({ manualTripColor: 'yellow' })).available).toBe(true);
+		expect(getAdoptionAvailability(adoptableDog({ manualTripColor: 'green' })).available).toBe(true);
+	});
+});
