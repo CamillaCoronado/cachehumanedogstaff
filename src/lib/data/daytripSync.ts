@@ -8,6 +8,23 @@ import type { DayTripLog, Dog, Volunteer } from '$lib/types';
 export interface DayTripData {
 	logs: DayTripLog[];
 	volunteers: Volunteer[];
+	/** Why the DT-sheet colors couldn't be read, or null. Colors are left as they were. */
+	colorsError: string | null;
+}
+
+type SheetColors = Record<string, 'green' | 'yellow' | 'red'>;
+
+async function fetchSheetColors(): Promise<{ colors: SheetColors; error: string | null }> {
+	try {
+		const res = await fetch('/api/sheets/dog-colors');
+		if (!res.ok) {
+			const body = await res.json().catch(() => null);
+			return { colors: {}, error: body?.message ?? `HTTP ${res.status}` };
+		}
+		return { colors: await res.json(), error: null };
+	} catch (e) {
+		return { colors: {}, error: e instanceof Error ? e.message : String(e) };
+	}
 }
 
 /**
@@ -21,13 +38,13 @@ export async function loadDayTripData(forceDogs = true): Promise<DayTripData> {
 	const [dogRows, logs, colorsRes, volunteers] = await Promise.all([
 		forceDogs ? refreshDogs() : ensureDogsLoaded(),
 		listAllDayTripLogs(),
-		fetch('/api/sheets/dog-colors').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+		fetchSheetColors(),
 		listVolunteers()
 	]);
 
 	// Sync sheet colors into each dog's single color field — only when the sheet value
 	// actually changed, so a manual color persists until the sheet next changes.
-	const sheet = colorsRes as Record<string, 'green' | 'yellow' | 'red'>;
+	const sheet = colorsRes.colors;
 	const colorChanges = await syncSheetColorsToDogs(dogRows, sheet);
 
 	// Auto-clear awaitingEvaluation once, the first time a dog appears on the DT
@@ -51,7 +68,7 @@ export async function loadDayTripData(forceDogs = true): Promise<DayTripData> {
 		patchDogInStore(d.id, { awaitingEvaluation: false, evaluationAutoCleared: true });
 	}
 
-	return { logs, volunteers };
+	return { logs, volunteers, colorsError: colorsRes.error };
 }
 
 export interface AutoImportResult {

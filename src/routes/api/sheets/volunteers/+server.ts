@@ -110,7 +110,7 @@ export interface VolunteerSheetResponse {
 async function fetchEstablishedVolunteers(): Promise<{ rows: EstablishedRow[]; skippedRows: SkippedSheetRow[]; rawDataRows: number; nonBlankRows: number }> {
 	let allRows: string[][];
 	try {
-		allRows = await fetchTabRows('Established DTVs', '538722785');
+		allRows = await fetchTabRows('Established DTVs');
 	} catch {
 		return { rows: [], skippedRows: [], rawDataRows: 0, nonBlankRows: 0 };
 	}

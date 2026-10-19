@@ -67,7 +67,7 @@ function parseGroupDate(raw: string): string | null {
 
 // "In House Volunteers" — established active IHVs
 async function fetchActiveIHVs(): Promise<IHVSheetRow[]> {
-	const allRows = await fetchTabRows('In House Volunteers', '311017137');
+	const allRows = await fetchTabRows('In House Volunteers');
 	const dataRows = allRows.slice(2); // skip color-legend row + column-headers row
 
 	const rows: IHVSheetRow[] = [];
@@ -160,7 +160,7 @@ async function fetchIHVTraining(): Promise<IHVSheetRow[]> {
 
 // "Non Active Volunteers"
 async function fetchNonActiveVolunteers(): Promise<IHVSheetRow[]> {
-	const allRows = await fetchTabRows('Non Active Volunteers', '1188818996');
+	const allRows = await fetchTabRows('Non Active Volunteers');
 	const dataRows = allRows.slice(1); // skip header row
 
 	const rows: IHVSheetRow[] = [];

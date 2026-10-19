@@ -26,7 +26,7 @@ function parseSheetDate(raw: string): string | null {
 export async function GET() {
 	let rows: string[][];
 	try {
-		rows = await fetchTabRows('DT Numbers', '1548223211');
+		rows = await fetchTabRows('DT Numbers');
 	} catch (e) {
 		throw error(502, `Sheet fetch error: ${e instanceof Error ? e.message : String(e)}`);
 	}
