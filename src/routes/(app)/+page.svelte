@@ -20,6 +20,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { syncVersion } from '$lib/stores/sync';
+	import { tempAdvisory, type TempAdvisory } from '$lib/utils/tempGuidelines';
 	import type { Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
 
 	type TodayActionId = 'feeding' | 'cleaning' | 'movement' | 'slack';
@@ -61,6 +62,7 @@
 	const today = startOfDay(new Date());
 	let weatherIcon = '';
 	let weatherTemp = '';
+	let weatherAdvisory: TempAdvisory | null = null;
 
 	// Each part of the board draws as its own data lands, so one slow read on the
 	// shelter's signal (ASM, say) no longer holds every card on a skeleton.
@@ -276,9 +278,11 @@
 				code <= 82 ? '🌦️' :
 				'⛈️';
 			weatherTemp = `${temp}°`;
+			weatherAdvisory = tempAdvisory(temp);
 		} catch {
 			weatherIcon = '';
 			weatherTemp = '';
+			weatherAdvisory = null;
 		}
 	}
 
@@ -807,6 +811,18 @@
 			</div>
 		{/if}
 	</header>
+
+	{#if weatherAdvisory}
+		<div class={`temp-banner temp-banner-${weatherAdvisory.tone}`} role="status">
+			<p class="temp-banner-title">
+				{weatherAdvisory.tone === 'cold' ? '🥶' : '🥵'} {weatherTemp}: {weatherAdvisory.label}
+			</p>
+			<p class="temp-banner-text">{weatherAdvisory.protocol}</p>
+			{#if weatherAdvisory.surfaces}
+				<p class="temp-banner-surfaces">{weatherAdvisory.surfaces}</p>
+			{/if}
+		</div>
+	{/if}
 
 	{#if errorMessage}
 		<p class="planner-error">{errorMessage}</p>
@@ -1349,6 +1365,65 @@
 
 	.planner-shift-pm .planner-shift-label-pm {
 		color: #6344a8;
+	}
+
+	/* ── Temperature banner (cold rule + kennel heat chart) ── */
+	.temp-banner {
+		display: grid;
+		gap: 0.18rem;
+		padding: 0.56rem 0.72rem;
+		border: 1px solid;
+		border-radius: 0.62rem;
+		font-family: var(--font-ui);
+	}
+
+	.temp-banner p {
+		margin: 0;
+	}
+
+	.temp-banner-title {
+		font-size: 0.9rem;
+		font-weight: 700;
+	}
+
+	.temp-banner-text {
+		font-size: 0.8rem;
+		font-weight: 500;
+	}
+
+	.temp-banner-surfaces {
+		font-size: 0.72rem;
+		opacity: 0.8;
+	}
+
+	.temp-banner-cold {
+		border-color: #b9d3ef;
+		background: #eef5fd;
+		color: #24527f;
+	}
+
+	.temp-banner-caution {
+		border-color: #f0d49a;
+		background: #fff8e8;
+		color: #8a5a00;
+	}
+
+	.temp-banner-high {
+		border-color: #f2bf98;
+		background: #fff1e6;
+		color: #9a4510;
+	}
+
+	.temp-banner-severe {
+		border-color: #efc7c7;
+		background: #fff1f1;
+		color: #a13b3b;
+	}
+
+	.temp-banner-extreme {
+		border-color: #d5c3ef;
+		background: #f6f0ff;
+		color: #5b2a99;
 	}
 
 	.planner-error {
