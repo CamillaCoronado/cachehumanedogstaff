@@ -4,9 +4,24 @@ import type { Dog } from '$lib/types';
 
 // Mock the data layer so importing the store never touches Firebase.
 const listDogs = vi.fn<() => Promise<Dog[]>>();
+// Null = no Firestore, so the store runs in fetch mode unless a test opts in.
+type Listener = { onRows: (rows: Dog[]) => void; onError: (error: Error) => void };
+const subscribeDogs = vi.fn<(onRows: Listener['onRows'], onError: Listener['onError']) => (() => void) | null>();
 vi.mock('$lib/data/dogs', () => ({
-	listDogs: () => listDogs()
+	listDogs: () => listDogs(),
+	subscribeDogs: (onRows: Listener['onRows'], onError: Listener['onError']) => subscribeDogs(onRows, onError),
+	settleDogWrites: () => Promise.resolve()
 }));
+
+/** Opt a test into listener mode; returns a handle to push snapshots. */
+function fakeListener() {
+	const handle = { current: null as Listener | null, stop: vi.fn() };
+	subscribeDogs.mockImplementation((onRows, onError) => {
+		handle.current = { onRows, onError };
+		return handle.stop;
+	});
+	return handle;
+}
 
 function makeDog(id: string, overrides: Partial<Dog> = {}): Dog {
 	return { id, name: `Dog ${id}`, status: 'active', ...overrides } as Dog;
@@ -24,6 +39,8 @@ async function freshStore() {
 
 beforeEach(() => {
 	listDogs.mockReset();
+	subscribeDogs.mockReset();
+	subscribeDogs.mockReturnValue(null);
 	vi.useRealTimers();
 });
 
@@ -120,5 +137,51 @@ describe('syncVersion subscription', () => {
 		syncVersion.set(2);
 		await vi.waitFor(() => expect(get(dogs)).toHaveLength(2));
 		expect(listDogs).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('live listener', () => {
+	it('resolves on the first snapshot and keeps the store current after it', async () => {
+		const listener = fakeListener();
+		const { ensureDogsLoaded, refreshDogs, dogs, dogsLoaded } = await freshStore();
+
+		const first = ensureDogsLoaded();
+		expect(get(dogsLoaded)).toBe(false);
+		listener.current!.onRows([makeDog('a')]);
+		expect(await first).toHaveLength(1);
+
+		// A later change (another device, the ASM sync) lands without a fetch.
+		listener.current!.onRows([makeDog('a'), makeDog('b')]);
+		expect(get(dogs)).toHaveLength(2);
+		expect(await refreshDogs()).toHaveLength(2);
+		expect(await ensureDogsLoaded()).toHaveLength(2);
+		expect(subscribeDogs).toHaveBeenCalledTimes(1);
+		expect(listDogs).not.toHaveBeenCalled();
+	});
+
+	it('does not re-fetch on a sync bump', async () => {
+		const listener = fakeListener();
+		const { ensureDogsLoaded, syncVersion } = await freshStore();
+		const first = ensureDogsLoaded();
+		listener.current!.onRows([makeDog('a')]);
+		await first;
+
+		syncVersion.set(1);
+		expect(listDogs).not.toHaveBeenCalled();
+		expect(subscribeDogs).toHaveBeenCalledTimes(1);
+	});
+
+	it('restarts after the listener errors', async () => {
+		const listener = fakeListener();
+		const { ensureDogsLoaded } = await freshStore();
+
+		const first = ensureDogsLoaded();
+		listener.current!.onError(new Error('permission-denied'));
+		await expect(first).rejects.toThrow('permission-denied');
+
+		const second = ensureDogsLoaded();
+		listener.current!.onRows([makeDog('a')]);
+		expect(await second).toHaveLength(1);
+		expect(subscribeDogs).toHaveBeenCalledTimes(2);
 	});
 });

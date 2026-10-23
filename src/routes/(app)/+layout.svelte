@@ -6,7 +6,7 @@
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 
 	injectAnalytics({ mode: dev ? 'development' : 'production' });
-	import { authReady, authUser, authProfile, initAuthListener } from '$lib/stores/auth';
+	import { authReady, authUser, authProfile, authProfileFresh, initAuthListener } from '$lib/stores/auth';
 	import { isProfileApproved } from '$lib/data/users';
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
@@ -276,7 +276,9 @@
 	// editors can run the sync itself (it writes dog docs), so before this existed the
 	// celebration was visible to whoever's browser happened to win the race, and to
 	// nobody else — staff never saw it at all.
-	$: if ($authReady && $authUser && $authProfile && !overlayCheckStarted) {
+	// Waits for the server's copy of the profile: the one cached on this device can
+	// carry an old seen-stamp and re-show popups already cleared on another device.
+	$: if ($authReady && $authUser && $authProfile && $authProfileFresh && !overlayCheckStarted) {
 		overlayCheckStarted = true;
 		seenStamp = $authProfile.lastSeenSyncEventAt ?? null;
 		popupsToList = $authProfile.popupsToList ?? false;
