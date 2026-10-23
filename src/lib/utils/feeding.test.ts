@@ -31,8 +31,24 @@ describe('estimateFoodAmountPerMeal (per shelter wall chart)', () => {
 	it('reads adults off the weight chart', () => {
 		expect(estimateFoodAmountPerMeal({ weightLbs: 8 })).toBe('1/2 c');
 		expect(estimateFoodAmountPerMeal({ weightLbs: 30 })).toBe('1 1/4 c');
-		expect(estimateFoodAmountPerMeal({ weightLbs: 65 })).toBe('2 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 60 })).toBe('1 3/4 c');
 		expect(estimateFoodAmountPerMeal({ weightLbs: 100 })).toBe('2 3/4 c');
+	});
+
+	it('calculates weights between rows instead of rounding up a row', () => {
+		expect(estimateFoodAmountPerMeal({ weightLbs: 25 })).toBe('1 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 35 })).toBe('1 1/4 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 38 })).toBe('1 1/2 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 45 })).toBe('1 1/2 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 55 })).toBe('1 1/2 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 65 })).toBe('1 3/4 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 105 })).toBe('2 3/4 c');
+	});
+
+	it('calculates puppies between rows too', () => {
+		const now = new Date(2026, 9, 23);
+		expect(estimateFoodAmountPerMeal({ weightLbs: 12, dateOfBirth: new Date(2026, 3, 1), now })).toBe('3/4 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 5, dateOfBirth: new Date(2025, 11, 1), now })).toBe('1/3 c');
 	});
 
 	it('extends past 100 lbs by 1/4 cup per 10 lbs', () => {
