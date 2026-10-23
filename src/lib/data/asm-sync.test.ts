@@ -199,3 +199,25 @@ describe('selective with dogs', () => {
 		expect(store.get('6')?.goodWithDogs).toBe('no');
 	});
 });
+
+describe('adoption holds', () => {
+	it('copies ASM holds and clears ones ASM dropped or that have run out', async () => {
+		const { env, store } = fakeEnv(
+			{ '6': { name: 'Was', status: 'active', asmId: 6, asmShelterCode: 'A6', asmHold: true, asmHoldUntil: '2026-01-01' } },
+			{
+				animals: [
+					stayer,
+					{ ID: 6, ANIMALNAME: 'Was', SPECIESNAME: 'Dog', SHELTERCODE: 'A6', ISHOLD: 0 },
+					{ ID: 7, ANIMALNAME: 'Held', SPECIESNAME: 'Dog', SHELTERCODE: 'A7', ISHOLD: 1, HOLDUNTILDATE: '2999-10-30T00:00:00' },
+					{ ID: 8, ANIMALNAME: 'Open', SPECIESNAME: 'Dog', SHELTERCODE: 'A8', ISHOLD: 1, HOLDUNTILDATE: null },
+					{ ID: 9, ANIMALNAME: 'Lapsed', SPECIESNAME: 'Dog', SHELTERCODE: 'A9', ISHOLD: 1, HOLDUNTILDATE: '2020-01-01T00:00:00' }
+				]
+			}
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('6')).toMatchObject({ asmHold: false, asmHoldUntil: null });
+		expect(store.get('7')).toMatchObject({ asmHold: true, asmHoldUntil: '2999-10-30' });
+		expect(store.get('8')).toMatchObject({ asmHold: true, asmHoldUntil: null });
+		expect(store.get('9')).toMatchObject({ asmHold: false, asmHoldUntil: null });
+	});
+});

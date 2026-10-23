@@ -4,6 +4,7 @@ import { resolveDogHandlingLevel } from '$lib/utils/permissions';
 
 export type AdoptionAvailabilityState =
 	| 'available'
+	| 'asm_hold'
 	| 'medical_hold'
 	| 'isolation_hold'
 	| 'sick_hold'
@@ -48,6 +49,8 @@ export function getAdoptionAvailability(
 		| 'sickHoldReason'
 		| 'manualTripColor'
 		| 'manualTripColorReason'
+		| 'asmHold'
+		| 'asmHoldUntil'
 		| 'manualTripColorNote'
 	>
 ): AdoptionAvailability {
@@ -71,6 +74,17 @@ export function getAdoptionAvailability(
 			state: 'not_available',
 			missingMedicalRequirements,
 			holdReason: 'already adopted'
+		};
+	}
+
+	// ASM's Hold checkbox is how this shelter marks a dog someone is adopting.
+	if (dog.asmHold) {
+		const until = toDate(dog.asmHoldUntil ?? null);
+		return {
+			available: false,
+			state: 'asm_hold',
+			missingMedicalRequirements,
+			holdReason: until ? `adoption pending, hold until ${until.getMonth() + 1}/${until.getDate()}` : 'adoption pending'
 		};
 	}
 

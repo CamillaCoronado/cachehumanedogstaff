@@ -211,6 +211,8 @@
 					? `Not available for adoption: ${adoptionAvailability.holdReason ?? 'care hold'}`
 					: adoptionAvailability?.state === 'isolation_hold'
 						? 'Temporarily unavailable for adoption'
+					: adoptionAvailability?.state === 'asm_hold'
+						? `Adoption pending${adoptionAvailability.holdReason?.includes('until') ? ` (${adoptionAvailability.holdReason.replace('adoption pending, ', '')})` : ''}`
 						: 'Available for adoption'
 		: 'Unavailable';
 	$: adoptionIsAvailable = adoptionAvailability?.state === 'available';
@@ -221,7 +223,8 @@
 				? adoptionAvailability.holdReason ?? 'not available'
 				: adoptionAvailability?.state === 'handling_hold' ||
 					  adoptionAvailability?.state === 'day_trip_hold' ||
-					  adoptionAvailability?.state === 'isolation_hold'
+					  adoptionAvailability?.state === 'isolation_hold' ||
+					  adoptionAvailability?.state === 'asm_hold'
 					? adoptionAvailability.holdReason ?? 'care hold'
 					: '';
 	$: adoptionReasonBadge = adoptionReason.replace(/\s+/g, ' ').trim();
