@@ -9,6 +9,7 @@ import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
 import { pollSlackMedical } from '$lib/server/slackMedicalPoll';
 import { recordSyncLog, syncLogSince } from '$lib/server/syncLog';
+import { syncHiddenNoteTrips } from '$lib/server/hiddenNoteTripsSync';
 
 /**
  * Twenty people opening the app at 8am should not each reconcile the whole roster
@@ -92,6 +93,14 @@ export async function POST({ request }: RequestEvent) {
 		await pollSlackMedical();
 	} catch (e) {
 		console.error('[slack medical]', e);
+	}
+
+	// Day trips staff wrote into ASM hidden comments ("Day Trip Notes M/D: ..."), which
+	// the animal sync above just pulled in. Used to wait for someone to open Day Trips.
+	try {
+		await syncHiddenNoteTrips();
+	} catch (e) {
+		console.error('[hidden-note trips]', e);
 	}
 
 	// The Medical page from ASM's medical book, in the same slot. It signs in to ASM's

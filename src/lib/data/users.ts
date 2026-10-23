@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocFromCache, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import type { UserProfile, UserRole } from '$lib/types';
 import { db } from '$lib/firebase/config';
 
@@ -8,6 +8,17 @@ export async function getUserProfile(uid: string) {
 	const snap = await getDoc(ref);
 	if (!snap.exists()) return null;
 	return snap.data() as UserProfile;
+}
+
+/** This device's last-read copy of the profile, without touching the network. Null if none. */
+export async function getCachedUserProfile(uid: string) {
+	if (!db) return null;
+	try {
+		const snap = await getDocFromCache(doc(db, 'users', uid));
+		return snap.exists() ? (snap.data() as UserProfile) : null;
+	} catch {
+		return null;
+	}
 }
 
 export async function listUserProfiles() {

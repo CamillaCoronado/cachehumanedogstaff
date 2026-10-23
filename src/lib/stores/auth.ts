@@ -2,12 +2,14 @@ import { writable } from 'svelte/store';
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '$lib/firebase/config';
-import { createUserProfile, getUserProfile } from '$lib/data/users';
+import { createUserProfile, getCachedUserProfile, getUserProfile } from '$lib/data/users';
 import type { UserProfile } from '$lib/types';
 
 export const authUser = writable<User | null>(null);
 export const authProfile = writable<UserProfile | null>(null);
 export const authReady = writable(false);
+/** True once the profile has been read from the server this session, not just this device's copy. */
+export const authProfileFresh = writable(false);
 
 let initialized = false;
 
@@ -22,7 +24,15 @@ export function initAuthListener() {
 
 	onAuthStateChanged(auth, async (user) => {
 		authUser.set(user);
+		authProfileFresh.set(false);
 		if (user) {
+			// Draw the app from this device's copy of the profile while the server read
+			// is still out — on the shelter's signal that read can take many seconds.
+			const cached = await getCachedUserProfile(user.uid);
+			if (cached) {
+				authProfile.set(cached);
+				authReady.set(true);
+			}
 			try {
 				let profile = await getUserProfile(user.uid);
 				if (!profile) {
@@ -40,9 +50,11 @@ export function initAuthListener() {
 					profile = await getUserProfile(user.uid);
 				}
 				authProfile.set(profile);
+				authProfileFresh.set(true);
 			} catch (error) {
 				console.error('Failed to load user profile', error);
-				authProfile.set(null);
+				// Offline with a cached copy: keep working from it rather than locking the app.
+				if (!cached) authProfile.set(null);
 			}
 		} else {
 			authProfile.set(null);

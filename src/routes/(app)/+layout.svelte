@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { dev } from '$app/environment';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 
 	injectAnalytics({ mode: dev ? 'development' : 'production' });
-	import { authReady, authUser, authProfile, initAuthListener } from '$lib/stores/auth';
+	import { authReady, authUser, authProfile, authProfileFresh, initAuthListener } from '$lib/stores/auth';
 	import { isProfileApproved } from '$lib/data/users';
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
@@ -17,6 +17,7 @@
 	import { listUnseenSyncEvents } from '$lib/data/syncEvents';
 	import { updateUserProfile } from '$lib/data/users';
 	import { syncVersion } from '$lib/stores/sync';
+	import { dogsLoaded } from '$lib/stores/dogs';
 	import { readJson, writeJson } from '$lib/utils/storage';
 	import { mergeChanges } from '$lib/utils/syncChanges';
 	import PhotoDebugPanel from '$lib/components/debug/PhotoDebugPanel.svelte';
@@ -62,6 +63,12 @@
 	let animating = false;
 	let mobileNavOpen = false;
 	let asmAttempted = false;
+	let asmDeferTimer: ReturnType<typeof setTimeout> | null = null;
+	let asmBoardSeen = false;
+	/** After the page's first dogs show, before the ASM sync starts. */
+	const ASM_SYNC_AFTER_BOARD_MS = 1500;
+	/** Longest the sync waits on a page that never loads dogs. */
+	const ASM_SYNC_MAX_WAIT_MS = 5000;
 	let overlayCheckStarted = false;
 	let overlayCheckInFlight = false;
 	/** A check asked for while one was running; it runs again once that one finishes. */
@@ -276,7 +283,9 @@
 	// editors can run the sync itself (it writes dog docs), so before this existed the
 	// celebration was visible to whoever's browser happened to win the race, and to
 	// nobody else — staff never saw it at all.
-	$: if ($authReady && $authUser && $authProfile && !overlayCheckStarted) {
+	// Waits for the server's copy of the profile: the one cached on this device can
+	// carry an old seen-stamp and re-show popups already cleared on another device.
+	$: if ($authReady && $authUser && $authProfile && $authProfileFresh && !overlayCheckStarted) {
 		overlayCheckStarted = true;
 		seenStamp = $authProfile.lastSeenSyncEventAt ?? null;
 		popupsToList = $authProfile.popupsToList ?? false;
@@ -354,7 +363,20 @@
 	// Everyone triggers a sync, not just dog editors. The reconcile runs on the server
 	// with admin credentials, so a staff member can keep ASM current without being able
 	// to write dog documents — and ASM changes no longer wait for an admin to log in.
-	$: if ($authReady && $authUser && $authProfile && !asmAttempted) {
+	//
+	// It waits for the page's first dogs (or a few seconds, on pages without them) so
+	// on a weak signal the sync is not competing with the board for the connection.
+	$: if ($authReady && $authUser && $authProfile && !asmAttempted && !asmDeferTimer) {
+		asmDeferTimer = setTimeout(startServerSync, ASM_SYNC_MAX_WAIT_MS);
+	}
+	$: if ($dogsLoaded && asmDeferTimer && !asmBoardSeen) {
+		asmBoardSeen = true;
+		clearTimeout(asmDeferTimer);
+		asmDeferTimer = setTimeout(startServerSync, ASM_SYNC_AFTER_BOARD_MS);
+	}
+
+	function startServerSync() {
+		if (asmAttempted) return;
 		asmAttempted = true;
 		asmSyncing = true;
 		void runServerSync()
@@ -366,6 +388,8 @@
 				asmSyncing = false;
 			});
 	}
+
+	onDestroy(() => clearTimeout(asmDeferTimer ?? undefined));
 
 	async function runServerSync(force = false) {
 		const token = await $authUser?.getIdToken();

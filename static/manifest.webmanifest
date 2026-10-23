@@ -1,0 +1,10 @@
+{
+	"name": "Cache Humane Society",
+	"short_name": "CHS Dogs",
+	"description": "Staff management for Cache Humane Society",
+	"theme_color": "#016aa5",
+	"background_color": "#f0f5fa",
+	"display": "standalone",
+	"start_url": "/",
+	"icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

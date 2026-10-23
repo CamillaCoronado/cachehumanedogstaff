@@ -1,8 +1,7 @@
 import { listAllDayTripLogs, updateDog, logManualTrip, patchDayTripLog, importedTripId, syncSheetColorsToDogs } from '$lib/data/dogs';
 import { listVolunteers } from '$lib/data/volunteers';
 import { ensureDogsLoaded, refreshDogs, patchDogInStore } from '$lib/stores/dogs';
-import { toDate } from '$lib/utils/dates';
-import { parseDayTripNotes } from '$lib/utils/tripNotesParser';
+import { planHiddenNoteTrips } from '$lib/utils/hiddenNoteTrips';
 import type { DayTripLog, Dog, Volunteer } from '$lib/types';
 
 export interface DayTripData {
@@ -71,69 +70,35 @@ export interface AutoImportResult {
  * notes. The dog detail page strips the notes for display only.
  */
 export async function autoImportTripsFromHiddenNotes(dogs: Dog[], logs: DayTripLog[]): Promise<AutoImportResult> {
-	// Only sync real, in-shelter dogs, and only when an actual dated note block
-	// is present — a loose "day trip notes" mention (no date) would otherwise be
-	// re-selected on every sync and never clear.
-	const dogsWithNotes = dogs.filter(
-		(d) =>
-			d.status === 'active' &&
-			!d.permanentFoster &&
-			!d.inFoster &&
-			!d.isIncoming &&
-			/Day Trip Notes\s+\d{1,2}\/\d{1,2}\s*:/i.test(d.hiddenComments ?? '')
-	);
-
-	let totalNew = 0;
-	let totalPatched = 0;
-	for (const dog of dogsWithNotes) {
-		const parsed = parseDayTripNotes(dog.hiddenComments!);
-
-		for (const trip of parsed) {
-			const tripDay = trip.date.toDateString();
-			const existing = logs.find(
-				(l) => l.dogId === dog.id && toDate(l.startedAt)?.toDateString() === tripDay
-			);
-
-			if (existing) {
-				// Patch only if notes/ratings are still empty
-				const needsPatch =
-					!existing.tripNotes &&
-					!existing.reactionToDogs && !existing.reactionToStrangers &&
-					!existing.reactionToCats && !existing.reactionToKids &&
-					!existing.reactionToLeash && !existing.reactionToCarRides &&
-					!existing.reactionToToys;
-				if (!needsPatch) continue;
-				await patchDayTripLog(dog.id, existing.id, {
-					tripNotes: trip.tripNotes || null,
-					reactionToDogs: trip.reactionToDogs,
-					reactionToStrangers: trip.reactionToStrangers,
-					reactionToCats: trip.reactionToCats,
-					reactionToKids: trip.reactionToKids,
-					reactionToLeash: trip.reactionToLeash,
-					reactionToCarRides: trip.reactionToCarRides,
-					reactionToToys: trip.reactionToToys
-				});
-				totalPatched++;
-			} else {
-				await logManualTrip(dog.id, {
-					logId: importedTripId(trip.date),
-					startedAt: trip.date,
-					endedAt: trip.date,
-					volunteerName: null,
-					reactionToDogs: trip.reactionToDogs,
-					reactionToStrangers: trip.reactionToStrangers,
-					reactionToCats: trip.reactionToCats,
-					reactionToKids: trip.reactionToKids,
-					reactionToLeash: trip.reactionToLeash,
-					reactionToCarRides: trip.reactionToCarRides,
-					reactionToToys: trip.reactionToToys,
-					tripNotes: trip.tripNotes,
-					source: 'staff'
-				}, null);
-				totalNew++;
-			}
-		}
+	const { creates, patches } = planHiddenNoteTrips(dogs, logs);
+	for (const { dogId, tripId, trip } of patches) {
+		await patchDayTripLog(dogId, tripId, {
+			tripNotes: trip.tripNotes || null,
+			reactionToDogs: trip.reactionToDogs,
+			reactionToStrangers: trip.reactionToStrangers,
+			reactionToCats: trip.reactionToCats,
+			reactionToKids: trip.reactionToKids,
+			reactionToLeash: trip.reactionToLeash,
+			reactionToCarRides: trip.reactionToCarRides,
+			reactionToToys: trip.reactionToToys
+		});
 	}
-
-	return { totalNew, totalPatched };
+	for (const { dogId, trip } of creates) {
+		await logManualTrip(dogId, {
+			logId: importedTripId(trip.date),
+			startedAt: trip.date,
+			endedAt: trip.date,
+			volunteerName: null,
+			reactionToDogs: trip.reactionToDogs,
+			reactionToStrangers: trip.reactionToStrangers,
+			reactionToCats: trip.reactionToCats,
+			reactionToKids: trip.reactionToKids,
+			reactionToLeash: trip.reactionToLeash,
+			reactionToCarRides: trip.reactionToCarRides,
+			reactionToToys: trip.reactionToToys,
+			tripNotes: trip.tripNotes,
+			source: 'staff'
+		}, null);
+	}
+	return { totalNew: creates.length, totalPatched: patches.length };
 }

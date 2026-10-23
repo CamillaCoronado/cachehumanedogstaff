@@ -17,9 +17,10 @@ import type {
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
+import { importedTripId } from '$lib/utils/hiddenNoteTrips';
 import { clockStart } from '$lib/utils/attention';
 import { db } from '$lib/firebase/config';
-import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, setDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, waitForPendingWrites, where, writeBatch } from 'firebase/firestore';
 
 const DOGS_KEY = 'shelter.dogs';
 const NOTES_KEY = 'shelter.behavioralNotes';
@@ -983,6 +984,35 @@ export async function listDogs() {
 	return deduplicateAgainstAsm(stored.map(deserializeDog));
 }
 
+/**
+ * Live listener on the dogs collection. The first snapshot comes straight from the
+ * on-device cache when there is one, so a page can draw before the network answers;
+ * after that only changed docs come over the wire. Returns null without Firestore.
+ */
+export function subscribeDogs(onRows: (dogs: Dog[]) => void, onError: (error: Error) => void): (() => void) | null {
+	const ref = dogsCollectionRef();
+	if (!ref) return null;
+	return onSnapshot(
+		ref,
+		(snapshot) => {
+			const dogs = snapshot.docs.map((docSnap) =>
+				deserializeDog({ ...(docSnap.data() as StoredDog), id: docSnap.id })
+			);
+			onRows(deduplicateAgainstAsm(dogs));
+		},
+		onError
+	);
+}
+
+/** Resolves once this device's queued writes reach the server (or after `timeoutMs`). */
+export async function settleDogWrites(timeoutMs = 2000): Promise<void> {
+	if (!db) return;
+	await Promise.race([
+		waitForPendingWrites(db).catch(() => {}),
+		new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
+	]);
+}
+
 export async function getDog(id: string) {
 	const ref = dogRef(id);
 	if (ref) {
@@ -1932,12 +1962,7 @@ function defaultTripEndTime(date: Date): Date {
 	return result;
 }
 
-// Deterministic id for a trip imported from notes/spreadsheet, keyed on the trip day.
-// Re-importing the same day overwrites the same row instead of creating a duplicate,
-// so concurrent imports across devices can never double up.
-export function importedTripId(date: Date): string {
-	return `imp-${toDateString(date)?.slice(0, 10) ?? 'unknown'}`;
-}
+export { importedTripId };
 
 export interface ManualTripData {
 	logId?: string;
