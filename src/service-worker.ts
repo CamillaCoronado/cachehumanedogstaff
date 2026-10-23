@@ -7,8 +7,8 @@
 //
 // Install saves only the HTML shell and the small static files, plus whatever of this
 // deploy's build the previous deploy's cache already holds (hashed file names, so an
-// unchanged file is the same file). Everything else is saved the first time the app
-// loads it. An earlier version downloaded the whole build in one all-or-nothing batch
+// unchanged file is the same file). Everything else is saved when the app loads it,
+// or by a one-file-at-a-time fill after activation. An earlier version downloaded the whole build in one all-or-nothing batch
 // on install; on a flaky signal that batch kept failing, so the cache never got made.
 //
 // Each deploy gets its own cache (keyed by `version`), and the previous one is kept
@@ -57,7 +57,27 @@ sw.addEventListener('activate', (event) => {
 			await sw.clients.claim();
 		})()
 	);
+	// Then, quietly, the rest of this deploy's files, one at a time. The cached shell
+	// can only start pages whose files are cached once Vercel stops serving this
+	// deploy, so they all need to land eventually. A file that fails is retried on
+	// the next start; nothing is all-or-nothing.
+	void fillCache();
 });
+
+let filling = false;
+async function fillCache() {
+	if (filling) return;
+	filling = true;
+	try {
+		const cache = await caches.open(CACHE);
+		for (const path of BUILD) {
+			if (await caches.match(path)) continue;
+			await cache.add(path).catch(() => {});
+		}
+	} finally {
+		filling = false;
+	}
+}
 
 sw.addEventListener('fetch', (event) => {
 	const { request } = event;
@@ -88,11 +108,14 @@ sw.addEventListener('message', (event) => {
 	if (event.data?.type !== 'cache-loaded') return;
 	const paths = (event.data.paths as string[]).filter((path) => BUILD.has(path));
 	event.waitUntil(
-		caches.open(CACHE).then(async (cache) => {
-			for (const path of paths) {
-				if (!(await cache.match(path))) await cache.add(path).catch(() => {});
-			}
-		})
+		caches
+			.open(CACHE)
+			.then(async (cache) => {
+				for (const path of paths) {
+					if (!(await cache.match(path))) await cache.add(path).catch(() => {});
+				}
+			})
+			.then(fillCache)
 	);
 });
 
