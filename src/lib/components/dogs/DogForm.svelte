@@ -52,6 +52,11 @@
 		{ value: 'yes', label: 'Yes' },
 		{ value: 'no', label: 'No' }
 	];
+	// Selective = picky about other dogs: solo playtime only.
+	const dogCompatibilityOptions: { value: Compatibility; label: string }[] = [
+		...compatibilityOptions,
+		{ value: 'selective', label: 'Selective' }
+	];
 	const energyOptions: { value: EnergyLevel; label: string }[] = [
 		{ value: 'unknown', label: 'Unknown' },
 		{ value: 'low', label: 'Low' },
@@ -680,7 +685,7 @@
 					bind:value={value.goodWithDogs}
 					on:change={(event) => handleSelect('goodWithDogs', event.currentTarget.value)}
 				>
-					{#each compatibilityOptions as option}
+					{#each dogCompatibilityOptions as option}
 						<option value={option.value}>{option.label}</option>
 					{/each}
 				</select>

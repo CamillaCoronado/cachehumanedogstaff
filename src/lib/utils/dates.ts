@@ -322,6 +322,15 @@ export function tripColorReasonLabel(reason: TripColorReason | null | undefined)
 	return TRIP_COLOR_REASONS.find((r) => r.value === reason)?.label ?? null;
 }
 
+/** dogColorReason as text: the staff's typed note for a picked Other, else the label. */
+export function dogColorReasonLabel(dog: Dog): string | null {
+	const reason = dogColorReason(dog);
+	if (reason === 'other' && dog.manualTripColorReason === 'other' && dog.manualTripColorNote?.trim()) {
+		return dog.manualTripColorNote.trim();
+	}
+	return tripColorReasonLabel(reason);
+}
+
 // The reason a dog is its color — derived from what's already on the profile (mirrors the
 // factors dogStripeColor uses), or the manager's picked reason when the profile doesn't
 // explain it. Returns null for a green/eligible dog with nothing on record.

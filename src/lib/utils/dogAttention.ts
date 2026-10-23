@@ -1,5 +1,5 @@
 import type { Dog, UserRole } from '$lib/types';
-import { checkDayTripEligibility, daysSince, dogColorReason, dogStripeColor, tripColorReasonLabel } from '$lib/utils/dates';
+import { checkDayTripEligibility, daysSince, dogColorReasonLabel, dogStripeColor } from '$lib/utils/dates';
 import { clockStart, enrichmentOverdueDays, getBathStatus, isBathDue, needsDogTest } from '$lib/utils/attention';
 
 /**
@@ -18,7 +18,7 @@ export type TripEligibility = ReturnType<typeof checkDayTripEligibility>;
 export function tripEligibilityFor(dog: Dog, role: UserRole | null | undefined, today: Date): TripEligibility {
 	const result = profileTripEligibility(dog, role, today);
 	if (dogStripeColor(dog) !== 'red' || !result.eligible) return result;
-	const why = tripColorReasonLabel(dogColorReason(dog));
+	const why = dogColorReasonLabel(dog);
 	return { eligible: false, status: 'ineligible', reasons: [why ? `Red: ${why}` : 'Red', ...result.reasons] };
 }
 

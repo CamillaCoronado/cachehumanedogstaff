@@ -192,7 +192,7 @@ export function isPlaygroupEligible(dog: Dog, today: Date): boolean {
 	const isPuppyAge = ageWeeks !== null && ageWeeks < PUPPY_AGE_WEEKS;
 	// Adults need a confirmed 'yes'; puppies can play (with each other or with
 	// puppy-experienced adults) as long as they're not marked 'no'.
-	if (dog.goodWithDogs === 'no') return false;
+	if (dog.goodWithDogs === 'no' || dog.goodWithDogs === 'selective') return false;
 	if (dog.goodWithDogs !== 'yes' && !isPuppyAge) return false;
 	if (!isPuppyAge && !dog.isFixed) return false;
 	if (dog.isolationStatus !== 'none') return false;

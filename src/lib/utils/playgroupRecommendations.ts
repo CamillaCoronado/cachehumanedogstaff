@@ -37,7 +37,7 @@ export function isPuppy(dog: Dog): boolean {
 }
 
 export function getReadiness(dog: Dog): DogReadiness {
-	if (dog.isolationStatus !== 'none' || dog.sickHold || dog.goodWithDogs === 'no') return 'hold';
+	if (dog.isolationStatus !== 'none' || dog.sickHold || dog.goodWithDogs === 'no' || dog.goodWithDogs === 'selective') return 'hold';
 	if (isSurgeryResting(dog, new Date())) return 'hold';
 	const weeks = dogAgeWeeks(dog, new Date());
 	if (weeks !== null && weeks < 26) {
@@ -59,6 +59,7 @@ export function guidanceForDog(dog: Dog) {
 		if (dog.isolationStatus !== 'none') return 'In isolation: do not schedule.';
 		if (dog.sickHold) return 'Sick (outbreak hold): no playgroups.';
 		if (dog.goodWithDogs === 'no') return 'Marked not dog-social: behavior team only.';
+		if (dog.goodWithDogs === 'selective') return 'Selective with dogs: solo playtime only.';
 		const surgeryDaysAgo = daysSince(dog.surgeryDate);
 		if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) {
 			const daysLeft = (dog.surgeryRestDays ?? 0) - surgeryDaysAgo;
