@@ -89,26 +89,36 @@ function ageInMonths(dateOfBirth: Date, now: Date) {
 }
 
 function estimateAdultCups(weightLbs: number) {
-	const bucket = ADULT_CHART.find((row) => weightLbs <= row.maxWeight);
-	if (bucket) return bucket.cups;
-
-	const extraSteps = Math.ceil((weightLbs - 100) / 10);
-	return 2.75 + Math.max(0, extraSteps) * 0.25;
+	const last = ADULT_CHART[ADULT_CHART.length - 1];
+	// Past the chart: 1/4 cup per 10 lbs, prorated by the pound.
+	if (weightLbs > last.maxWeight) return last.cups + ((weightLbs - last.maxWeight) / 10) * 0.25;
+	return interpolateChart(ADULT_CHART, weightLbs, (row) => row.cups);
 }
 
 function estimatePuppyCups(weightLbs: number, band: PuppyBand) {
-	const bucket = PUPPY_CHART.find((row) => weightLbs <= row.maxWeight) ?? PUPPY_CHART[PUPPY_CHART.length - 1];
-	const base = bucket?.[band] ?? 0;
+	const last = PUPPY_CHART[PUPPY_CHART.length - 1];
+	// Chart note: 40+ adds 1/4 cup for every 5 lbs, prorated by the pound.
+	if (weightLbs > last.maxWeight) return last[band] + ((weightLbs - last.maxWeight) / 5) * 0.25;
+	return interpolateChart(PUPPY_CHART, weightLbs, (row) => row[band]);
+}
 
-	if (weightLbs <= 40) return base;
-
-	// Chart note: 40+ adds 1/4 cup for every 5 lbs.
-	const extraSteps = Math.ceil((weightLbs - 40) / 5);
-	return base + Math.max(0, extraSteps) * 0.25;
+// Weights between chart rows get a proportional amount instead of the next
+// row up (which overfed in-between dogs by about 1/4 cup).
+function interpolateChart<T extends { maxWeight: number }>(chart: T[], weightLbs: number, cupsOf: (row: T) => number) {
+	const upperIndex = chart.findIndex((row) => weightLbs <= row.maxWeight);
+	if (upperIndex <= 0) return cupsOf(chart[0]);
+	const lower = chart[upperIndex - 1];
+	const upper = chart[upperIndex];
+	const t = (weightLbs - lower.maxWeight) / (upper.maxWeight - lower.maxWeight);
+	return cupsOf(lower) + t * (cupsOf(upper) - cupsOf(lower));
 }
 
 function formatCupAmount(cups: number) {
 	if (!Number.isFinite(cups) || cups <= 0) return '';
+	// Chart values stay exact (1/3 c); anything calculated rounds to the
+	// nearest 1/4 c scoop, halfway cases rounding down.
+	const twelfths = Math.round(cups * 12) / 12;
+	cups = isLabeledFraction(twelfths - Math.floor(twelfths)) ? twelfths : Math.max(0.25, Math.ceil(cups * 4 - 0.5) / 4);
 
 	const whole = Math.floor(cups);
 	const fraction = Math.round((cups - whole) * 12) / 12;
@@ -117,6 +127,10 @@ function formatCupAmount(cups: number) {
 	if (!fractionLabel) return `${whole} c`;
 	if (whole === 0) return `${fractionLabel} c`;
 	return `${whole} ${fractionLabel} c`;
+}
+
+function isLabeledFraction(value: number) {
+	return Math.abs(value) < 0.01 || fractionToLabel(value) !== '';
 }
 
 function fractionToLabel(value: number) {
