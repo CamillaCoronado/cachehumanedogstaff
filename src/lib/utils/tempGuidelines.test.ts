@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { tempAdvisory } from './tempGuidelines';
 
 describe('tempAdvisory', () => {
-	it('flags everyone below 35 and small dogs from 35 to 39', () => {
-		expect(tempAdvisory(34)?.label).toBe('Bring everyone inside');
-		expect(tempAdvisory(35)?.label).toBe('Bring small dogs inside');
-		expect(tempAdvisory(39)?.label).toBe('Bring small dogs inside');
+	it('flags everyone at 35 and below, small dogs from 36 to 40', () => {
+		expect(tempAdvisory(35)?.label).toBe('Bring everyone inside');
+		expect(tempAdvisory(36)?.label).toBe('Bring small dogs inside');
+		expect(tempAdvisory(40)?.label).toBe('Bring small dogs inside');
 	});
 
 	it('shows nothing in the normal range', () => {
-		expect(tempAdvisory(40)).toBeNull();
+		expect(tempAdvisory(41)).toBeNull();
 		expect(tempAdvisory(75)).toBeNull();
 		expect(tempAdvisory(79)).toBeNull();
 		expect(tempAdvisory(null)).toBeNull();

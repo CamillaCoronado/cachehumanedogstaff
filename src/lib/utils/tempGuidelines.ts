@@ -1,6 +1,6 @@
 /**
  * The shelter's outdoor temperature rules, keyed off the current air temp.
- * Cold: below 40°F small dogs, puppies and just-fixed dogs come in; below 35°F everyone does.
+ * Cold: at 40°F or colder small dogs, puppies and just-fixed dogs come in; at 35°F or colder everyone does.
  * Heat: the kennel chart's risk tiers, with the surface temps it lists for each.
  */
 export type TempTone = 'cold' | 'caution' | 'high' | 'severe' | 'extreme';
@@ -16,14 +16,14 @@ export interface TempAdvisory {
 
 export function tempAdvisory(tempF: number | null | undefined): TempAdvisory | null {
 	if (tempF == null || !Number.isFinite(tempF)) return null;
-	if (tempF < 35) {
-		return { tone: 'cold', label: 'Bring everyone inside', protocol: 'Below 35°F: all dogs come inside.' };
+	if (tempF <= 35) {
+		return { tone: 'cold', label: 'Bring everyone inside', protocol: '35°F or colder: all dogs come inside.' };
 	}
-	if (tempF < 40) {
+	if (tempF <= 40) {
 		return {
 			tone: 'cold',
 			label: 'Bring small dogs inside',
-			protocol: 'Below 40°F: small dogs, puppies and dogs that just got fixed come inside. Everyone else at 35°F.'
+			protocol: '40°F or colder: small dogs, puppies and dogs that just got fixed come inside. Everyone else at 35°F.'
 		};
 	}
 	if (tempF >= 95) {
@@ -58,6 +58,6 @@ export function tempAdvisory(tempF: number | null | undefined): TempAdvisory | n
 			surfaces: 'Concrete 110–115°F · asphalt 125°F'
 		};
 	}
-	// 40–79°F: standard turnout, nothing to flag.
+	// 41–79°F: standard turnout, nothing to flag.
 	return null;
 }
