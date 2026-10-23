@@ -77,3 +77,20 @@ describe('getAdoptionAvailability — red dog', () => {
 		expect(getAdoptionAvailability(adoptableDog({ manualTripColor: 'green' })).available).toBe(true);
 	});
 });
+
+describe('getAdoptionAvailability — asm hold', () => {
+	it('blocks adoption as pending, with the hold date', () => {
+		const result = getAdoptionAvailability(adoptableDog({ asmHold: true, asmHoldUntil: new Date(2026, 9, 30) }));
+		expect(result.available).toBe(false);
+		expect(result.state).toBe('asm_hold');
+		expect(result.holdReason).toBe('adoption pending, hold until 10/30');
+	});
+
+	it('is pending without a date when asm has none', () => {
+		expect(getAdoptionAvailability(adoptableDog({ asmHold: true, asmHoldUntil: null })).holdReason).toBe('adoption pending');
+	});
+
+	it('does nothing when asm has no hold', () => {
+		expect(getAdoptionAvailability(adoptableDog({ asmHold: false })).available).toBe(true);
+	});
+});

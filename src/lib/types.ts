@@ -232,6 +232,10 @@ export interface Dog {
 	isolationStatus: IsolationStatus;
 	isolationReason: IsolationReason | null;
 	isolationUntilDate: DateValue | null;
+	/** ASM's Hold checkbox, written by the sync (ASM wins). Blocks adoption only. */
+	asmHold?: boolean;
+	/** The date ASM's hold runs to; null when open-ended or not held. */
+	asmHoldUntil?: DateValue | null;
 	/** Outbreak "sick hold" — distinct from isolation (iso room). A sick-hold dog stays in
 	 *  the normal kennel building and is still fed/handled by regular staff (with
 	 *  precautions), but is grouped into the inside red zone and is staff-only, blocked from

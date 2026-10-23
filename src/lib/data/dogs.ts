@@ -149,6 +149,8 @@ interface StoredDog {
 	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
 	isolationReason?: 'sick' | 'bite_quarantine' | null;
 	isolationUntilDate?: string | null;
+	asmHold?: boolean;
+	asmHoldUntil?: string | null;
 	sickHold?: boolean;
 	sickHoldReason?: string | null;
 	sickHoldSince?: string | null;
@@ -497,6 +499,8 @@ function serializeDog(dog: Dog): StoredDog {
 		isolationStatus: dog.isolationStatus,
 		isolationReason: dog.isolationReason ?? null,
 		isolationUntilDate: toDateString(dog.isolationUntilDate),
+		asmHold: dog.asmHold ?? false,
+		asmHoldUntil: dog.asmHold ? (toDateString(dog.asmHoldUntil) ?? null) : null,
 		sickHold: dog.sickHold ?? false,
 		sickHoldReason: dog.sickHold ? (dog.sickHoldReason ?? null) : null,
 		sickHoldSince: dog.sickHold ? (toDateString(dog.sickHoldSince) ?? null) : null,
@@ -714,6 +718,8 @@ function deserializeDog(stored: StoredDog): Dog {
 		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
 		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
 		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,
+		asmHold: stored.asmHold ?? false,
+		asmHoldUntil: stored.asmHold && stored.asmHoldUntil ? toDate(stored.asmHoldUntil) : null,
 		sickHold: stored.sickHold ?? false,
 		sickHoldReason: stored.sickHold ? (stored.sickHoldReason ?? null) : null,
 		sickHoldSince: stored.sickHold && stored.sickHoldSince ? toDate(stored.sickHoldSince) : null,

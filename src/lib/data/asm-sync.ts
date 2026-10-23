@@ -84,6 +84,8 @@ const FIELD_LABELS: Record<string, string> = {
 	crateTrained: 'Crate trained',
 	pottyTrained: 'Potty trained',
 	energyLevel: 'Energy',
+	asmHold: 'Adoption pending',
+	asmHoldUntil: 'Hold until',
 	photoUrl: 'Photo',
 	inFoster: 'Foster',
 	permanentFoster: 'Permanent foster',
@@ -165,6 +167,9 @@ export interface AsmAnimal {
 	HASPERMANENTFOSTER: number;
 	/** ASM's Quarantine flag — a bite quarantine here. */
 	ISQUARANTINE?: number;
+	/** ASM's Hold checkbox (1 = on hold) and the date it runs to. */
+	ISHOLD?: number;
+	HOLDUNTILDATE?: string | null;
 	// Non-zero = animal has left shelter. 2 = foster, 1 = adoption, 3 = transfer, etc.
 	ACTIVEMOVEMENTTYPE: number;
 	ACTIVEMOVEMENTDATE: string | null;
@@ -229,6 +234,10 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 	const quarantined = animal.ISQUARANTINE === 1;
 	const isolationStatus: 'none' | 'iso' =
 		locationName.includes('iso') || quarantined ? 'iso' : 'none';
+	// ASM's batch clears Hold once its date passes; a past date is treated as cleared
+	// so a dog isn't held for the hours before that runs.
+	const holdUntil = normalizeDateStr(animal.HOLDUNTILDATE);
+	const asmHold = animal.ISHOLD === 1 && (!holdUntil || holdUntil >= now.slice(0, 10));
 	const photoUrl =
 		Array.isArray(animal.PHOTOURLS) && animal.PHOTOURLS.length > 0
 			? animal.PHOTOURLS[0]
@@ -283,6 +292,9 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		// Only written when ASM has it, so a reason staff gave ("sick") isn't wiped.
 		...(quarantined ? { isolationReason: 'bite_quarantine' as const } : {}),
 		permanentFoster: isPermanentFoster,
+		// ASM wins. Hold here means someone is adopting the dog; it only blocks adoption.
+		asmHold,
+		asmHoldUntil: asmHold ? holdUntil : null,
 		// A permanent foster is still ours: not adopted, not departed. The permanentFoster
 		// flag keeps them off the shelter's lists (feeding, Needs attention, the floor).
 		status: 'active',
@@ -402,7 +414,7 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 				asmToStoredFields(animal, now),
 				existing
 			);
-			const DATE_FIELDS = new Set(['dateOfBirth', 'intakeDate', 'originalIntakeDate', 'microchipDate', 'fixedDate', 'vaccinatedDate', 'inFosterSince']);
+			const DATE_FIELDS = new Set(['dateOfBirth', 'intakeDate', 'originalIntakeDate', 'microchipDate', 'fixedDate', 'vaccinatedDate', 'inFosterSince', 'asmHoldUntil']);
 			const changedFields = (Object.entries(comparable) as [string, unknown][])
 				.filter(([k, v]) => {
 					const stored = existing[k];
