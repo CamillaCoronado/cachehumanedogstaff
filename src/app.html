@@ -9,6 +9,35 @@
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<!--
+			Shown before any JS arrives, since pages render client-side only; on the shelter's
+			signal the app's code can take a while. The root layout removes it on mount. If
+			that never happens (a dropped file, a dead connection), offer a reload instead of
+			leaving a blank page.
+		-->
+		<div id="boot" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#f0f5fa;color:#016aa5;font-family:system-ui,sans-serif;text-align:center;padding:16px;z-index:9999">
+			<p style="margin:0;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:14px">Cache Humane Society</p>
+			<p id="boot-msg" style="margin:0;font-size:18px">Loading…</p>
+			<button id="boot-retry" type="button" onclick="location.reload()" style="display:none;padding:10px 20px;border:0;border-radius:8px;background:#016aa5;color:#fff;font-size:16px">Try again</button>
+		</div>
+		<script>
+			(function () {
+				function stuck() {
+					var boot = document.getElementById('boot');
+					if (!boot) return;
+					document.getElementById('boot-msg').textContent = 'Slow connection. Still trying…';
+					document.getElementById('boot-retry').style.display = 'block';
+				}
+				setTimeout(stuck, 20000);
+				// A script that fails to load leaves the app unable to start at all.
+				window.addEventListener('error', function (e) {
+					if (e.target && e.target.tagName === 'SCRIPT') stuck();
+				}, true);
+				window.addEventListener('unhandledrejection', function (e) {
+					if (/import|fetch|module/i.test(String(e.reason))) stuck();
+				});
+			})();
+		</script>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>
