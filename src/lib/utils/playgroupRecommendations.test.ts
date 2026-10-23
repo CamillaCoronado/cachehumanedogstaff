@@ -57,6 +57,7 @@ describe('getReadiness', () => {
 	it('holds isolated, not-dog-social, and post-surgery dogs', () => {
 		expect(getReadiness(makeDog({ isolationStatus: 'iso' }))).toBe('hold');
 		expect(getReadiness(makeDog({ goodWithDogs: 'no' }))).toBe('hold');
+		expect(getReadiness(makeDog({ goodWithDogs: 'selective' }))).toBe('hold');
 		expect(getReadiness(makeDog({ surgeryDate: daysAgo(2), surgeryRestDays: 7 }))).toBe('hold');
 	});
 

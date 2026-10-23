@@ -48,6 +48,7 @@ export function getAdoptionAvailability(
 		| 'sickHoldReason'
 		| 'manualTripColor'
 		| 'manualTripColorReason'
+		| 'manualTripColorNote'
 	>
 ): AdoptionAvailability {
 	const missingMedicalRequirements = missingAdoptionMedicalRequirements(dog);
@@ -120,7 +121,9 @@ export function getAdoptionAvailability(
 
 	// A red dog is staff-only and not adoptable, whatever its profile says.
 	if (dog.manualTripColor === 'red') {
-		const why = tripColorReasonLabel(dog.manualTripColorReason);
+		const why =
+			(dog.manualTripColorReason === 'other' && dog.manualTripColorNote?.trim()) ||
+			tripColorReasonLabel(dog.manualTripColorReason);
 		return {
 			available: false,
 			state: 'handling_hold',

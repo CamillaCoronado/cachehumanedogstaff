@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { Dog } from '$lib/types';
 import {
+	dogColorReasonLabel,
 	bathEligible,
 	daysSince,
 	formatAge,
@@ -135,5 +137,15 @@ describe('bathEligible', () => {
 	it('is eligible with no surgery date or a future one', () => {
 		expect(bathEligible(null, today)).toBe(true);
 		expect(bathEligible(new Date(2026, 5, 20), today)).toBe(true);
+	});
+});
+
+describe('dogColorReasonLabel', () => {
+	const dog = (o: Partial<Dog>) => ({ isolationStatus: 'none', handlingLevel: 'volunteer', ...o }) as Dog;
+
+	it("shows the typed note for Other, the label otherwise", () => {
+		expect(dogColorReasonLabel(dog({ manualTripColor: 'red', manualTripColorReason: 'other', manualTripColorNote: 'jumps fences' }))).toBe('jumps fences');
+		expect(dogColorReasonLabel(dog({ manualTripColor: 'red', manualTripColorReason: 'other' }))).toBe('Other');
+		expect(dogColorReasonLabel(dog({ manualTripColor: 'red', manualTripColorReason: 'medical', manualTripColorNote: 'stale' }))).toBe('Medical');
 	});
 });

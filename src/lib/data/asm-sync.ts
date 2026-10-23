@@ -139,7 +139,8 @@ export interface AsmAnimal {
 	VACCGIVENCOUNT: number;
 	VACCOUTSTANDINGCOUNT: number;
 	VACCRABIESDATE: string | null;
-	// Compatibility: 0 = yes, 1 = no, 2 = unknown
+	// Compatibility: 0 = yes, 1 = no, 2 = unknown, 3 = selective (dogs/cats/elderly/lead/traveller;
+	// children use a lookup without selective)
 	ISGOODWITHDOGS: number;
 	ISGOODWITHCATS: number;
 	ISGOODWITHCHILDREN: number;
@@ -197,10 +198,11 @@ function normalizeSex(sexName: string): 'male' | 'female' | 'unknown' {
 	return 'unknown';
 }
 
-// ASM compatibility fields: 0 = yes, 1 = no, 2 = unknown
-function normalizeCompat(value: number | undefined): 'yes' | 'no' | 'unknown' {
+// ASM compatibility fields: 0 = yes, 1 = no, 2 = unknown, 3 = selective
+function normalizeCompat(value: number | undefined): 'yes' | 'no' | 'unknown' | 'selective' {
 	if (value === 0) return 'yes';
 	if (value === 1) return 'no';
+	if (value === 3) return 'selective';
 	return 'unknown';
 }
 
@@ -390,6 +392,22 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		return fields;
 	}
 
+	// ASM wins on good-with-dogs, except an ASM "unknown" never erases a selective that
+	// staff set in the app.
+	function applySelectivePrecedence<T extends { goodWithDogs: string }>(
+		fields: T,
+		existing: Record<string, unknown> | undefined
+	): T {
+		if (fields.goodWithDogs === 'unknown' && existing?.goodWithDogs === 'selective') {
+			fields.goodWithDogs = 'selective';
+		}
+		return fields;
+	}
+
+	function asmFieldsFor(animal: AsmAnimal, existing: Record<string, unknown> | undefined) {
+		return applySelectivePrecedence(applyPhotoPrecedence(asmToStoredFields(animal, now), existing), existing);
+	}
+
 	for (const animal of dogs) {
 		const docId = String(animal.ID);
 		const existing = existingDocs.get(docId);
@@ -398,10 +416,7 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 			pending.push({ animal, isNew: true, changedFields: [] });
 		} else {
 			// Compare ASM-sourced fields only (exclude _lastSyncedAt — it always changes)
-			const { _lastSyncedAt: _ignored, ...comparable } = applyPhotoPrecedence(
-				asmToStoredFields(animal, now),
-				existing
-			);
+			const { _lastSyncedAt: _ignored, ...comparable } = asmFieldsFor(animal, existing);
 			const DATE_FIELDS = new Set(['dateOfBirth', 'intakeDate', 'originalIntakeDate', 'microchipDate', 'fixedDate', 'vaccinatedDate', 'inFosterSince']);
 			const changedFields = (Object.entries(comparable) as [string, unknown][])
 				.filter(([k, v]) => {
@@ -426,7 +441,7 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		const writes: { id: string; data: Record<string, unknown> }[] = [];
 		for (const { animal, isNew } of pending.slice(i, i + BATCH_SIZE)) {
 			const docId = String(animal.ID);
-			const asmFields = applyPhotoPrecedence(asmToStoredFields(animal, now), existingDocs.get(docId));
+			const asmFields = asmFieldsFor(animal, existingDocs.get(docId));
 			// Puppies don't need evaluation — never flag them.
 			const isPuppy = isPuppyAge(asmFields.dateOfBirth);
 			if (isNew) {

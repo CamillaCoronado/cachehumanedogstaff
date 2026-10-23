@@ -5,7 +5,7 @@
 	import { localRole } from '$lib/stores/role';
 	import { firebaseEnabled } from '$lib/firebase/config';
 	import { canAccessDayTrips, canEditDayTrips as checkCanEditDayTrips, canSetDayTripColor, resolveRole } from '$lib/utils/permissions';
-	import { setDogTripStatus, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, setDogAwaitingEvaluation, setDogDayTripPuppyOverride } from '$lib/data/dogs';
+	import { setDogTripStatus, importHistoricalDayTrip, clearDayTripLogs, updateDog, createDog, deleteDayTripLog, setDogAwaitingEvaluation, setDogDayTripPuppyOverride, setDogDayTripBlocked } from '$lib/data/dogs';
 	import { loadDayTripData, autoImportTripsFromHiddenNotes } from '$lib/data/daytripSync';
 	import { dogs as dogsStore } from '$lib/stores/dogs';
 	import type { DayTripLog, Dog, UserRole, Volunteer } from '$lib/types';
@@ -169,6 +169,12 @@
 		await refresh();
 	}
 
+	async function setTripBlocked(dog: Dog, reason: string | null) {
+		await setDogDayTripBlocked(dog.id, reason);
+		toast.success(reason ? `${dog.name} marked not eligible.` : `${dog.name} eligible for day trips again.`);
+		await refresh();
+	}
+
 	async function toggleOut(dog: Dog) {
 		const eligibility = getEligibility(dog);
 		if (dog.isOutOnDayTrip) {
@@ -240,7 +246,7 @@
 		<!-- ───── BOARD ───── -->
 		{:else if activeTab === 'board'}
 			<BoardTab {dogsOut} {dogsEligible} {dogsIneligible}
-				{allTimeTripsCountByDog} {getEligibility} {toggleOut} {toggleAwaitingEval} {togglePuppyOverride} />
+				{allTimeTripsCountByDog} {getEligibility} {toggleOut} {toggleAwaitingEval} {togglePuppyOverride} {setTripBlocked} />
 
 		<!-- ───── LOG ───── -->
 		{:else if activeTab === 'log'}

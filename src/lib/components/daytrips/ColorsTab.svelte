@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Dog, TripColorReason } from '$lib/types';
-	import { dogStripeColor, dogColorReason, tripColorReasonLabel, TRIP_COLOR_REASONS } from '$lib/utils/dates';
+	import { dogStripeColor, dogColorReasonLabel, tripColorReasonLabel, TRIP_COLOR_REASONS } from '$lib/utils/dates';
 	import { setDogManualTripColor } from '$lib/data/dogs';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import toast from 'svelte-french-toast';
@@ -21,6 +21,9 @@
 
 	// When a dog is dropped on red/yellow we ask for a reason before committing.
 	let pending: { dog: Dog; color: 'red' | 'yellow' } | null = null;
+	// Other asks for the reason in the staff's own words.
+	let otherMode = false;
+	let otherNote = '';
 
 	$: byColor = (color: Color) =>
 		dogs
@@ -40,12 +43,13 @@
 		dragOver = null;
 	}
 
-	async function commitColor(dog: Dog, color: Color, reason: TripColorReason | null) {
+	async function commitColor(dog: Dog, color: Color, reason: TripColorReason | null, note: string | null = null) {
 		if (saving) return;
 		saving = true;
 		try {
-			await setDogManualTripColor(dog.id, color, reason);
-			toast.success(`${dog.name} set to ${color}${reason ? ` (${tripColorReasonLabel(reason)})` : ''}.`);
+			await setDogManualTripColor(dog.id, color, reason, note);
+			const why = note?.trim() || tripColorReasonLabel(reason);
+			toast.success(`${dog.name} set to ${color}${why ? ` (${why})` : ''}.`);
 			await refresh();
 		} catch {
 			toast.error('Could not set color.');
@@ -63,6 +67,8 @@
 			void commitColor(dog, 'green', null);
 		} else {
 			// Red/yellow: ask why.
+			otherMode = false;
+			otherNote = '';
 			pending = { dog, color };
 		}
 	}
@@ -95,9 +101,21 @@
 
 	async function pickReason(reason: TripColorReason) {
 		if (!pending) return;
+		if (reason === 'other') {
+			otherMode = true;
+			return;
+		}
 		const { dog, color } = pending;
 		pending = null;
 		await commitColor(dog, color, reason);
+	}
+
+	async function saveOther() {
+		if (!pending || !otherNote.trim()) return;
+		const { dog, color } = pending;
+		pending = null;
+		otherMode = false;
+		await commitColor(dog, color, 'other', otherNote);
 	}
 </script>
 
@@ -144,8 +162,8 @@
 					>
 						<span class="ct-grip" aria-hidden="true">⠿</span>
 						<span class="ct-name">{dog.name}</span>
-						{#if col.color !== 'green' && dogColorReason(dog)}
-							<span class="ct-reason">{tripColorReasonLabel(dogColorReason(dog))}</span>
+						{#if col.color !== 'green' && dogColorReasonLabel(dog)}
+							<span class="ct-reason">{dogColorReasonLabel(dog)}</span>
 						{/if}
 					</button>
 				{/each}
@@ -159,11 +177,23 @@
 	title={pending ? `Why is ${pending.dog.name} ${pending.color}?` : 'Reason'}
 	onClose={() => (pending = null)}
 >
-	<div class="ct-reasons">
-		{#each TRIP_COLOR_REASONS as r}
-			<button class="ct-reason-btn" on:click={() => pickReason(r.value)}>{r.label}</button>
-		{/each}
-	</div>
+	{#if otherMode}
+		<form class="ct-other" on:submit|preventDefault={saveOther}>
+			<label class="ct-other-label" for="ct-other-note">Reason</label>
+			<!-- svelte-ignore a11y-autofocus -->
+			<input id="ct-other-note" class="ct-other-input" bind:value={otherNote} placeholder="Why?" autofocus />
+			<div class="ct-other-actions">
+				<button type="button" class="ct-reason-btn" on:click={() => (otherMode = false)}>Back</button>
+				<button type="submit" class="ct-reason-btn ct-reason-save" disabled={!otherNote.trim()}>Save</button>
+			</div>
+		</form>
+	{:else}
+		<div class="ct-reasons">
+			{#each TRIP_COLOR_REASONS as r}
+				<button class="ct-reason-btn" on:click={() => pickReason(r.value)}>{r.label}</button>
+			{/each}
+		</div>
+	{/if}
 </Modal>
 
 <style>
@@ -313,6 +343,20 @@
 	}
 
 	.ct-reason-btn:hover { background: #f1f3f4; border-color: #bdc1c6; }
+	.ct-reason-btn:disabled { opacity: 0.5; cursor: default; }
+	.ct-reason-save { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+	.ct-reason-save:hover:not(:disabled) { background: #1765cc; border-color: #1765cc; }
+
+	.ct-other { display: flex; flex-direction: column; gap: 0.4rem; }
+	.ct-other-label { font-size: 0.75rem; font-weight: 600; color: #5f6368; }
+	.ct-other-input {
+		padding: 0.45rem 0.6rem;
+		border: 1px solid #dadce0;
+		border-radius: 6px;
+		font: inherit;
+		font-size: 0.85rem;
+	}
+	.ct-other-actions { display: flex; justify-content: flex-end; gap: 0.4rem; }
 
 	@media (min-width: 640px) {
 		.ct-board {

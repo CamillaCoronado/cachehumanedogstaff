@@ -72,7 +72,8 @@ export type DogPlayStyle = 'rough_and_rowdy' | 'gentle_and_dainty' | 'solo';
 export type IsolationStatus = 'none' | 'iso';
 export type IsolationReason = 'sick' | 'bite_quarantine';
 export type DogHandlingLevel = 'manager_only' | 'staff_only' | 'volunteer';
-export type Compatibility = 'yes' | 'no' | 'unknown';
+/** 'selective' = picky about other dogs (ASM's 4th good-with value): solo playtime only. */
+export type Compatibility = 'yes' | 'no' | 'unknown' | 'selective';
 export type PottyTrainedStatus = 'yes' | 'no' | 'working_on_it' | 'unknown';
 export type EnergyLevel = 'low' | 'medium' | 'high' | 'very_high' | 'unknown';
 export type DogSex = 'male' | 'female' | 'unknown';
@@ -197,6 +198,8 @@ export interface Dog {
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
 	/** Why the color was set (for red/yellow) — null for green or an unset color. */
 	manualTripColorReason?: TripColorReason | null;
+	/** Staff's own words when the reason is Other — shown in place of "Other". */
+	manualTripColorNote?: string | null;
 	/** Last color seen from the sheet, so a sheet change can update `manualTripColor` without
 	 *  clobbering a manual change on every load. */
 	lastSheetColor?: 'green' | 'yellow' | 'red' | null;

@@ -107,17 +107,17 @@
 	$: filteredDogs = activeDogs.filter((dog) => dog.name.toLowerCase().includes(search.toLowerCase()));
 	$: dogIdsWithHistory = new Set(sessions.flatMap((s) => s.dogIds));
 	$: readyDogs = activeDogs.filter((dog) => {
-		if (dog.isolationStatus !== 'none' || dog.sickHold || dog.goodWithDogs === 'no' || dog.awaitingEvaluation) return false;
+		if (dog.isolationStatus !== 'none' || dog.sickHold || dog.goodWithDogs === 'no' || dog.goodWithDogs === 'selective' || dog.awaitingEvaluation) return false;
 		if (getReadiness(dog) === 'hold') return false; // too-young/unvaccinated puppies, surgery rest
 		if (dog.goodWithDogs === 'yes' || isPuppy(dog)) return true;
 		return dogIdsWithHistory.has(dog.id);
 	});
-	// Solo Playtime: not dog-social or tagged solo-style — no groups, but they
-	// still get one-on-one yard time with a person.
+	// Solo Playtime: not dog-social, selective with dogs or tagged solo-style — no
+	// groups, but they still get one-on-one yard time with a person.
 	$: soloPlaytimeDogs = activeDogs.filter(
 		(dog) =>
 			dog.isolationStatus === 'none' &&
-			(dog.goodWithDogs === 'no' || (dog.playStyles ?? []).includes('solo'))
+			(dog.goodWithDogs === 'no' || dog.goodWithDogs === 'selective' || (dog.playStyles ?? []).includes('solo'))
 	);
 	$: cautionDogs = getCautionDogs(activeDogs, sessions);
 	$: holdDogs = activeDogs.filter((dog) => getReadiness(dog) === 'hold');
@@ -830,7 +830,7 @@
 					<div class="playstyle-col">
 						<div class="playstyle-col-head">
 							<h4 class="playstyle-col-title">Solo Playtime</h4>
-							<p class="playstyle-col-note">Not dog-social — one-on-one people time</p>
+							<p class="playstyle-col-note">Not dog-social or dog selective — one-on-one people time</p>
 						</div>
 						{#if soloPlaytimeDogs.length === 0}
 							<p class="empty-line">No solo dogs.</p>
@@ -841,8 +841,8 @@
 										{dog}
 										value="solo"
 										editable={canEdit}
-										locked={dog.goodWithDogs === 'no'}
-										lockedNote="Not dog-social"
+										locked={dog.goodWithDogs === 'no' || dog.goodWithDogs === 'selective'}
+										lockedNote={dog.goodWithDogs === 'selective' ? 'Dog selective' : 'Not dog-social'}
 										on:move={(e) => movePlayStyle(dog, e.detail)}
 									/>
 								{/each}
