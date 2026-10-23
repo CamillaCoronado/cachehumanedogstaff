@@ -6,6 +6,11 @@
 	// The static loading screen in app.html, up until the app could draw itself.
 	onMount(() => {
 		document.getElementById('boot')?.remove();
+		try {
+			sessionStorage.removeItem('boot-reloaded');
+		} catch {
+			// Storage blocked: the boot screen just won't auto-reload.
+		}
 		// Have the service worker save the files this load fetched before it was in charge.
 		navigator.serviceWorker?.ready
 			.then((registration) => {

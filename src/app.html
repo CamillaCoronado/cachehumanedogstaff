@@ -23,18 +23,33 @@
 		<script>
 			(function () {
 				function stuck() {
-					var boot = document.getElementById('boot');
-					if (!boot) return;
+					if (!document.getElementById('boot')) return;
 					document.getElementById('boot-msg').textContent = 'Slow connection. Still trying…';
 					document.getElementById('boot-retry').style.display = 'block';
 				}
 				setTimeout(stuck, 20000);
-				// A script that fails to load leaves the app unable to start at all.
+				// Only the app's own code failing to load means it cannot start. Other scripts
+				// (analytics, often blocked) and Firebase's network errors are not that.
+				function appCodeFailed() {
+					if (!document.getElementById('boot')) return;
+					// Usually a file from a deploy that has since been replaced: one reload
+					// picks up the current one.
+					try {
+						if (!sessionStorage.getItem('boot-reloaded')) {
+							sessionStorage.setItem('boot-reloaded', '1');
+							location.reload();
+							return;
+						}
+					} catch (e) {}
+					stuck();
+				}
 				window.addEventListener('error', function (e) {
-					if (e.target && e.target.tagName === 'SCRIPT') stuck();
+					var src = e.target && e.target.tagName === 'SCRIPT' ? e.target.src : '';
+					if (src && src.indexOf(location.origin + '/_app/') === 0) appCodeFailed();
 				}, true);
 				window.addEventListener('unhandledrejection', function (e) {
-					if (/import|fetch|module/i.test(String(e.reason))) stuck();
+					var msg = String(e.reason && e.reason.message ? e.reason.message : e.reason);
+					if (/dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(msg)) appCodeFailed();
 				});
 			})();
 		</script>
