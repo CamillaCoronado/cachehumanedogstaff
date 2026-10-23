@@ -97,6 +97,8 @@ export interface Dog {
 	photoUrls?: string[];
 	hasOwnFood?: boolean;
 	transitionToHills?: boolean | null;
+	/** Day staff accepted the puppy → adult food switch; drives the 7-day mix. */
+	adultFoodTransitionStart?: DateValue | null;
 	satinBalls?: boolean;
 	hasSupplements?: boolean;
 	hasSecondMeal?: boolean;

@@ -41,10 +41,20 @@ export function estimateFoodAmountPerMeal(input: {
 	weightLbs: number | null | undefined;
 	dateOfBirth?: DateValue | null;
 	foodType?: string | null;
+	adultFoodTransitionStart?: DateValue | null;
 	now?: Date;
 }): string {
 	const weightLbs = normalizeWeightLbs(input.weightLbs);
 	if (weightLbs === null) return '';
+
+	const stage = adultFoodStage(input, input.now);
+	if (stage?.kind === 'adult') return formatCupAmount(estimateAdultCups(weightLbs));
+	if (stage?.kind === 'suggested') return formatCupAmount(estimatePuppyCups(weightLbs, 'm10to12'));
+	if (stage?.kind === 'mixing') {
+		const puppyCups = estimatePuppyCups(weightLbs, 'm10to12');
+		const adultCups = estimateAdultCups(weightLbs);
+		return formatCupAmount(puppyCups + stage.adultShare * (adultCups - puppyCups));
+	}
 
 	const puppyBand = resolvePuppyBand(input.dateOfBirth, input.foodType, input.now);
 	if (puppyBand) {
@@ -141,16 +151,67 @@ function fractionToLabel(value: number) {
 	return '';
 }
 
+// ─── Puppy → adult food transition ───
+
+// Daily adult share for the standard 7-day switch; day 7 on is all adult food.
+const ADULT_TRANSITION_SCHEDULE = [0.25, 0.25, 0.5, 0.5, 0.75, 0.75];
+const ADULT_TRANSITION_SUGGEST_MONTHS = 11;
+// Normal-food dogs past this age with no transition on record already went
+// adult under the old automatic 12-month switch; don't re-suggest for them.
+const ADULT_TRANSITION_SUGGEST_UNTIL_MONTHS = 13;
+
+export type AdultFoodStage =
+	| { kind: 'puppy' }
+	| { kind: 'suggested' }
+	| { kind: 'mixing'; day: number; adultShare: number }
+	| { kind: 'adult' };
+
+/**
+ * Where a dog is in moving from puppy to adult food. From 11 months the app
+ * only suggests the transition; it starts when staff accept it (stamping
+ * adultFoodTransitionStart). Null for special diets (No Fish etc.).
+ */
+export function adultFoodStage(
+	dog: { foodType?: string | null; dateOfBirth?: DateValue | null; adultFoodTransitionStart?: DateValue | null },
+	day: Date = new Date()
+): AdultFoodStage | null {
+	const t = (dog.foodType ?? '').trim().toLowerCase();
+	const dob = toDate(dog.dateOfBirth ?? null);
+	const months = dob ? ageInMonths(dob, day) : null;
+
+	if (t === 'puppy') {
+		return months !== null && months >= ADULT_TRANSITION_SUGGEST_MONTHS ? { kind: 'suggested' } : { kind: 'puppy' };
+	}
+	if (t !== '' && t !== 'normal') return null;
+
+	const start = toDate(dog.adultFoodTransitionStart ?? null);
+	if (start) {
+		const dayKey = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+		const startKey = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+		const daysIn = Math.max(0, Math.round((dayKey - startKey) / 86_400_000));
+		if (daysIn < ADULT_TRANSITION_SCHEDULE.length) {
+			return { kind: 'mixing', day: daysIn + 1, adultShare: ADULT_TRANSITION_SCHEDULE[daysIn] };
+		}
+		return { kind: 'adult' };
+	}
+
+	if (months === null) return { kind: 'adult' };
+	if (months < ADULT_TRANSITION_SUGGEST_MONTHS) return { kind: 'puppy' };
+	if (months < ADULT_TRANSITION_SUGGEST_UNTIL_MONTHS) return { kind: 'suggested' };
+	return { kind: 'adult' };
+}
+
+function adultTransitionMixLabel(adultShare: number) {
+	if (adultShare <= 0.25) return '3/4 Puppy + 1/4 Adult';
+	if (adultShare <= 0.5) return '1/2 Puppy + 1/2 Adult';
+	return '1/4 Puppy + 3/4 Adult';
+}
+
 // ─── Food type classification ───
 
-export function isPuppyFood(dog: Dog): boolean {
-	const t = (dog.foodType ?? '').trim().toLowerCase();
-	if (t === 'puppy') return true;
-	if (t === '' || t === 'normal') {
-		const dob = toDate(dog.dateOfBirth ?? null);
-		if (dob) return ageInMonths(dob, new Date()) < 12;
-	}
-	return false;
+export function isPuppyFood(dog: Dog, day: Date = new Date()): boolean {
+	const kind = adultFoodStage(dog, day)?.kind;
+	return kind === 'puppy' || kind === 'suggested';
 }
 
 export function isOwnFood(dog: Dog): boolean {
@@ -162,26 +223,30 @@ export function isNormalFood(dog: Dog): boolean {
 	return t === 'normal' || t === '';
 }
 
-export function foodTypeTone(dog: Dog): 'own' | 'puppy' | 'normal' | 'special' {
+export function foodTypeTone(dog: Dog, day: Date = new Date()): 'own' | 'puppy' | 'normal' | 'special' {
 	if (isOwnFood(dog)) return 'own';
-	if (isPuppyFood(dog)) return 'puppy';
+	if (isPuppyFood(dog, day) || adultFoodStage(dog, day)?.kind === 'mixing') return 'puppy';
 	if (isNormalFood(dog)) return 'normal';
 	return 'special';
 }
 
-export function foodTypeInstruction(dog: Dog): string {
+export function foodTypeInstruction(dog: Dog, day: Date = new Date()): string {
 	if (isOwnFood(dog)) {
 		if (dog.transitionToHills === true) return 'Own Food -> Transition to Hills';
 		if (dog.transitionToHills === false) return 'Own Food (No Hills Transition)';
 		return 'Own Food';
 	}
-	if (isPuppyFood(dog)) return 'Puppy Food';
+	const stage = adultFoodStage(dog, day);
+	if (stage?.kind === 'mixing') return `${adultTransitionMixLabel(stage.adultShare)} (day ${stage.day}/7)`;
+	if (isPuppyFood(dog, day)) return 'Puppy Food';
 	if (isNormalFood(dog)) return 'Normal Food';
 	return dog.foodType?.trim() || 'Unknown Food';
 }
 
-export function foodTypeLabel(dog: Dog): string {
+export function foodTypeLabel(dog: Dog, day: Date = new Date()): string {
 	if (isOwnFood(dog)) return 'Own Food';
+	const stage = adultFoodStage(dog, day);
+	if (stage?.kind === 'mixing') return `Puppy→Adult ${Math.round(stage.adultShare * 100)}%`;
 	return dog.foodType?.trim() || 'Unknown';
 }
 
@@ -190,7 +255,12 @@ const abnormalTypes = new Set([1, 2, 5, 6, 7]);
 export function foodAmountLabel(dog: Dog) {
 	const value = dog.foodAmount?.trim();
 	if (value) return value;
-	const estimated = estimateFoodAmountPerMeal({ weightLbs: dog.weightLbs, dateOfBirth: dog.dateOfBirth, foodType: dog.foodType });
+	const estimated = estimateFoodAmountPerMeal({
+		weightLbs: dog.weightLbs,
+		dateOfBirth: dog.dateOfBirth,
+		foodType: dog.foodType,
+		adultFoodTransitionStart: dog.adultFoodTransitionStart
+	});
 	return estimated || '—';
 }
 
@@ -227,6 +297,10 @@ export function specialFeedingReasons(dog: Dog, meal?: MealTime, day: Date = new
 	if (isOwnFood(dog)) reasons.push('Own Food');
 	if (dog.hasOwnFood && dog.transitionToHills === true) reasons.push('→ Transition to Hills');
 	if (dog.hasOwnFood && dog.transitionToHills === false) reasons.push('No Hills Transition');
+	if (!isOwnFood(dog)) {
+		const stage = adultFoodStage(dog, day);
+		if (stage?.kind === 'mixing') reasons.push(`Puppy → adult food, day ${stage.day}/7`);
+	}
 	if (dog.foodType === 'No Fish') reasons.push('No Fish');
 	if (dog.foodType === 'No Chicken') reasons.push('No Chicken');
 	if (dog.satinBalls) reasons.push('Satin Balls');

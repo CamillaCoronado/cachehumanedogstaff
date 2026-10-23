@@ -144,7 +144,8 @@
 	$: suggestedFoodAmount = estimateFoodAmountPerMeal({
 		weightLbs: value.weightLbs,
 		dateOfBirth: value.dateOfBirth,
-		foodType: value.foodType
+		foodType: value.foodType,
+		adultFoodTransitionStart: value.adultFoodTransitionStart
 	});
 
 	function handleDateChange(field: keyof Dog, dateValue: string) {
@@ -404,12 +405,14 @@
 		const nextSuggestion = estimateFoodAmountPerMeal({
 			weightLbs: next.weightLbs,
 			dateOfBirth: next.dateOfBirth,
-			foodType: next.foodType
+			foodType: next.foodType,
+			adultFoodTransitionStart: next.adultFoodTransitionStart
 		});
 		const previousSuggestion = estimateFoodAmountPerMeal({
 			weightLbs: previous.weightLbs,
 			dateOfBirth: previous.dateOfBirth,
-			foodType: previous.foodType
+			foodType: previous.foodType,
+			adultFoodTransitionStart: previous.adultFoodTransitionStart
 		});
 		const currentFoodAmount = (next.foodAmount ?? '').trim();
 		const shouldAutofill =
