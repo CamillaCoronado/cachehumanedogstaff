@@ -946,6 +946,12 @@
 							<dd>Yes</dd>
 						</div>
 					{/if}
+					{#if dog.goodWithDogs === 'selective'}
+						<div>
+							<dt>Dog selective</dt>
+							<dd>Yes · solo playtime only, no playgroups</dd>
+						</div>
+					{/if}
 					<div>
 						<dt>Treatments</dt>
 						<dd>{treatmentSummary.length ? treatmentSummary.join(', ') : 'None'}</dd>

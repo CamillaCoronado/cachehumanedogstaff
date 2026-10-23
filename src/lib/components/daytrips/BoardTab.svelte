@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Dog } from '$lib/types';
 	import type { DayTripEligibility } from '$lib/utils/dates';
-	import { daysSince, dogStripeColor, dogColorReason, isUnderageForDayTrips, tripColorReasonLabel } from '$lib/utils/dates';
+	import { daysSince, dogStripeColor, dogColorReasonLabel, isUnderageForDayTrips } from '$lib/utils/dates';
 	import { getDayTripGapDays, DAYTRIP_OVERDUE_DAYS } from '$lib/utils/attention';
 
 	export let dogsOut: Dog[] = [];
@@ -12,12 +12,30 @@
 	export let toggleOut: (dog: Dog) => Promise<void>;
 	export let toggleAwaitingEval: (dog: Dog) => Promise<void>;
 	export let togglePuppyOverride: (dog: Dog) => Promise<void>;
+	export let setTripBlocked: (dog: Dog, reason: string | null) => Promise<void>;
 
 	const now = new Date();
 
 	let boardColorFilter: 'green' | 'yellow' | null = null;
 	let openEval: Record<string, boolean> = {};
 	const toggleEvalMenu = (id: string) => (openEval = { ...openEval, [id]: !openEval[id] });
+
+	// Blocked by hand ("No Day Trips" on the dog form) — the board can undo exactly this.
+	const isHandBlocked = (dog: Dog) =>
+		dog.dayTripStatus === 'ineligible' && dog.isolationStatus === 'none' && dog.handlingLevel !== 'manager_only';
+	// Dog id → reason being typed for "Mark not eligible".
+	let blockDraft: Record<string, string> = {};
+	const startBlock = (id: string) => (blockDraft = { ...blockDraft, [id]: '' });
+	function cancelBlock(id: string) {
+		const { [id]: _drop, ...rest } = blockDraft;
+		blockDraft = rest;
+	}
+	async function saveBlock(dog: Dog) {
+		const reason = blockDraft[dog.id]?.trim();
+		if (!reason) return;
+		cancelBlock(dog.id);
+		await setTripBlocked(dog, reason);
+	}
 </script>
 
 			<div class="cal-filters">
@@ -74,8 +92,8 @@
 								<p class="cal-event-count">{allTime} trip{allTime !== 1 ? 's' : ''} total</p>
 								{#if eligibility.reasons.length > 0}
 									<p class="cal-event-warning">{eligibility.reasons[0]}</p>
-								{:else if dogColorReason(dog)}
-									<p class="cal-event-meta">{tripColorReasonLabel(dogColorReason(dog))}</p>
+								{:else if dogColorReasonLabel(dog)}
+									<p class="cal-event-meta">{dogColorReasonLabel(dog)}</p>
 								{/if}
 								<div class="cal-event-actions">
 									<button class="cal-btn cal-btn-green" on:click={() => toggleOut(dog)}>Send Out</button>
@@ -86,6 +104,19 @@
 										<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
 											{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
 										</button>
+										{#if isHandBlocked(dog)}
+											<button class="cal-eval cal-eval-on" on:click={() => setTripBlocked(dog, null)}>Make eligible again</button>
+										{:else if blockDraft[dog.id] !== undefined}
+											<form class="cal-block-form" on:submit|preventDefault={() => saveBlock(dog)}>
+												<input class="cal-block-input" bind:value={blockDraft[dog.id]} placeholder="Why not eligible?" aria-label="Reason not eligible" />
+												<div class="cal-block-actions">
+													<button type="button" class="cal-eval" on:click={() => cancelBlock(dog.id)}>Cancel</button>
+													<button type="submit" class="cal-eval cal-eval-on" disabled={!blockDraft[dog.id]?.trim()}>Save</button>
+												</div>
+											</form>
+										{:else}
+											<button class="cal-eval" on:click={() => startBlock(dog.id)}>Mark not eligible</button>
+										{/if}
 										{#if isUnderageForDayTrips(dog)}
 											<button class="cal-eval" class:cal-eval-on={dog.dayTripPuppyOverride} on:click={() => togglePuppyOverride(dog)}>
 												{dog.dayTripPuppyOverride ? 'Remove early day-trip access' : 'Allow day trips (under 30d)'}
@@ -113,7 +144,7 @@
 							<div class="cal-event" class:cal-event-red={stripe === 'red'} class:cal-event-orange={stripe === 'yellow'} class:cal-event-green={stripe === 'green'}>
 								<p class="cal-event-name"><a class="dog-name-link" href="/dogs/{dog.id}">{dog.name}</a></p>
 								<div class="cal-event-actions">
-									<p class="cal-event-meta cal-event-meta-grow">{eligibility.reasons[0] ?? tripColorReasonLabel(dogColorReason(dog)) ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
+									<p class="cal-event-meta cal-event-meta-grow">{eligibility.reasons[0] ?? dogColorReasonLabel(dog) ?? `Kennel ${dog.outdoorKennelAssignment || '—'}`}</p>
 									<button class="cal-caret" class:cal-caret-open={openEval[dog.id]} on:click={() => toggleEvalMenu(dog.id)} aria-label="More options" aria-expanded={Boolean(openEval[dog.id])}>⌄</button>
 								</div>
 								{#if openEval[dog.id]}
@@ -121,6 +152,19 @@
 										<button class="cal-eval" class:cal-eval-on={dog.awaitingEvaluation} on:click={() => toggleAwaitingEval(dog)}>
 											{dog.awaitingEvaluation ? 'Clear awaiting eval' : 'Mark awaiting eval'}
 										</button>
+										{#if isHandBlocked(dog)}
+											<button class="cal-eval cal-eval-on" on:click={() => setTripBlocked(dog, null)}>Make eligible again</button>
+										{:else if blockDraft[dog.id] !== undefined}
+											<form class="cal-block-form" on:submit|preventDefault={() => saveBlock(dog)}>
+												<input class="cal-block-input" bind:value={blockDraft[dog.id]} placeholder="Why not eligible?" aria-label="Reason not eligible" />
+												<div class="cal-block-actions">
+													<button type="button" class="cal-eval" on:click={() => cancelBlock(dog.id)}>Cancel</button>
+													<button type="submit" class="cal-eval cal-eval-on" disabled={!blockDraft[dog.id]?.trim()}>Save</button>
+												</div>
+											</form>
+										{:else}
+											<button class="cal-eval" on:click={() => startBlock(dog.id)}>Mark not eligible</button>
+										{/if}
 										{#if isUnderageForDayTrips(dog)}
 											<button class="cal-eval" class:cal-eval-on={dog.dayTripPuppyOverride} on:click={() => togglePuppyOverride(dog)}>
 												{dog.dayTripPuppyOverride ? 'Remove early day-trip access' : 'Allow day trips (under 30d)'}
@@ -464,6 +508,27 @@
 		align-items: flex-start;
 		gap: 0.3rem;
 	}
+
+	.cal-eval:disabled { opacity: 0.5; cursor: default; }
+
+	.cal-block-form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		width: 100%;
+		margin-top: 0.4rem;
+	}
+
+	.cal-block-input {
+		width: 100%;
+		padding: 0.3rem 0.45rem;
+		border: 1px solid #dadce0;
+		border-radius: 4px;
+		font: inherit;
+		font-size: 0.75rem;
+	}
+
+	.cal-block-actions { display: flex; gap: 0.3rem; }
 
 
 

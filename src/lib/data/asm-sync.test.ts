@@ -170,6 +170,36 @@ describe('permanent foster', () => {
 	});
 });
 
+describe('selective with dogs', () => {
+	it("reads ASM's Selective (3) as selective", async () => {
+		const { env, store } = fakeEnv(
+			{},
+			{ animals: [stayer, { ID: 4, ANIMALNAME: 'Picky', SPECIESNAME: 'Dog', SHELTERCODE: 'A4', ISGOODWITHDOGS: 3 }] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('4')?.goodWithDogs).toBe('selective');
+	});
+
+	it('an ASM unknown keeps a selective set in the app, but a yes/no from ASM wins', async () => {
+		const { env, store } = fakeEnv(
+			{
+				'5': { name: 'Kept', status: 'active', asmId: 5, asmShelterCode: 'A5', goodWithDogs: 'selective' },
+				'6': { name: 'Over', status: 'active', asmId: 6, asmShelterCode: 'A6', goodWithDogs: 'selective' }
+			},
+			{
+				animals: [
+					stayer,
+					{ ID: 5, ANIMALNAME: 'Kept', SPECIESNAME: 'Dog', SHELTERCODE: 'A5', ISGOODWITHDOGS: 2 },
+					{ ID: 6, ANIMALNAME: 'Over', SPECIESNAME: 'Dog', SHELTERCODE: 'A6', ISGOODWITHDOGS: 1 }
+				]
+			}
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('5')?.goodWithDogs).toBe('selective');
+		expect(store.get('6')?.goodWithDogs).toBe('no');
+	});
+});
+
 describe('adoption holds', () => {
 	it('copies ASM holds and clears ones ASM dropped or that have run out', async () => {
 		const { env, store } = fakeEnv(

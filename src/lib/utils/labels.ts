@@ -37,6 +37,7 @@ export function isAssumedFriendly(dog: Pick<Dog, 'dateOfBirth'>, today = new Dat
 export function compatibilityLabel(value: Compatibility | null | undefined, assumeFriendly = false): string {
 	if (value === 'yes') return 'Yes';
 	if (value === 'no') return 'No';
+	if (value === 'selective') return 'Selective';
 	return assumeFriendly ? 'Yes*' : 'Not tested';
 }
 

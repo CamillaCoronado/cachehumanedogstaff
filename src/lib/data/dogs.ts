@@ -67,13 +67,13 @@ interface StoredDog {
 	warningNotes?: string;
 	holdNotes?: string;
 	pottyTrained?: 'yes' | 'no' | 'working_on_it' | 'unknown';
-	goodWithDogs?: 'yes' | 'no' | 'unknown';
-	goodWithCats?: 'yes' | 'no' | 'unknown';
-	goodWithKids?: 'yes' | 'no' | 'unknown';
-	goodWithElderly?: 'yes' | 'no' | 'unknown';
-	goodOnLead?: 'yes' | 'no' | 'unknown';
-	goodTraveller?: 'yes' | 'no' | 'unknown';
-	crateTrained?: 'yes' | 'no' | 'unknown';
+	goodWithDogs?: 'yes' | 'no' | 'unknown' | 'selective';
+	goodWithCats?: 'yes' | 'no' | 'unknown' | 'selective';
+	goodWithKids?: 'yes' | 'no' | 'unknown' | 'selective';
+	goodWithElderly?: 'yes' | 'no' | 'unknown' | 'selective';
+	goodOnLead?: 'yes' | 'no' | 'unknown' | 'selective';
+	goodTraveller?: 'yes' | 'no' | 'unknown' | 'selective';
+	crateTrained?: 'yes' | 'no' | 'unknown' | 'selective';
 	idealHome?: string;
 	energyLevel?: 'low' | 'medium' | 'high' | 'very_high' | 'unknown';
 	playStyles?: string[];
@@ -126,6 +126,7 @@ interface StoredDog {
 	dayTripManagerOnlyReason?: DayTripIneligibleReason | null;
 	manualTripColor?: 'green' | 'yellow' | 'red' | null;
 	manualTripColorReason?: TripColorReason | null;
+	manualTripColorNote?: string | null;
 	lastSheetColor?: 'green' | 'yellow' | 'red' | null;
 	dayTripPuppyOverride?: boolean;
 	dayTripNotes: string | null;
@@ -478,6 +479,7 @@ function serializeDog(dog: Dog): StoredDog {
 			dog.handlingLevel === 'manager_only' ? (dog.dayTripManagerOnlyReason ?? 'other') : null,
 		manualTripColor: dog.manualTripColor ?? null,
 		manualTripColorReason: dog.manualTripColorReason ?? null,
+		manualTripColorNote: dog.manualTripColorNote ?? null,
 		lastSheetColor: dog.lastSheetColor ?? null,
 		dayTripPuppyOverride: dog.dayTripPuppyOverride ?? false,
 		dayTripNotes: dog.dayTripNotes,
@@ -693,6 +695,7 @@ function deserializeDog(stored: StoredDog): Dog {
 		manualTripColorReason: (['behavior', 'medical', 'isolation', 'sick', 'awaiting_eval', 'manager_only', 'staff_only', 'difficult', 'other'].includes(stored.manualTripColorReason ?? '')
 			? (stored.manualTripColorReason as TripColorReason)
 			: null),
+		manualTripColorNote: stored.manualTripColorNote?.trim() || null,
 		lastSheetColor: (['green', 'yellow', 'red'].includes(stored.lastSheetColor ?? '')
 			? (stored.lastSheetColor as 'green' | 'yellow' | 'red')
 			: null),
@@ -1854,12 +1857,16 @@ export async function deleteBathLog(dogId: string, logId: string) {
 export async function setDogManualTripColor(
 	dogId: string,
 	color: 'green' | 'yellow' | 'red' | null,
-	reason: TripColorReason | null = null
+	reason: TripColorReason | null = null,
+	note: string | null = null
 ): Promise<void> {
 	// A reason only applies to a restricting color (red/yellow); green/unset clears it.
+	// The typed note only goes with Other.
+	const restricting = color === 'red' || color === 'yellow';
 	await updateDog(dogId, {
 		manualTripColor: color,
-		manualTripColorReason: color === 'red' || color === 'yellow' ? reason : null
+		manualTripColorReason: restricting ? reason : null,
+		manualTripColorNote: restricting && reason === 'other' ? note?.trim() || null : null
 	});
 }
 
@@ -1918,6 +1925,18 @@ export async function setDogTripStatus(dogId: string, isOut: boolean): Promise<v
 export async function setDogAwaitingEvaluation(dogId: string, awaiting: boolean): Promise<void> {
 	// evaluationAutoCleared marks it manually managed so the sheet-colour sync won't undo it.
 	const fields = { awaitingEvaluation: awaiting, evaluationAutoCleared: true };
+	if (await mergeDogFields(dogId, fields)) return;
+	await updateDog(dogId, fields);
+}
+
+/**
+ * Board toggle: take a dog off day trips with a reason (the dog form's "No Day Trips"), or
+ * pass null to make it eligible again. Doesn't touch awaiting evaluation or the color.
+ */
+export async function setDogDayTripBlocked(dogId: string, reason: string | null): Promise<void> {
+	const fields = reason
+		? { dayTripStatus: 'ineligible' as const, dayTripIneligibleReason: 'other' as const, dayTripNotes: reason.trim() }
+		: { dayTripStatus: 'eligible' as const, dayTripIneligibleReason: null, dayTripNotes: null };
 	if (await mergeDogFields(dogId, fields)) return;
 	await updateDog(dogId, fields);
 }
