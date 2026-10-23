@@ -17,6 +17,7 @@ import type {
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
+import { importedTripId } from '$lib/utils/hiddenNoteTrips';
 import { clockStart } from '$lib/utils/attention';
 import { db } from '$lib/firebase/config';
 import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, waitForPendingWrites, where, writeBatch } from 'firebase/firestore';
@@ -1961,12 +1962,7 @@ function defaultTripEndTime(date: Date): Date {
 	return result;
 }
 
-// Deterministic id for a trip imported from notes/spreadsheet, keyed on the trip day.
-// Re-importing the same day overwrites the same row instead of creating a duplicate,
-// so concurrent imports across devices can never double up.
-export function importedTripId(date: Date): string {
-	return `imp-${toDateString(date)?.slice(0, 10) ?? 'unknown'}`;
-}
+export { importedTripId };
 
 export interface ManualTripData {
 	logId?: string;
