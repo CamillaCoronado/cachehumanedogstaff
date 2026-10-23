@@ -1,8 +1,8 @@
 <script lang="ts">
 	import toast from 'svelte-french-toast';
 	import { format, startOfDay } from 'date-fns';
-	import { addFeedingLog, setDogTripStatus, listAllDayTripLogs, listAllFeedingLogsForToday, updateDog } from '$lib/data/dogs';
-	import { ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
+	import { addFeedingLog, setDogTripStatus, listAllFeedingLogsForToday, updateDog } from '$lib/data/dogs';
+	import { dogs as dogsStore, dogsLoaded, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import { canEditDogs } from '$lib/utils/permissions';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
@@ -20,7 +20,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { syncVersion } from '$lib/stores/sync';
-	import type { DayTripLog, Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
+	import type { Dog, FeedingLog, MealTime, PlaygroupSession } from '$lib/types';
 
 	type TodayActionId = 'feeding' | 'cleaning' | 'movement' | 'slack';
 	type ActionBusyMap = Record<TodayActionId, boolean>;
@@ -62,7 +62,12 @@
 	let weatherIcon = '';
 	let weatherTemp = '';
 
+	// Each part of the board draws as its own data lands, so one slow read on the
+	// shelter's signal (ASM, say) no longer holds every card on a skeleton.
 	let loading = true;
+	let playgroupsLoading = true;
+	let adoptionsLoading = true;
+	let feedingLoading = true;
 	let errorMessage = '';
 	// PM shift starts at 1:30pm
 	const _now = new Date();
@@ -208,6 +213,8 @@
 	// ResizeObserver in masonryItem alone wouldn't catch that.
 	$: {
 		loading;
+		playgroupsLoading;
+		adoptionsLoading;
 		dogsOut.length;
 		managerOnlyDogs.length;
 		isolationDogs.length;
@@ -220,7 +227,7 @@
 	}
 
 	let playgroupSessions: PlaygroupSession[] = [];
-	let dayTripLogs: DayTripLog[] = [];
+	let recentAsmAdoptions: AsmRecentAdoption[] = [];
 	let feedingLogsByDog: Record<string, FeedingLog[]> = {};
 	let completedTaskIds = new Set<string>();
 	let todayItems: TodayAction[] = [];
@@ -410,7 +417,7 @@
 					{ id: 'movement', label: 'Bring Dogs In @ 4:15', done: movementDone },
 					{ id: 'slack', label: 'Slack Update (PM)', done: slackDone }
 				];
-	$: attentionItems = buildAttentionItems(playgroupSessions, dayTripLogs);
+	$: attentionItems = buildAttentionItems(playgroupSessions, activeDogs);
 
 
 	function hasFeedingLogForShift(dogId: string, mealTime: MealTime) {
@@ -544,10 +551,10 @@
 
 	// The same rules the dog cards use (dogAttention), for every dog at the shelter;
 	// incoming dogs are left out there.
-	function buildAttentionItems(sessions: PlaygroupSession[], _tripLogs: DayTripLog[]): AttentionItem[] {
+	function buildAttentionItems(sessions: PlaygroupSession[], dogs: Dog[]): AttentionItem[] {
 		const lastPlaygroup = buildLastPlaygroupMap(sessions);
 		const items: AttentionItem[] = [];
-		for (const dog of activeDogs) {
+		for (const dog of dogs) {
 			const flags = dogAttention(dog, { today, lastPlaygroupDate: lastPlaygroup[dog.id] ?? null });
 			if (flags.length === 0) continue;
 			items.push({
@@ -659,6 +666,12 @@
 
 	async function handleTodayAction(actionId: TodayActionId) {
 		if (actionPending(actionId)) return;
+		// Marking feeding done logs every dog not yet fed, so it must not run on a
+		// half-loaded list of today's feedings and double-log dogs.
+		if (actionId === 'feeding' && feedingLoading) {
+			toast("Still loading today's feedings, try again in a moment.");
+			return;
+		}
 		setActionBusy(actionId, true);
 		errorMessage = '';
 		try {
@@ -698,57 +711,74 @@
 
 	$: if ($syncVersion > 0) void loadBoard();
 
+	// Dogs come from the live store, so the board follows every change to them
+	// (this device, another, or the ASM sync) without a reload.
+	$: boardDogs = $dogsLoaded ? $dogsStore : [];
+	$: recentAsmMatchedDogIds = (() => {
+		const lookup = buildAsmDogLookup(boardDogs);
+		return new Set(
+			recentAsmAdoptions
+				.map((adoption) => lookup.get(adoption.animalId)?.id)
+				.filter((dogId): dogId is string => Boolean(dogId))
+		);
+	})();
+	$: allActiveDogs = boardDogs
+		.filter(
+			(dog) =>
+				dog.status === 'active' &&
+				!dog.permanentFoster &&
+				!recentAsmMatchedDogIds.has(dog.id)
+		)
+		.sort((a, b) => a.name.localeCompare(b.name));
+	$: activeDogs = allActiveDogs.filter((dog) => !dog.inFoster);
+	$: recentlyAdopted = buildRecentlyAdoptedItems(boardDogs, recentAsmAdoptions);
+	// Movements need the FULL list (including archived dogs).
+	$: movementDogs = boardDogs;
+
 	async function loadBoard(forceDogs = true) {
-		loading = true;
 		errorMessage = '';
 		failedThumbs = new Set();
-		try {
-			// Dogs flow through the shared store: the initial load reuses its cache,
-			// sync- and mutation-triggered reloads force-fetch (as before).
-			const [dogs, tripLogs, feedingByDog, pgSessions, recentAsmAdoptions] = await Promise.all([
-				forceDogs ? refreshDogs() : ensureDogsLoaded(),
-				listAllDayTripLogs(),
-				listAllFeedingLogsForToday(),
-				listPlaygroupSessions(),
-				fetchRecentAsmAdoptions()
-			]);
-			const recentAsmDogLookup = buildAsmDogLookup(dogs);
-			const recentAsmMatchedDogIds = new Set(
-				recentAsmAdoptions
-					.map((adoption) => recentAsmDogLookup.get(adoption.animalId)?.id)
-					.filter((dogId): dogId is string => Boolean(dogId))
-			);
-			const allActive = dogs
-				.filter(
-					(dog) =>
-						dog.status === 'active' &&
-						!dog.permanentFoster &&
-						!recentAsmMatchedDogIds.has(dog.id)
-				)
-				.sort((a, b) => a.name.localeCompare(b.name));
-			const active = allActive.filter((dog) => !dog.inFoster);
-			recentlyAdopted = buildRecentlyAdoptedItems(dogs, recentAsmAdoptions);
-			// Temporary diagnostic: log each recently-adopted card's photo state.
-			for (const item of recentlyAdopted) {
-				logPhotoRender('dashboard-recently-adopted', item.id, item.name, item.photoUrl);
-			}
-			void reconcileAsmAdoptions(dogs, recentAsmAdoptions);
+		// Dogs flow through the shared store: the initial load reuses its cache,
+		// sync- and mutation-triggered reloads ask it to catch up.
+		const dogsReady = (forceDogs ? refreshDogs() : ensureDogsLoaded()).finally(() => {
+			loading = false;
+		});
+		const adoptionsReady = fetchRecentAsmAdoptions().then((adoptions) => {
+			recentAsmAdoptions = adoptions;
+			adoptionsLoading = false;
+			return adoptions;
+		});
+		const results = await Promise.allSettled([
+			dogsReady,
+			listAllFeedingLogsForToday().then((byDog) => {
+				feedingLogsByDog = byDog;
+				feedingLoading = false;
+			}),
+			listPlaygroupSessions()
+				.then((sessions) => {
+					playgroupSessions = sessions;
+				})
+				.finally(() => {
+					playgroupsLoading = false;
+				}),
+			adoptionsReady
+		]);
 
-			allActiveDogs = allActive;
-			activeDogs = active;
-			// Movements need the FULL list (including archived dogs).
-			movementDogs = dogs;
-			dayTripLogs = tripLogs;
-			feedingLogsByDog = feedingByDog;
-			playgroupSessions = pgSessions;
-		} catch (error) {
+		const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+		if (failed) {
+			const error = failed.reason;
 			console.error(error);
 			const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
 			errorMessage = code
 				? `Unable to load live dashboard data (${code}).`
 				: 'Unable to load live dashboard data.';
-		} finally {
-			loading = false;
+		}
+		if (results[0].status === 'fulfilled') {
+			// Temporary diagnostic: log each recently-adopted card's photo state.
+			for (const item of recentlyAdopted) {
+				logPhotoRender('dashboard-recently-adopted', item.id, item.name, item.photoUrl);
+			}
+			void reconcileAsmAdoptions(results[0].value, recentAsmAdoptions);
 		}
 	}
 </script>
@@ -1004,13 +1034,13 @@
 		</div>
 	</section>
 
-	<section class="planner-list planner-list-amber planner-list-attention" class:planner-list-empty={!loading && attentionItems.length === 0} data-masonry-empty={!loading && attentionItems.length === 0} data-masonry-attention="true" use:masonryItem>
+	<section class="planner-list planner-list-amber planner-list-attention" class:planner-list-empty={!(loading || playgroupsLoading) && attentionItems.length === 0} data-masonry-empty={!(loading || playgroupsLoading) && attentionItems.length === 0} data-masonry-attention="true" use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Needs Attention</h2>
 				<span class="planner-pill planner-pill-amber">{attentionItems.length}</span>
 			</div>
 			<div class="planner-items">
-				{#if loading}
+				{#if loading || playgroupsLoading}
 					<p class="planner-empty-row">Loading...</p>
 				{:else if attentionItems.length === 0}
 					<p class="planner-empty-row">All caught up!</p>
@@ -1087,13 +1117,13 @@
 			</div>
 		</section>
 
-		<section class="planner-list planner-list-sage" class:planner-list-empty={!loading && recentlyAdopted.length === 0} data-masonry-empty={!loading && recentlyAdopted.length === 0} use:masonryItem>
+		<section class="planner-list planner-list-sage" class:planner-list-empty={!(loading || adoptionsLoading) && recentlyAdopted.length === 0} data-masonry-empty={!(loading || adoptionsLoading) && recentlyAdopted.length === 0} use:masonryItem>
 			<div class="planner-list-head">
 				<h2>Recently Adopted</h2>
 				<span class="planner-pill planner-pill-sage">{recentlyAdopted.length}</span>
 			</div>
 			<div class="planner-items">
-				{#if loading}
+				{#if loading || adoptionsLoading}
 					<p class="planner-empty-row">Loading...</p>
 				{:else if recentlyAdopted.length === 0}
 					<p class="planner-empty-row">No recent adoptions.</p>
