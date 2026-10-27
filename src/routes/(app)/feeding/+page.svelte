@@ -777,7 +777,7 @@
 										</p>
 										{#if !isOwnFood(dog) && adultFoodStage(dog, selectedDay)?.kind === 'suggested'}
 											<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog)}>
-												11+ mo: start adult food transition?
+												10+ mo: start adult food transition?
 											</button>
 										{/if}
 										{#if flags.length > 0}

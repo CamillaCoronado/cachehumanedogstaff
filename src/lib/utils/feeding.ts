@@ -155,7 +155,7 @@ function fractionToLabel(value: number) {
 
 // Daily adult share for the standard 7-day switch; day 7 on is all adult food.
 const ADULT_TRANSITION_SCHEDULE = [0.25, 0.25, 0.5, 0.5, 0.75, 0.75];
-const ADULT_TRANSITION_SUGGEST_MONTHS = 11;
+const ADULT_TRANSITION_SUGGEST_MONTHS = 10;
 // Normal-food dogs past this age with no transition on record already went
 // adult under the old automatic 12-month switch; don't re-suggest for them.
 const ADULT_TRANSITION_SUGGEST_UNTIL_MONTHS = 13;
@@ -167,7 +167,7 @@ export type AdultFoodStage =
 	| { kind: 'adult' };
 
 /**
- * Where a dog is in moving from puppy to adult food. From 11 months the app
+ * Where a dog is in moving from puppy to adult food. From 10 months the app
  * only suggests the transition; it starts when staff accept it (stamping
  * adultFoodTransitionStart). Null for special diets (No Fish etc.).
  */

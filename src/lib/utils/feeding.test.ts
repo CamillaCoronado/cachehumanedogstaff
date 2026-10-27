@@ -245,8 +245,9 @@ describe('puppy → adult food transition', () => {
 	const now = new Date(2026, 9, 23, 12);
 	const monthsAgo = (m: number) => new Date(2026, 9 - m, 1);
 
-	it('stays puppy under 11 months and suggests from 11 without switching', () => {
-		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(10) }, now)).toEqual({ kind: 'puppy' });
+	it('stays puppy under 10 months and suggests from 10 without switching', () => {
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(9) }, now)).toEqual({ kind: 'puppy' });
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(10) }, now)).toEqual({ kind: 'suggested' });
 		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(11) }, now)).toEqual({ kind: 'suggested' });
 		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(12) }, now)).toEqual({ kind: 'suggested' });
 		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(20) }, now)).toEqual({ kind: 'suggested' });
