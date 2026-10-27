@@ -8,6 +8,8 @@
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import {
+		adultFoodStage,
+		isOwnFood,
 		foodTypeTone,
 		foodTypeInstruction,
 		foodTypeLabel,
@@ -228,6 +230,21 @@
 			toast.error(`Could not update ${dog.name}'s feeding info.`);
 		} finally {
 			savingFeed = false;
+		}
+	}
+
+	async function startAdultTransition(dog: Dog) {
+		const now = new Date();
+		const updates = {
+			adultFoodTransitionStart: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12),
+			foodType: 'Normal'
+		};
+		try {
+			await updateDog(dog.id, updates);
+			patchDogInStore(dog.id, updates);
+			toast.success(`${dog.name}: adult food transition started.`);
+		} catch {
+			toast.error(`Could not start ${dog.name}'s transition.`);
 		}
 	}
 
@@ -753,11 +770,16 @@
 												{activeFoodAmountLabel(dog)}
 											</button>
 										</p>
-										<p class={`feeding-feed-type feeding-feed-type-${foodTypeTone(dog)}`}>
+										<p class={`feeding-feed-type feeding-feed-type-${foodTypeTone(dog, selectedDay)}`}>
 											<button class="feed-type-edit-btn" on:click={() => startEditFeed(dog)}>
-												{foodTypeInstruction(dog)}
+												{foodTypeInstruction(dog, selectedDay)}
 											</button>
 										</p>
+										{#if !isOwnFood(dog) && adultFoodStage(dog, selectedDay)?.kind === 'suggested'}
+											<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog)}>
+												10+ mo: start adult food transition?
+											</button>
+										{/if}
 										{#if flags.length > 0}
 											<div class="feeding-feed-tags">
 												{#each flags as flag}
@@ -874,7 +896,7 @@
 												<span class="feeding-run-divider">•</span>
 												<span class="feeding-run-amount">{foodAmountLabel(slotDog)}</span>
 												<span class="feeding-run-divider">•</span>
-												<span class="feeding-run-kind">{foodTypeLabel(slotDog)}</span>
+												<span class="feeding-run-kind">{foodTypeLabel(slotDog, selectedDay)}</span>
 											</p>
 										{/each}
 										{#if slotDogs.length > MAX_DOGS_PER_RUN}
@@ -1927,6 +1949,17 @@
 		border-radius: 0.38rem;
 		background: transparent;
 		color: #526b81;
+		cursor: pointer;
+	}
+
+	.feed-transition-suggest {
+		display: block;
+		margin-top: 0.25rem;
+		padding: 0.15rem 0.45rem;
+		border: 1px dashed currentColor;
+		border-radius: 6px;
+		background: transparent;
+		font-size: 0.75rem;
 		cursor: pointer;
 	}
 

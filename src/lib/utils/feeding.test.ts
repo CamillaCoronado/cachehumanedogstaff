@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Dog, FeedingLog, StoolLog } from '$lib/types';
 import {
+	adultFoodStage,
 	appetiteRiskLabel,
 	estimateFoodAmountPerMeal,
 	feedingFlags,
 	foodAmountLabel,
+	foodTypeInstruction,
 	getAbnormalCount,
 	getFedMap,
 	getFeedingHistoryEntries,
@@ -236,5 +238,46 @@ describe('isFastingMeal', () => {
 	it('treats a missing until-meal as the whole final day', () => {
 		const wholeDay = makeDog({ fastUntilDate: tomorrow });
 		expect(isFastingMeal(wholeDay, tomorrow, 'second')).toBe(true);
+	});
+});
+
+describe('puppy → adult food transition', () => {
+	const now = new Date(2026, 9, 23, 12);
+	const monthsAgo = (m: number) => new Date(2026, 9 - m, 1);
+
+	it('stays puppy under 10 months and suggests from 10 without switching', () => {
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(9) }, now)).toEqual({ kind: 'puppy' });
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(10) }, now)).toEqual({ kind: 'suggested' });
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(11) }, now)).toEqual({ kind: 'suggested' });
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(12) }, now)).toEqual({ kind: 'suggested' });
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(20) }, now)).toEqual({ kind: 'suggested' });
+		// already adult under the old 12-month switch
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(14) }, now)).toEqual({ kind: 'adult' });
+		expect(adultFoodStage({ foodType: 'No Fish', dateOfBirth: monthsAgo(11) }, now)).toBeNull();
+	});
+
+	it('runs the 7-day mix from the accepted day, then adult', () => {
+		const dob = monthsAgo(11);
+		const stageOn = (daysAfter: number) =>
+			adultFoodStage({ foodType: 'Normal', dateOfBirth: dob, adultFoodTransitionStart: new Date(2026, 9, 23 - daysAfter, 12) }, now);
+		expect(stageOn(0)).toEqual({ kind: 'mixing', day: 1, adultShare: 0.25 });
+		expect(stageOn(2)).toEqual({ kind: 'mixing', day: 3, adultShare: 0.5 });
+		expect(stageOn(5)).toEqual({ kind: 'mixing', day: 6, adultShare: 0.75 });
+		expect(stageOn(6)).toEqual({ kind: 'adult' });
+	});
+
+	it('keeps puppy amounts while suggested, blends while mixing, adult after', () => {
+		const dob = monthsAgo(11);
+		// 40 lb: puppy 10-12mo = 1 3/4 c, adult = 1 1/2 c
+		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Normal', dateOfBirth: dob, now })).toBe('1 3/4 c');
+		const start = (daysAgo: number) => new Date(2026, 9, 23 - daysAgo, 12);
+		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Normal', dateOfBirth: dob, adultFoodTransitionStart: start(2), now })).toBe('1 1/2 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Normal', dateOfBirth: dob, adultFoodTransitionStart: start(7), now })).toBe('1 1/2 c');
+	});
+
+	it('tells staff the mix', () => {
+		const dog = makeDog({ dateOfBirth: monthsAgo(11), adultFoodTransitionStart: new Date(2026, 9, 21, 12) });
+		expect(foodTypeInstruction(dog, now)).toBe('1/2 Puppy + 1/2 Adult (day 3/7)');
+		expect(specialFeedingReasons(dog, 'am', now)).toContain('Puppy → adult food, day 3/7');
 	});
 });
