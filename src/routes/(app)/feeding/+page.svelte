@@ -9,6 +9,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import {
 		adultFoodStage,
+		adultFoodTransitionStartFor,
 		isOwnFood,
 		foodTypeTone,
 		foodTypeInstruction,
@@ -233,18 +234,17 @@
 		}
 	}
 
-	async function startAdultTransition(dog: Dog) {
-		const now = new Date();
+	async function startAdultTransition(dog: Dog, mode: 'transition' | 'switch') {
 		const updates = {
-			adultFoodTransitionStart: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12),
+			adultFoodTransitionStart: adultFoodTransitionStartFor(mode),
 			foodType: 'Normal'
 		};
 		try {
 			await updateDog(dog.id, updates);
 			patchDogInStore(dog.id, updates);
-			toast.success(`${dog.name}: adult food transition started.`);
+			toast.success(mode === 'switch' ? `${dog.name}: switched to adult food.` : `${dog.name}: adult food transition started.`);
 		} catch {
-			toast.error(`Could not start ${dog.name}'s transition.`);
+			toast.error(`Could not update ${dog.name}'s food.`);
 		}
 	}
 
@@ -775,9 +775,20 @@
 												{foodTypeInstruction(dog, selectedDay)}
 											</button>
 										</p>
-										{#if !isOwnFood(dog) && adultFoodStage(dog, selectedDay)?.kind === 'suggested'}
-											<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog)}>
-												10+ mo: start adult food transition?
+										{@const adultStage = isOwnFood(dog) ? null : adultFoodStage(dog, selectedDay)}
+										{#if adultStage?.kind === 'suggested'}
+											<p class="feed-transition-label">10+ mo: adult food?</p>
+											<div class="feed-transition-actions">
+												<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog, 'transition')}>
+													Start 7-day transition
+												</button>
+												<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog, 'switch')}>
+													Switch to adult now
+												</button>
+											</div>
+										{:else if adultStage?.kind === 'mixing'}
+											<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog, 'switch')}>
+												Switch to adult now
 											</button>
 										{/if}
 										{#if flags.length > 0}
@@ -1950,6 +1961,17 @@
 		background: transparent;
 		color: #526b81;
 		cursor: pointer;
+	}
+
+	.feed-transition-label {
+		margin: 0.25rem 0 0;
+		font-size: 0.75rem;
+	}
+
+	.feed-transition-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
 	}
 
 	.feed-transition-suggest {

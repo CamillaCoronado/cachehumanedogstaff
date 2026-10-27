@@ -201,6 +201,15 @@ export function adultFoodStage(
 	return { kind: 'adult' };
 }
 
+/**
+ * adultFoodTransitionStart to stamp: today starts the 7-day mix; skipping
+ * straight to adult food backdates it past the end of the mix.
+ */
+export function adultFoodTransitionStartFor(mode: 'transition' | 'switch', now: Date = new Date()): Date {
+	const backDays = mode === 'switch' ? ADULT_TRANSITION_SCHEDULE.length : 0;
+	return new Date(now.getFullYear(), now.getMonth(), now.getDate() - backDays, 12);
+}
+
 function adultTransitionMixLabel(adultShare: number) {
 	if (adultShare <= 0.25) return '3/4 Puppy + 1/4 Adult';
 	if (adultShare <= 0.5) return '1/2 Puppy + 1/2 Adult';
