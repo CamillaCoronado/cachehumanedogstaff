@@ -8,7 +8,9 @@
 	import type { Dog, FeedingLog, StoolLog, MealTime, AmountEaten } from '$lib/types';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import {
+		ALLERGY_OPTIONS,
 		adultFoodStage,
+		adultFoodTransitionStartFor,
 		isOwnFood,
 		foodTypeTone,
 		foodTypeInstruction,
@@ -49,7 +51,7 @@
 	let stoolLogs: Record<string, StoolLog[]> = {};
 	let loading = true;
 	let editingFeedId: string | null = null;
-	let feedDraft: { foodType: string; foodAmount: string; dietaryNotes: string; hasOwnFood: boolean; transitionToHills: boolean | null; satinBalls: boolean; hasSupplements: boolean; hasSecondMeal: boolean; secondMealAmount: string; fasting: boolean; fastUntilDate: string; fastUntilMeal: MealTime; fastReason: string } = { foodType: 'Normal', foodAmount: '', dietaryNotes: '', hasOwnFood: false, transitionToHills: null, satinBalls: false, hasSupplements: false, hasSecondMeal: false, secondMealAmount: '', fasting: false, fastUntilDate: '', fastUntilMeal: 'am', fastReason: '' };
+	let feedDraft: { foodType: string; foodAmount: string; dietaryNotes: string; allergyTypes: string[]; hasOwnFood: boolean; transitionToHills: boolean | null; satinBalls: boolean; hasSupplements: boolean; hasSecondMeal: boolean; secondMealAmount: string; fasting: boolean; fastUntilDate: string; fastUntilMeal: MealTime; fastReason: string } = { foodType: 'Normal', foodAmount: '', dietaryNotes: '', allergyTypes: [], hasOwnFood: false, transitionToHills: null, satinBalls: false, hasSupplements: false, hasSecondMeal: false, secondMealAmount: '', fasting: false, fastUntilDate: '', fastUntilMeal: 'am', fastReason: '' };
 	let savingFeed = false;
 	const _now = new Date();
 	const _day = _now.getDay(); // 0=Sun, 5=Fri, 6=Sat
@@ -179,6 +181,7 @@
 			foodType: dog.foodType || 'Normal',
 			foodAmount: dog.foodAmount ?? '',
 			dietaryNotes: dog.dietaryNotes ?? '',
+			allergyTypes: [...(dog.allergyTypes ?? [])],
 			hasOwnFood: dog.hasOwnFood ?? false,
 			transitionToHills: dog.transitionToHills ?? null,
 			satinBalls: dog.satinBalls ?? false,
@@ -212,6 +215,7 @@
 			foodType: feedDraft.foodType,
 			foodAmount: feedDraft.foodAmount.trim(),
 			dietaryNotes: feedDraft.dietaryNotes.trim(),
+			allergyTypes: feedDraft.allergyTypes,
 			hasOwnFood: feedDraft.hasOwnFood,
 			transitionToHills: feedDraft.transitionToHills,
 			satinBalls: feedDraft.satinBalls,
@@ -233,18 +237,17 @@
 		}
 	}
 
-	async function startAdultTransition(dog: Dog) {
-		const now = new Date();
+	async function startAdultTransition(dog: Dog, mode: 'transition' | 'switch') {
 		const updates = {
-			adultFoodTransitionStart: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12),
+			adultFoodTransitionStart: adultFoodTransitionStartFor(mode),
 			foodType: 'Normal'
 		};
 		try {
 			await updateDog(dog.id, updates);
 			patchDogInStore(dog.id, updates);
-			toast.success(`${dog.name}: adult food transition started.`);
+			toast.success(mode === 'switch' ? `${dog.name}: switched to adult food.` : `${dog.name}: adult food transition started.`);
 		} catch {
-			toast.error(`Could not start ${dog.name}'s transition.`);
+			toast.error(`Could not update ${dog.name}'s food.`);
 		}
 	}
 
@@ -697,6 +700,24 @@
 												<label class="feed-edit-label typewriter" for="feed-notes-{dog.id}">Notes</label>
 												<input id="feed-notes-{dog.id}" class="feed-edit-input" type="text" bind:value={feedDraft.dietaryNotes} placeholder="Dietary notes" />
 											</div>
+											<div class="feed-edit-row feed-edit-allergies">
+												<span class="feed-edit-label typewriter">Allergies</span>
+												<div class="feed-allergy-options">
+													{#each ALLERGY_OPTIONS as allergyType}
+														<label class="feed-edit-check">
+															<input
+																type="checkbox"
+																checked={feedDraft.allergyTypes.some((t) => t.toLowerCase() === allergyType.toLowerCase())}
+																on:change={(e) => {
+																	const rest = feedDraft.allergyTypes.filter((t) => t.toLowerCase() !== allergyType.toLowerCase());
+																	feedDraft.allergyTypes = e.currentTarget.checked ? [...rest, allergyType] : rest;
+																}}
+															/>
+															{allergyType}
+														</label>
+													{/each}
+												</div>
+											</div>
 											<div class="feed-edit-checks">
 												<label class="feed-edit-check">
 													<input type="checkbox" bind:checked={feedDraft.hasOwnFood} />
@@ -775,15 +796,26 @@
 												{foodTypeInstruction(dog, selectedDay)}
 											</button>
 										</p>
-										{#if !isOwnFood(dog) && adultFoodStage(dog, selectedDay)?.kind === 'suggested'}
-											<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog)}>
-												10+ mo: start adult food transition?
+										{@const adultStage = isOwnFood(dog) ? null : adultFoodStage(dog, selectedDay)}
+										{#if adultStage?.kind === 'suggested'}
+											<p class="feed-transition-label">10+ mo: adult food?</p>
+											<div class="feed-transition-actions">
+												<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog, 'transition')}>
+													Start 7-day transition
+												</button>
+												<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog, 'switch')}>
+													Switch to adult now
+												</button>
+											</div>
+										{:else if adultStage?.kind === 'mixing'}
+											<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog, 'switch')}>
+												Switch to adult now
 											</button>
 										{/if}
 										{#if flags.length > 0}
 											<div class="feeding-feed-tags">
 												{#each flags as flag}
-													<span class={`feeding-feed-tag ${flag === 'Allergy' ? 'feeding-feed-tag-allergy' : ''}`}>{flag}</span>
+													<span class={`feeding-feed-tag ${flag.allergy ? 'feeding-feed-tag-allergy' : ''}`}>{flag.label}</span>
 												{/each}
 											</div>
 										{/if}
@@ -1952,6 +1984,17 @@
 		cursor: pointer;
 	}
 
+	.feed-transition-label {
+		margin: 0.25rem 0 0;
+		font-size: 0.75rem;
+	}
+
+	.feed-transition-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+
 	.feed-transition-suggest {
 		display: block;
 		margin-top: 0.25rem;
@@ -2118,6 +2161,16 @@
 		text-transform: uppercase;
 		font-weight: 700;
 		color: var(--marker-black);
+	}
+
+	.feed-edit-allergies {
+		align-items: flex-start;
+	}
+
+	.feed-allergy-options {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.15rem 0.6rem;
 	}
 
 	.feeding-feed-tag-allergy {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Dog, FeedingLog, StoolLog } from '$lib/types';
 import {
 	adultFoodStage,
+	adultFoodTransitionStartFor,
 	appetiteRiskLabel,
 	estimateFoodAmountPerMeal,
 	feedingFlags,
@@ -105,7 +106,11 @@ describe('specialFeedingReasons / feedingFlags', () => {
 		expect(reasons).toContain('Allergy: chicken');
 		expect(reasons).toContain('Own Food');
 		expect(reasons).toContain('Supplements');
-		expect(feedingFlags(dog)).toEqual(['Allergy', 'Supplements']);
+		expect(feedingFlags(dog)).toEqual([
+			{ label: 'Chicken allergy', allergy: true },
+			{ label: 'Supplements', allergy: false }
+		]);
+		expect(feedingFlags(makeDog({ allergyTypes: ['Fish', 'Soy'] })).map((f) => f.label)).toEqual(['Fish allergy', 'Soy allergy']);
 		expect(isSpecialFeeding(dog)).toBe(true);
 		expect(isSpecialFeeding(makeDog())).toBe(false);
 	});
@@ -264,6 +269,12 @@ describe('puppy → adult food transition', () => {
 		expect(stageOn(2)).toEqual({ kind: 'mixing', day: 3, adultShare: 0.5 });
 		expect(stageOn(5)).toEqual({ kind: 'mixing', day: 6, adultShare: 0.75 });
 		expect(stageOn(6)).toEqual({ kind: 'adult' });
+	});
+
+	it('switching straight to adult skips the mix', () => {
+		const dog = { foodType: 'Normal', dateOfBirth: monthsAgo(10) };
+		expect(adultFoodStage({ ...dog, adultFoodTransitionStart: adultFoodTransitionStartFor('switch', now) }, now)).toEqual({ kind: 'adult' });
+		expect(adultFoodStage({ ...dog, adultFoodTransitionStart: adultFoodTransitionStartFor('transition', now) }, now)).toEqual({ kind: 'mixing', day: 1, adultShare: 0.25 });
 	});
 
 	it('keeps puppy amounts while suggested, blends while mixing, adult after', () => {

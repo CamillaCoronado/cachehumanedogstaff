@@ -15,7 +15,7 @@
 		PottyTrainedStatus
 	} from '$lib/types';
 	import { formatDate, toDate } from '$lib/utils/dates';
-	import { estimateFoodAmountPerMeal } from '$lib/utils/feeding';
+	import { ALLERGY_OPTIONS, estimateFoodAmountPerMeal } from '$lib/utils/feeding';
 	import { deleteDogPhotoByUrl, uploadDogPhotoDataUrl } from '$lib/firebase/storage';
 	import { getStorageUploadErrorMessage } from '$lib/firebase/errors';
 	import { logPhotoError, logPhotoLoaded } from '$lib/utils/photoLog';
@@ -179,7 +179,7 @@
 		dispatch('change', { value, valid: true });
 	}
 
-	const allergyOptions = ['Chicken', 'Fish', 'Grains', 'Beef', 'Dairy', 'Soy', 'Other'];
+	const allergyOptions = ALLERGY_OPTIONS;
 
 	function handleAllergyToggle(type: string, checked: boolean) {
 		const current = value.allergyTypes ?? [];

@@ -40,6 +40,7 @@
 		toDate
 	} from '$lib/utils/dates';
 	import { getDayTripGapDays } from '$lib/utils/attention';
+	import { feedingFlags, foodAmountLabel, foodTypeInstruction, secondMealAmountLabel, specialFeedingReasons } from '$lib/utils/feeding';
 	import { tripEligibilityFor } from '$lib/utils/dogAttention';
 	import { shelterTimeLabel, stoolColor, stoolLabel, reentryDatesLabel } from '$lib/utils/labels';
 	import { durationHours as dayTripHours } from '$lib/utils/daytrips';
@@ -844,7 +845,7 @@
 									<summary>Care & Food</summary>
 									<div class="kennel-section-body kennel-facts">
 										<p><span>Handling:</span> <strong class="detail-value">{handlingLevelText}</strong></p>
-										<p><span>Food:</span> <strong class="detail-value">{dog.foodType} ({dog.foodAmount || 'TBD'})</strong></p>
+										<p><span>Food:</span> <strong class="detail-value">{foodTypeInstruction(dog)} ({foodAmountLabel(dog)})</strong></p>
 										<p><span>Own Food:</span> <strong class="detail-value">{dog.hasOwnFood ? 'Yes' : 'No'}</strong></p>
 										{#if dog.hasOwnFood}
 											<p>
@@ -854,10 +855,24 @@
 										{/if}
 										<p>
 											<span>Second Meal:</span>
-											<strong class="detail-value">{dog.hasSecondMeal ? `Yes (${dog.secondMealAmount || 'amount TBD'})` : 'No'}</strong>
+											<strong class="detail-value">{dog.hasSecondMeal ? `Yes (${secondMealAmountLabel(dog)})` : 'No'}</strong>
 										</p>
 										<p><span>Satin Balls:</span> <strong class="detail-value">{dog.satinBalls ? 'Yes' : 'No'}</strong></p>
-										<p><span>Allergies:</span> <strong class="detail-value">{dog.allergyTypes?.length ? dog.allergyTypes.join(', ') : 'None recorded'}</strong></p>
+										<p>
+											<span>Allergies:</span>
+											{#if feedingFlags(dog).some((flag) => flag.allergy)}
+												<span class="food-pills">
+													{#each feedingFlags(dog).filter((flag) => flag.allergy) as flag}
+														<span class="food-pill food-pill-allergy">{flag.label}</span>
+													{/each}
+												</span>
+											{:else}
+												<strong class="detail-value">None recorded</strong>
+											{/if}
+										</p>
+										{#if specialFeedingReasons(dog).filter((r) => !r.startsWith('Allergy')).length > 0}
+											<p><span>Special:</span> <strong class="detail-value">{specialFeedingReasons(dog).filter((r) => !r.startsWith('Allergy')).join(' • ')}</strong></p>
+										{/if}
 										{#if dog.dietaryNotes}
 											<p><span>Dietary Notes:</span> <strong class="detail-note">{dog.dietaryNotes}</strong></p>
 										{/if}
@@ -1867,6 +1882,28 @@
 		display: inline-block;
 		min-width: 6.8rem;
 		color: #5a7189;
+	}
+
+	.kennel-facts .food-pills {
+		min-width: 0;
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 0.26rem;
+	}
+
+	.kennel-facts .food-pill {
+		min-width: 0;
+		display: inline-flex;
+		align-items: center;
+		border-radius: 999px;
+		padding: 0.08rem 0.5rem;
+		font-size: 0.75rem;
+	}
+
+	.kennel-facts .food-pill-allergy {
+		border: 1.5px solid #e8a8a8;
+		background: #fff0f0;
+		color: #8b2020;
 	}
 
 	.detail-value {
