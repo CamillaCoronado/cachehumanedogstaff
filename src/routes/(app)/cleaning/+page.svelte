@@ -3,241 +3,16 @@
 	import { format, startOfDay } from 'date-fns';
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import type { CleaningShift, TaskCompletionMeta } from '$lib/data/cleaning';
+	import { checklistFor } from '$lib/data/cleaningChecklist';
+	import type { StaffRole } from '$lib/data/cleaningChecklist';
 	import { authProfile } from '$lib/stores/auth';
+	import { readJson, writeJson } from '$lib/utils/storage';
 
 	type Shift = CleaningShift;
+	type StaffFilter = 'all' | StaffRole;
 
-	interface Task {
-		id: string;
-		description: string;
-	}
-
-	interface Section {
-		title: string;
-		tasks: Task[];
-		note?: string;
-	}
-
-	const sundayMorningShared: Section = {
-		title: 'Sunday AM — Shared',
-		note: 'Both staff members split these responsibilities evenly so no one is doing more or less than their share.',
-		tasks: [
-			{ id: 'am-shared-take-dogs-out', description: 'Take all dogs outside.' },
-			{
-				id: 'am-shared-feed-breakfast',
-				description:
-					'One person feeds all the dogs their morning breakfast per diet plans; note inappetance, abnormal poops, or anything clinic should be aware of.'
-			},
-			{
-				id: 'am-shared-pickup-inside-runs',
-				description: 'One person picks up all poop, bowls, buckets, bedding, toys, etc. from inside runs.'
-			},
-			{
-				id: 'am-shared-prep-deep-clean',
-				description: 'Both staff begin prep for deep cleaning inside kennels.'
-			},
-			{ id: 'am-shared-soak-harnesses', description: 'Remove all harnesses and soak in a bucket of Accell.' },
-			{ id: 'am-shared-remove-pins', description: 'Remove pins and clips from middle dividers of all runs.' },
-			{ id: 'am-shared-remove-drain-bottoms', description: 'Remove bottoms that cover drains in all runs.' },
-			{
-				id: 'am-shared-move-carts',
-				description: 'Move treat cart, bucket cart, table, collar display, etc. into hallways/outside.'
-			},
-			{
-				id: 'am-shared-fill-mop-buckets',
-				description: 'Fill two mop buckets with Accell and get two scrubbers ready.'
-			},
-			{
-				id: 'am-shared-rinse-before-scrub',
-				description:
-					'Rinse all kennels with water before scrubbing with Accell. Staff decide which side; no one does both.'
-			},
-			{
-				id: 'am-shared-scrub-kennels',
-				description:
-					'Scrub all kennels top to bottom with Accell, including white kennels along wall. Scrub walkways and 3 bricks high on walls.'
-			},
-			{ id: 'am-shared-rinse-after-scrub', description: 'Rinse with water again after scrubbing all kennels.' },
-			{
-				id: 'am-shared-reassemble-kennels',
-				description:
-					'Squeegee as normal and put kennels back together with covers over drains and all pins reclipped. Towel dry all cots.'
-			},
-			{ id: 'am-shared-replace-accell-bin', description: 'Replace the Accell in the poop scooper bin.' },
-			{ id: 'am-shared-hang-harnesses', description: 'Hang soaked harnesses up to dry.' },
-			{
-				id: 'am-shared-setup-inside',
-				description: 'Set up inside kennels with new water buckets, blankets, and toys as needed.'
-			},
-			{ id: 'am-shared-bring-dogs-in', description: 'Bring dogs in.' },
-			{ id: 'am-shared-pickup-breakfast', description: 'Pick up poop and bowls from breakfast.' },
-			{ id: 'am-shared-trash', description: 'Throw trash away.' },
-			{ id: 'am-shared-dishes', description: 'Do dishes.' },
-			{ id: 'am-shared-laundry', description: 'Rotate laundry.' }
-		]
-	};
-
-	const baseMorningSections: Section[] = [
-		{
-			title: 'AM Cleaner Checklist',
-			tasks: [
-				{
-					id: 'am-cleaner-pickup-inside',
-					description: 'Pick up all poop, soiled bedding, buckets, bowls, and toys from inside kennels.'
-				},
-				{
-					id: 'am-cleaner-clean-kennels',
-					description: 'Clean all inside kennels according to current protocol.'
-				},
-				{
-					id: 'am-cleaner-drain-accell',
-					description: 'Clear the drain and refill the Accell bucket.'
-				},
-				{
-					id: 'am-cleaner-sanitize-gear',
-					description: 'Sanitize and hang leashes, collars, and harnesses from the dirty leash bucket.'
-				},
-				{
-					id: 'am-cleaner-wash-dishes',
-					description: 'Wash all dishes collected from inside kennels.'
-				},
-				{ id: 'am-cleaner-slack', description: 'Make a Slack update.' },
-				{ id: 'am-cleaner-playtimes', description: 'Begin playtimes and baths.' }
-			]
-		},
-		{
-			title: 'AM Feeder Checklist',
-			tasks: [
-				{ id: 'am-feeder-feed', description: 'Feed all dogs according to diet plans.' },
-				{
-					id: 'am-feeder-note-clinic',
-					description: "Note dogs that didn't eat, vomited, or had diarrhea. Refer to clinic as needed."
-				},
-				{
-					id: 'am-feeder-water-buckets',
-					description: 'Fill and pass out water buckets to all dogs; clip buckets in outside kennels if possible.'
-				},
-				{
-					id: 'am-feeder-pickup-poop',
-					description: 'Pick up all poop unless clinic needs to assess it, and throw the trash away.'
-				},
-				{
-					id: 'am-feeder-pickup-dishes',
-					description: 'Pick up all dishes from breakfast and wash them.'
-				},
-				{ id: 'am-feeder-laundry', description: 'Turn over the laundry.' },
-				{ id: 'am-feeder-slack', description: 'Make a Slack update.' },
-				{ id: 'am-feeder-playtimes', description: 'Begin playtimes and baths.' }
-			]
-		}
-	];
-
-	const sundayEveningShared: Section = {
-		title: 'Sunday PM — Shared',
-		tasks: [
-			{ id: 'pm-shared-take-dogs-out', description: 'Take all dogs outside.' },
-			{
-				id: 'pm-shared-spot-clean',
-				description:
-					'One person spot cleans inside, refilling/dumping water buckets and replacing bedding as needed. Also pick up any bowls from breakfast brought inside.'
-			},
-			{
-				id: 'pm-shared-feed-dinner',
-				description:
-					'One person feeds all dogs dinner per diet plans; note inappetance, strange poop, or anything clinic should be aware of.'
-			},
-			{
-				id: 'pm-shared-laundry-dishes',
-				description: 'Laundry should be turned over and dishes done at this time; tasks can be split.'
-			},
-			{ id: 'pm-shared-bring-dogs-in', description: 'At ~4:30, bring dogs inside.' },
-			{ id: 'pm-shared-prep-accell', description: 'One person preps an Accell bucket for scrubbing.' },
-			{
-				id: 'pm-shared-pickup-poop-outside',
-				description: 'One person picks up poop outside; throw away trash and take poop wagon to dumpster.'
-			},
-			{
-				id: 'pm-shared-rinse-kennels',
-				description:
-					'Kennels should be rinsed with water before scrubbing with Accell (skip if winter/too cold overnight).'
-			},
-			{
-				id: 'pm-shared-scrub-kennels',
-				description:
-					'Both staff scrub floors of all kennels, or only those needed in winter to mitigate freezing.'
-			},
-			{
-				id: 'pm-shared-pickup-outside',
-				description:
-					'Pick up everything from outside: buckets, bowls, toys, leashes, collars, blankets, towels, beds, etc.'
-			},
-			{
-				id: 'pm-shared-scrub-cots',
-				description:
-					'Scrub all cots and hang to dry (also helps prevent snow buildup in winter).'
-			},
-			{
-				id: 'pm-shared-yard-check',
-				description: 'If time, check yards and pick up poop, toys, buckets, and tidy.'
-			}
-		]
-	};
-
-	const baseEveningSections: Section[] = [
-		{
-			title: 'PM Cleaner Checklist',
-			tasks: [
-				{
-					id: 'pm-cleaner-setup-inside',
-					description: 'Set up all inside runs with buckets, blankets, and toys.'
-				},
-				{
-					id: 'pm-cleaner-put-away-gear',
-					description: 'Put away collars, leashes, and harnesses hanging up to dry.'
-				},
-				{
-					id: 'pm-cleaner-help-playtimes',
-					description: 'Help with playtimes and baths if any are leftover from AM shift.'
-				},
-				{ id: 'pm-cleaner-bring-dogs-in', description: 'Help bring dogs in at 4:15.' },
-				{
-					id: 'pm-cleaner-pickup-outside',
-					description:
-						'Pick up poop in outside kennels; dump and pick up buckets; throw away trash.'
-				},
-				{ id: 'pm-cleaner-hose-sanitize', description: 'Hose off and sanitize outside kennels.' },
-				{
-					id: 'pm-cleaner-check-gates',
-					description:
-						'Double check all gates outside, lock doors, and make sure all dogs inside have water.'
-				},
-				{ id: 'pm-cleaner-music-lights', description: 'Turn on music and turn off all lights.' },
-				{ id: 'pm-cleaner-board', description: 'Reset the dog walking board.' },
-				{ id: 'pm-cleaner-slack', description: 'Make a Slack update.' }
-			]
-		},
-		{
-			title: 'PM Feeder Checklist',
-			tasks: [
-				{
-					id: 'pm-feeder-playtimes',
-					description: 'Continue playtimes and baths from AM if any are leftover.'
-				},
-				{ id: 'pm-feeder-meet-greets', description: 'Do meet n greets as needed.' },
-				{
-					id: 'pm-feeder-feed-dinner',
-					description: 'Feed all dogs according to diet plans at 3:00.'
-				},
-				{
-					id: 'pm-feeder-dishes',
-					description: 'Pick up bowls from dinner and wash them; drain the dishwasher after.'
-				},
-				{ id: 'pm-feeder-laundry', description: 'Turn over the laundry.' },
-				{ id: 'pm-feeder-freya', description: 'Feed Freya and clean her litter box.' },
-				{ id: 'pm-feeder-slack', description: 'Make a Slack update.' }
-			]
-		}
-	];
+	const STAFF_FILTER_KEY = 'shelter.cleaningStaffFilter.v1';
+	const STAFF_FILTERS: StaffFilter[] = ['all', 'A', 'B'];
 
 	const today = startOfDay(new Date());
 	const dateKey = format(today, 'yyyy-MM-dd');
@@ -252,6 +27,7 @@
 	let completed = new Set<string>();
 	let taskMeta: Record<string, TaskCompletionMeta> = {};
 	let lastUpdated = '';
+	let staffFilter: StaffFilter = 'all';
 
 	// Live subscription: checkmarks from other devices appear without a reload.
 	let unsubscribeCompleted: (() => void) | null = null;
@@ -271,14 +47,14 @@
 	}
 
 	onMount(() => {
+		const saved = readJson<StaffFilter>(STAFF_FILTER_KEY, 'all');
+		if (saved === 'A' || saved === 'B') staffFilter = saved;
 		subscribeToShift();
 		return () => unsubscribeCompleted?.();
 	});
 
-	$: showSunday = isSunday || showSundayOverride;
-	$: baseSections = shift === 'morning' ? baseMorningSections : baseEveningSections;
-	$: sundayShared = shift === 'morning' ? sundayMorningShared : sundayEveningShared;
-	$: sections = showSunday ? [sundayShared, ...baseSections] : baseSections;
+	$: sheet = checklistFor(today, shift, showSundayOverride);
+	$: sections = sheet.sections.filter((section) => staffFilter === 'all' || section.staff === staffFilter);
 	$: allTaskIds = sections.flatMap((section) => section.tasks.map((task) => task.id));
 	$: completedCount = allTaskIds.filter((id) => completed.has(id)).length;
 
@@ -298,6 +74,11 @@
 		taskMeta = nextMeta;
 		lastUpdated = new Date().toISOString();
 		void toggleCleaningTask(dateKey, shift, taskId, checked, byName);
+	}
+
+	function setStaffFilter(value: StaffFilter) {
+		staffFilter = value;
+		writeJson(STAFF_FILTER_KEY, value);
 	}
 
 	function setShift(value: Shift) {
@@ -340,31 +121,50 @@
 			</div>
 		</div>
 
+		<div class="staff-filter" role="group" aria-label="Show staff">
+			{#each STAFF_FILTERS as value}
+				<button
+					class={`shift-pill ${staffFilter === value ? 'shift-pill-active' : ''}`}
+					on:click={() => setStaffFilter(value)}
+					type="button"
+				>
+					{value === 'all' ? 'All' : `Staff ${value}`}
+				</button>
+			{/each}
+		</div>
+
 		{#if !isSunday}
 			<div class="sunday-toggle">
 				<div class="sunday-toggle-inner">
 					<p class="sunday-copy whiteboard-hand">
-						Sunday shared checklist is hidden today. Toggle to preview it on other days.
+						Sunday sheets replace the regular ones on Sundays. Toggle to preview them on other days.
 					</p>
 					<button
 						class={`sunday-toggle-btn ${showSundayOverride ? 'sunday-toggle-btn-active' : ''}`}
 						type="button"
 						on:click={() => (showSundayOverride = !showSundayOverride)}
 					>
-						{showSundayOverride ? 'Hide Sunday Shared' : 'Show Sunday Shared'}
+						{showSundayOverride ? 'Hide Sunday Sheet' : 'Show Sunday Sheet'}
 					</button>
 				</div>
 			</div>
 		{/if}
+
+		<div class="sheet-intro">
+			<h2 class="sheet-title typewriter">{sheet.title}</h2>
+			{#if sheet.note}
+				<p class="section-note whiteboard-hand">{sheet.note}</p>
+			{/if}
+		</div>
 
 		<div class="checklist-sections">
 			{#each sections as section}
 				<div class="checklist-sheet">
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<div>
-							<h3 class="section-title typewriter">{section.title}</h3>
-							{#if section.note}
-								<p class="section-note whiteboard-hand">{section.note}</p>
+							<h3 class="section-title typewriter">Staff {section.staff}{section.side ? `: ${section.side}` : ''}</h3>
+							{#if section.subtitle}
+								<p class="section-note whiteboard-hand">{section.subtitle}</p>
 							{/if}
 						</div>
 						<span class="section-progress">
@@ -380,7 +180,12 @@
 									checked={completed.has(task.id)}
 									on:change={() => toggleTask(task.id)}
 								/>
-								<span class="task-copy">{task.description}</span>
+								<span class="task-copy">
+									{task.description}
+									{#if task.detail}
+										<span class="task-detail">{task.detail}</span>
+									{/if}
+								</span>
 								{#if completed.has(task.id) && taskByLine(task.id)}
 									<span class="task-by">{taskByLine(task.id)}</span>
 								{/if}
@@ -390,6 +195,10 @@
 				</div>
 			{/each}
 		</div>
+
+		{#if sheet.footer}
+			<p class="sheet-footer typewriter">{sheet.footer}</p>
+		{/if}
 	</div>
 </section>
 
@@ -518,6 +327,41 @@
 	.sunday-toggle-btn-active {
 		background: var(--sticky-green);
 		color: #155f3b;
+	}
+
+	.staff-filter {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.36rem;
+		padding: 0.62rem;
+		border-bottom: 1px solid #d5e0ea;
+	}
+
+	.sheet-intro {
+		padding: 0.75rem 0.72rem 0.62rem;
+	}
+
+	.sheet-title {
+		font-family: var(--font-ui);
+		font-size: 1.1rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--marker-black);
+	}
+
+	.sheet-footer {
+		padding: 0.75rem 0.72rem;
+		border-top: 1px solid #d5e0ea;
+		font-size: 0.82rem;
+		font-weight: 700;
+		color: var(--marker-black);
+	}
+
+	.task-detail {
+		display: block;
+		margin-top: 0.2rem;
+		font-size: 0.82rem;
+		color: var(--ink-soft);
 	}
 
 	.checklist-sections {
