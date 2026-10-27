@@ -277,10 +277,17 @@ export function secondMealAmountLabel(dog: Dog) {
 	return dog.secondMealAmount?.trim() || foodAmountLabel(dog);
 }
 
-export function feedingFlags(dog: Dog) {
-	const flags: string[] = [];
-	if ((dog.allergyTypes ?? []).length > 0) flags.push('Allergy');
-	if (dog.hasSupplements) flags.push('Supplements');
+export const ALLERGY_OPTIONS = ['Chicken', 'Fish', 'Grains', 'Beef', 'Dairy', 'Soy', 'Other'];
+
+export type FeedingFlag = { label: string; allergy: boolean };
+
+/** Pills for the feeding row and dog profile: one per allergy, then supplements. */
+export function feedingFlags(dog: Dog): FeedingFlag[] {
+	const flags: FeedingFlag[] = (dog.allergyTypes ?? [])
+		.map((type) => type.trim())
+		.filter(Boolean)
+		.map((type) => ({ label: `${type.charAt(0).toUpperCase()}${type.slice(1)} allergy`, allergy: true }));
+	if (dog.hasSupplements) flags.push({ label: 'Supplements', allergy: false });
 	return flags;
 }
 

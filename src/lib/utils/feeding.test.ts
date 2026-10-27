@@ -106,7 +106,11 @@ describe('specialFeedingReasons / feedingFlags', () => {
 		expect(reasons).toContain('Allergy: chicken');
 		expect(reasons).toContain('Own Food');
 		expect(reasons).toContain('Supplements');
-		expect(feedingFlags(dog)).toEqual(['Allergy', 'Supplements']);
+		expect(feedingFlags(dog)).toEqual([
+			{ label: 'Chicken allergy', allergy: true },
+			{ label: 'Supplements', allergy: false }
+		]);
+		expect(feedingFlags(makeDog({ allergyTypes: ['Fish', 'Soy'] })).map((f) => f.label)).toEqual(['Fish allergy', 'Soy allergy']);
 		expect(isSpecialFeeding(dog)).toBe(true);
 		expect(isSpecialFeeding(makeDog())).toBe(false);
 	});
