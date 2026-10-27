@@ -17,6 +17,7 @@
 	import { subscribeCompletedTasks, toggleCleaningTask } from '$lib/data/cleaning';
 	import { subscribeHandoff, saveHandoff, type ShiftHandoff } from '$lib/data/handoff';
 	import type { CleaningShift } from '$lib/data/cleaning';
+	import { checklistFor, taggedTaskIds } from '$lib/data/cleaningChecklist';
 	import { onDestroy, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { syncVersion } from '$lib/stores/sync';
@@ -395,18 +396,13 @@
 				(log) => log.mealTime === $shift && isSameCalendarDay(log.date, today)
 			)
 		);
-	$: cleaningDone = (
-		$shift === 'am'
-			? ['am-cleaner-clean-kennels', 'am-shared-scrub-kennels']
-			: ['pm-cleaner-hose-sanitize', 'pm-shared-scrub-kennels']
-	).some((id) => completedTaskIds.has(id));
-	$: movementDone =
-		$shift === 'am'
-			? ['am-shared-take-dogs-out'].some((id) => completedTaskIds.has(id))
-			: ['pm-cleaner-bring-dogs-in', 'pm-shared-bring-dogs-in'].some((id) => completedTaskIds.has(id));
-	$: slackDone = ['am-cleaner-slack', 'am-feeder-slack', 'pm-cleaner-slack', 'pm-feeder-slack'].some(
-		(id) => completedTaskIds.has(id)
-	);
+	$: cleaningSheet = checklistFor(today, cleaningShift);
+	$: cleaningTaskIds = taggedTaskIds(cleaningSheet, 'cleaning');
+	$: movementTaskIds = taggedTaskIds(cleaningSheet, 'movement');
+	$: slackTaskIds = taggedTaskIds(cleaningSheet, 'slack');
+	$: cleaningDone = cleaningTaskIds.some((id) => completedTaskIds.has(id));
+	$: movementDone = movementTaskIds.some((id) => completedTaskIds.has(id));
+	$: slackDone = slackTaskIds.some((id) => completedTaskIds.has(id));
 	$: todayItems =
 		$shift === 'am'
 			? [
@@ -418,7 +414,7 @@
 			: [
 					{ id: 'feeding', label: 'Feeding (PM)', done: feedingDone },
 					{ id: 'cleaning', label: 'Cleaning (PM)', done: cleaningDone, checklistHref: '/cleaning' },
-					{ id: 'movement', label: 'Bring Dogs In @ 4:15', done: movementDone },
+					{ id: 'movement', label: 'Bring Dogs In @ 4:00', done: movementDone },
 					{ id: 'slack', label: 'Slack Update (PM)', done: slackDone }
 				];
 	$: attentionItems = buildAttentionItems(playgroupSessions, activeDogs);
@@ -604,15 +600,15 @@
 	}
 
 	function primaryCleaningTaskId() {
-		return $shift === 'am' ? 'am-cleaner-clean-kennels' : 'pm-cleaner-hose-sanitize';
+		return cleaningTaskIds[0];
 	}
 
 	function primaryMovementTaskId() {
-		return $shift === 'am' ? 'am-shared-take-dogs-out' : 'pm-cleaner-bring-dogs-in';
+		return movementTaskIds[0];
 	}
 
 	function primarySlackTaskId() {
-		return $shift === 'am' ? 'am-cleaner-slack' : 'pm-cleaner-slack';
+		return slackTaskIds[0];
 	}
 
 	async function markFeedingComplete() {
