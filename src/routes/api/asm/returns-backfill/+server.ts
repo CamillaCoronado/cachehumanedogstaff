@@ -24,7 +24,7 @@ export async function POST({ request }: RequestEvent) {
 
 	try {
 		// Stop starting new reads at 45s so the last ones finish inside the minute.
-		return json(await syncReturnsFromASM({ limit: Infinity, budgetMs: 45_000 }));
+		return json(await syncReturnsFromASM({ limit: Infinity, budgetMs: 45_000, neverRead: true }));
 	} catch (e) {
 		console.error('returns backfill failed', e);
 		throw error(500, e instanceof Error ? e.message : String(e));

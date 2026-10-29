@@ -15,13 +15,13 @@ const AT_ONCE = 5;
  * intakeDate current.
  */
 export async function syncReturnsFromASM(
-	opts: { limit?: number; budgetMs?: number } = {}
+	opts: { limit?: number; budgetMs?: number; neverRead?: boolean } = {}
 ): Promise<{ read: number; failed: number; left: number }> {
 	const stopAt = Date.now() + (opts.budgetMs ?? Infinity);
 	const db = getAdminDb();
 	const snapshot = await db.collection('dogs').get();
 	const docs = new Map(snapshot.docs.map((d) => [d.id, d.data() as Record<string, unknown>]));
-	const due = dogsNeedingReturns(docs);
+	const due = dogsNeedingReturns(docs, { neverRead: opts.neverRead });
 	const today = shelterToday();
 	const batch = due.slice(0, opts.limit ?? PER_SYNC);
 	let read = 0;

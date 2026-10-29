@@ -39,3 +39,14 @@ describe('dogsNeedingReturns', () => {
 		]);
 	});
 });
+
+describe('dogsNeedingReturns for the backfill', () => {
+	it('also takes unread dogs whose dates show no return yet', () => {
+		const docs = new Map<string, Record<string, unknown>>([
+			['1', { asmId: 1, originalIntakeDate: '2026-09-14', intakeDate: '2026-09-14' }],
+			['2', { asmId: 2, originalIntakeDate: '2026-09-14', intakeDate: '2026-09-14', returnHistoryFor: '2026-09-14' }]
+		]);
+		expect(dogsNeedingReturns(docs)).toEqual([]);
+		expect(dogsNeedingReturns(docs, { neverRead: true })).toEqual([{ id: '1', asmId: 1, intake: '2026-09-14' }]);
+	});
+});
