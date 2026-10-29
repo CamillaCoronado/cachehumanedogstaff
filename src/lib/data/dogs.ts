@@ -383,7 +383,8 @@ function applyStatusTransition(current: Dog, updates: Partial<Dog>, now: Date): 
 		return applyFosterHousingRules({
 			...merged,
 			leftShelterDate: null,
-			reentryDates: appendUniqueDate(merged.reentryDates, reentryAt),
+			// ASM dogs get their re-entries from ASM's intake dates on sync.
+			reentryDates: isAsmDog(merged) ? merged.reentryDates : appendUniqueDate(merged.reentryDates, reentryAt),
 			// Puppies don't need evaluation.
 			awaitingEvaluation: !isPuppyAge(merged.dateOfBirth)
 		});
