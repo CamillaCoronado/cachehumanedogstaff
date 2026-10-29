@@ -254,6 +254,42 @@
 		}
 	}
 
+	// Return history from ASM movements, for every returned dog at once instead of a
+	// few per sync. Each request reads what fits in a minute; this repeats until done.
+	let returnsBusy = false;
+	let returnsRead = 0;
+	let returnsLeft: number | null = null;
+
+	async function runReturnsBackfill() {
+		if (returnsBusy) return;
+		returnsBusy = true;
+		returnsRead = 0;
+		returnsLeft = null;
+		try {
+			const token = await $authUser?.getIdToken();
+			for (;;) {
+				const res = await fetch('/api/asm/returns-backfill', {
+					method: 'POST',
+					headers: { authorization: `Bearer ${token}` }
+				});
+				if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+				const { read, failed, left } = (await res.json()) as { read: number; failed: number; left: number };
+				returnsRead += read;
+				returnsLeft = left;
+				// Only dogs ASM wouldn't show are left: say so instead of retrying forever.
+				if (left === 0 || read === 0) {
+					if (left > 0) toast.error(`ASM wouldn't show movements for ${failed} dog${failed === 1 ? '' : 's'}.`);
+					break;
+				}
+			}
+			toast.success(`Read return history for ${returnsRead} dog${returnsRead === 1 ? '' : 's'}.`);
+		} catch (e) {
+			toast.error('Backfill failed: ' + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			returnsBusy = false;
+		}
+	}
+
 	function toggleStaffRow(key: string) {
 		staffKeep = staffKeep.includes(key) ? staffKeep.filter((k) => k !== key) : [...staffKeep, key];
 	}
@@ -1158,6 +1194,25 @@
 						</button>
 					{/if}
 				{/if}
+			</section>
+
+			<section class="admin-card panel-steel">
+				<div class="card-header">
+					<div>
+						<p class="section-kicker">Data</p>
+						<h3 class="section-title">Backfill returns from ASM</h3>
+						<p class="section-copy">Read every returned dog's return history from ASM now, instead of a few dogs per sync.</p>
+						<details class="how-it-works"><summary>How it works</summary><p>For each dog ASM shows came in more than once, archived dogs too, reads its movements in ASM: when it came back, what from, the return category and the reason. Those become its re-entries and its return history on the dog page. A dog already read for its latest intake is skipped. Keep this page open until it finishes.</p></details>
+					</div>
+				</div>
+				<div class="repair-actions">
+					<button class="action-btn" type="button" on:click={runReturnsBackfill} disabled={returnsBusy}>
+						{returnsBusy ? `Reading… ${returnsRead} done${returnsLeft !== null ? `, ${returnsLeft} left` : ''}` : 'Backfill returns'}
+					</button>
+					{#if !returnsBusy && returnsLeft === 0}
+						<span class="section-copy">All returned dogs read ({returnsRead} this run).</span>
+					{/if}
+				</div>
 			</section>
 
 			<section class="admin-card panel-steel">

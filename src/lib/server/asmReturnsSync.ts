@@ -10,20 +10,36 @@ const AT_ONCE = 5;
 /**
  * Every returned dog's return history from its ASM movements: dates, what it came back
  * from, ASM's return category and reason. The dates become the dog's re-entries. A dog
- * is read once per intake; the rest of a backlog is picked up on the next syncs. Runs
- * after the animal sync, which keeps intakeDate current.
+ * is read once per intake; the rest of a backlog is picked up on the next syncs, or all
+ * at once by the Admin page's backfill. Runs after the animal sync, which keeps
+ * intakeDate current.
  */
-export async function syncReturnsFromASM(): Promise<{ read: number; left: number }> {
+export async function syncReturnsFromASM(
+	opts: { limit?: number; budgetMs?: number } = {}
+): Promise<{ read: number; failed: number; left: number }> {
+	const stopAt = Date.now() + (opts.budgetMs ?? Infinity);
 	const db = getAdminDb();
 	const snapshot = await db.collection('dogs').get();
 	const docs = new Map(snapshot.docs.map((d) => [d.id, d.data() as Record<string, unknown>]));
 	const due = dogsNeedingReturns(docs);
 	const today = shelterToday();
-	const batch = due.slice(0, PER_SYNC);
-	for (let i = 0; i < batch.length; i += AT_ONCE) {
+	const batch = due.slice(0, opts.limit ?? PER_SYNC);
+	let read = 0;
+	let failed = 0;
+	for (let i = 0; i < batch.length && Date.now() < stopAt; i += AT_ONCE) {
 		await Promise.all(
 			batch.slice(i, i + AT_ONCE).map(async ({ id, asmId, intake }) => {
-				const returns = parseAsmReturns(await loadAsmMovements(asmId), today);
+				let rows: Record<string, unknown>[];
+				try {
+					rows = await loadAsmMovements(asmId);
+				} catch (e) {
+					// One dog ASM won't show (deleted, no rights) mustn't stop the rest; it's
+					// tried again next time.
+					console.error(`[asm returns] dog ${id}`, e);
+					failed++;
+					return;
+				}
+				const returns = parseAsmReturns(rows, today);
 				await db.collection('dogs').doc(id).set(
 					{
 						returnHistory: returns,
@@ -35,7 +51,8 @@ export async function syncReturnsFromASM(): Promise<{ read: number; left: number
 				);
 			})
 		);
+		read += Math.min(AT_ONCE, batch.length - i);
 	}
-	const read = batch.length;
-	return { read, left: due.length - read };
+	read -= failed;
+	return { read, failed, left: due.length - read };
 }
