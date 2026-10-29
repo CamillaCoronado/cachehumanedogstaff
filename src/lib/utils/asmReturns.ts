@@ -52,15 +52,24 @@ export function parseAsmReturns(rows: Record<string, unknown>[], today: string):
  * The dogs whose returns need reading from ASM: ones whose latest intake is later than
  * the first (only those have been returned), and whose history wasn't already read for
  * that intake. returnHistoryFor holds the intake the stored history was read at.
+ * With neverRead, every ASM dog not read yet is taken too.
  */
-export function dogsNeedingReturns(docs: Map<string, Record<string, unknown>>): { id: string; asmId: number; intake: string }[] {
+export function dogsNeedingReturns(
+	docs: Map<string, Record<string, unknown>>,
+	opts: { neverRead?: boolean } = {}
+): { id: string; asmId: number; intake: string }[] {
 	const out: { id: string; asmId: number; intake: string }[] = [];
 	for (const [id, d] of docs) {
 		const asmId = typeof d.asmId === 'number' ? d.asmId : /^\d+$/.test(id) ? Number(id) : NaN;
 		if (!Number.isFinite(asmId)) continue;
 		const intake = day(d.intakeDate);
 		const original = day(d.originalIntakeDate);
-		if (!intake || !original || intake <= original) continue;
+		if (!intake) continue;
+		// neverRead (the Admin backfill) also takes dogs whose dates don't show a return
+		// yet: ASM caches the shelter list for up to an hour, but its movements are live.
+		const returned = Boolean(original && intake > original);
+		const unread = d.returnHistoryFor === undefined;
+		if (!returned && !(opts.neverRead && unread)) continue;
 		if (d.returnHistoryFor === intake) continue;
 		out.push({ id, asmId, intake });
 	}

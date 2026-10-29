@@ -282,7 +282,8 @@
 					break;
 				}
 			}
-			toast.success(`Read return history for ${returnsRead} dog${returnsRead === 1 ? '' : 's'}.`);
+			if (returnsRead === 0 && returnsLeft === 0) toast.success('Nothing left to read: every dog is up to date.');
+			else toast.success(`Read return history for ${returnsRead} dog${returnsRead === 1 ? '' : 's'}.`);
 		} catch (e) {
 			toast.error('Backfill failed: ' + (e instanceof Error ? e.message : String(e)));
 		} finally {
@@ -1202,7 +1203,7 @@
 						<p class="section-kicker">Data</p>
 						<h3 class="section-title">Backfill returns from ASM</h3>
 						<p class="section-copy">Read every returned dog's return history from ASM now, instead of a few dogs per sync.</p>
-						<details class="how-it-works"><summary>How it works</summary><p>For each dog ASM shows came in more than once, archived dogs too, reads its movements in ASM: when it came back, what from, the return category and the reason. Those become its re-entries and its return history on the dog page. A dog already read for its latest intake is skipped. Keep this page open until it finishes.</p></details>
+						<details class="how-it-works"><summary>How it works</summary><p>For every ASM dog not read yet, archived dogs too, reads its movements in ASM: when it came back, what from, the return category and the reason. Those become its re-entries and its return history on the dog page. A dog already read for its latest intake is skipped. After that, the regular sync reads any dog whose latest intake changes. Keep this page open until it finishes.</p></details>
 					</div>
 				</div>
 				<div class="repair-actions">
