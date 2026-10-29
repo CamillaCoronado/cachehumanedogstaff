@@ -264,3 +264,15 @@ describe('re-entries from ASM', () => {
 		expect(changes.find((c) => c.id === '6')?.fields ?? []).not.toContain('Re-entries');
 	});
 });
+
+describe('re-entries read from movements', () => {
+	it("leaves a movements-read history alone for that intake", async () => {
+		const back = { ID: 7, ANIMALNAME: 'Yoyo', SPECIESNAME: 'Dog', SHELTERCODE: 'A7', DATEBROUGHTIN: '2026-02-01', MOSTRECENTENTRYDATE: '2026-10-20' };
+		const { env, store } = fakeEnv(
+			{ '7': { name: 'Yoyo', status: 'active', asmId: 7, asmShelterCode: 'A7', reentryDates: ['2026-04-05', '2026-10-20'], returnHistoryFor: '2026-10-20' } },
+			{ animals: [stayer, back] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('7')?.reentryDates).toEqual(['2026-04-05', '2026-10-20']);
+	});
+});

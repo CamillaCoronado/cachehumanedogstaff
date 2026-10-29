@@ -19,6 +19,7 @@ import { readJson, writeJson, createId } from '$lib/utils/storage';
 import { isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
 import { importedTripId } from '$lib/utils/hiddenNoteTrips';
 import { clockStart } from '$lib/utils/attention';
+import type { AsmReturn } from '$lib/utils/asmReturns';
 import { db } from '$lib/firebase/config';
 import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, waitForPendingWrites, where, writeBatch } from 'firebase/firestore';
 
@@ -48,6 +49,7 @@ interface StoredDog {
 	intakeDate: string;
 	originalIntakeDate?: string;
 	reentryDates?: string[];
+	returnHistory?: AsmReturn[];
 	leftShelterDate?: string | null;
 	dateOfBirth: string;
 	weightLbs?: number | null;
@@ -617,6 +619,8 @@ function deserializeDog(stored: StoredDog): Dog {
 		intakeDate,
 		originalIntakeDate,
 		reentryDates,
+		// Not written back by serializeDog: the ASM sync owns it.
+		returnHistory: Array.isArray(stored.returnHistory) ? stored.returnHistory : [],
 		leftShelterDate: stored.leftShelterDate ? toDate(stored.leftShelterDate) : null,
 		dateOfBirth: toDate(stored.dateOfBirth) ?? new Date(),
 		weightLbs:

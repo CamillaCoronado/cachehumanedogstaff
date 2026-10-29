@@ -826,6 +826,14 @@
 										<p><span>Current Entry:</span> <strong class="detail-value">{formatDate(dog.intakeDate)}</strong></p>
 										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate, today)}</strong></p>
 										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
+										{#each dog.returnHistory ?? [] as ret}
+											<p class="return-entry">
+												<span>Returned {formatDate(ret.returnedAt)}:</span>
+												<strong class="detail-note">
+													{ret.movement || 'Left'}{#if ret.leftAt} {formatDate(ret.leftAt)}{/if}{#if ret.category} · {ret.category}{/if}{#if ret.reason} · {ret.reason}{/if}
+												</strong>
+											</p>
+										{/each}
 										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
 										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
 										<p><span>Status:</span> <strong class="detail-value">{dog.status === 'active' ? 'Active' : dog.status === 'transferred' ? 'Transferred' : dog.status === 'euthanized' ? '🌈 Deceased' : 'Adopted'}</strong></p>
