@@ -221,3 +221,58 @@ describe('adoption holds', () => {
 		expect(store.get('9')).toMatchObject({ asmHold: false, asmHoldUntil: null });
 	});
 });
+
+describe('re-entries from ASM', () => {
+	const back = { ID: 6, ANIMALNAME: 'Boomerang', SPECIESNAME: 'Dog', SHELTERCODE: 'A6', DATEBROUGHTIN: '2026-02-01T00:00:00', MOSTRECENTENTRYDATE: '2026-10-20T00:00:00' };
+
+	it("records ASM's latest entry as a re-entry on a dog the app already has", async () => {
+		const { env, store } = fakeEnv(
+			{ '6': { name: 'Boomerang', status: 'active', asmId: 6, asmShelterCode: 'A6', reentryDates: [] } },
+			{ animals: [stayer, back] }
+		);
+		const { changes } = await syncAnimalsFromASM(env);
+		expect(store.get('6')?.reentryDates).toEqual(['2026-10-20']);
+		expect(changes.find((c) => c.id === '6')?.fields).toContain('Re-entries');
+	});
+
+	it('records it on a dog that has only ever come in once as none', async () => {
+		const { env, store } = fakeEnv({}, { animals: [stayer, { ...back, MOSTRECENTENTRYDATE: back.DATEBROUGHTIN }] });
+		await syncAnimalsFromASM(env);
+		expect(store.get('6')?.reentryDates).toEqual([]);
+	});
+
+	it('keeps earlier returns, replaces an app-stamped one, and drops dates outside the stays', async () => {
+		const { env, store } = fakeEnv(
+			{
+				'6': {
+					name: 'Boomerang', status: 'active', asmId: 6, asmShelterCode: 'A6',
+					reentryDates: ['2026-05-03T16:00:00.000Z', '2026-10-21T01:30:00.000Z', '2026-01-15T12:00:00.000Z', '2026-11-30T12:00:00.000Z']
+				}
+			},
+			{ animals: [stayer, back] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('6')?.reentryDates).toEqual(['2026-05-03', '2026-10-20']);
+	});
+
+	it("doesn't count the dog as changed once its re-entries match", async () => {
+		const { env } = fakeEnv(
+			{ '6': { name: 'Boomerang', status: 'active', asmId: 6, asmShelterCode: 'A6', reentryDates: ['2026-10-20T06:00:00.000Z'] } },
+			{ animals: [stayer, back] }
+		);
+		const { changes } = await syncAnimalsFromASM(env);
+		expect(changes.find((c) => c.id === '6')?.fields ?? []).not.toContain('Re-entries');
+	});
+});
+
+describe('re-entries read from movements', () => {
+	it("leaves a movements-read history alone for that intake", async () => {
+		const back = { ID: 7, ANIMALNAME: 'Yoyo', SPECIESNAME: 'Dog', SHELTERCODE: 'A7', DATEBROUGHTIN: '2026-02-01', MOSTRECENTENTRYDATE: '2026-10-20' };
+		const { env, store } = fakeEnv(
+			{ '7': { name: 'Yoyo', status: 'active', asmId: 7, asmShelterCode: 'A7', reentryDates: ['2026-04-05', '2026-10-20'], returnHistoryFor: '2026-10-20' } },
+			{ animals: [stayer, back] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('7')?.reentryDates).toEqual(['2026-04-05', '2026-10-20']);
+	});
+});

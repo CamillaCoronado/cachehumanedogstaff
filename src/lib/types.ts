@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore';
+import type { AsmReturn } from '$lib/utils/asmReturns';
 
 export type DateValue = Date | Timestamp;
 export type UserRole = 'admin' | 'manager' | 'coordinator' | 'staff' | 'volunteer';
@@ -86,6 +87,8 @@ export interface Dog {
 	intakeDate: DateValue;
 	originalIntakeDate: DateValue;
 	reentryDates: DateValue[];
+	/** Each return, from the dog's ASM movements (the sync owns it). Staff-only, like hidden comments. */
+	returnHistory?: AsmReturn[];
 	leftShelterDate?: DateValue | null;
 	dateOfBirth: DateValue;
 	weightLbs: number | null;

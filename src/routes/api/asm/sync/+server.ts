@@ -4,6 +4,7 @@ import { getAdminAuth, getAdminDb } from '$lib/firebase/admin';
 import { syncAnimalsFromASM } from '$lib/data/asm-sync';
 import { createAdminSyncEnvironment } from '$lib/server/asmSyncEnv';
 import { syncMedicalFromASM, type MedicalSyncResult } from '$lib/server/asmMedicalSync';
+import { syncReturnsFromASM } from '$lib/server/asmReturnsSync';
 import { recordSyncEventsAdmin } from '$lib/server/syncEventsAdmin';
 import { pollSlackFeedings } from '$lib/server/slackFeedingPoll';
 import { pollSlackPlaygroups } from '$lib/server/slackPlaygroupPoll';
@@ -111,6 +112,15 @@ export async function POST({ request }: RequestEvent) {
 	} catch (e) {
 		console.error('[asm medical]', e);
 		medical = { status: 'failed', error: e instanceof Error ? e.message : String(e) };
+	}
+
+	// Returned dogs' history (dates, category, reason) from their ASM movements, after the
+	// animal sync has brought intake dates up to date. Website sign-in again, so it can't
+	// fail the sync either.
+	try {
+		await syncReturnsFromASM();
+	} catch (e) {
+		console.error('[asm returns]', e);
 	}
 
 	// Return the changes themselves, not just a count — the sync log panel lists them.

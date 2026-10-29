@@ -338,3 +338,12 @@ export async function loadAsmMedical(): Promise<{ regimens: AsmRegimen[]; given:
 	}
 	return { regimens: [...regimens.values()], given };
 }
+
+/**
+ * One animal's movements from its Movements tab on the ASM website (the service API has
+ * no movements method). The ASM user needs view-movement rights.
+ */
+export async function loadAsmMovements(animalId: number): Promise<Record<string, unknown>[]> {
+	const data = (await webJson(`/animal_movements?id=${animalId}&json=true`, 'movements')) as { rows?: unknown } | null;
+	return Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]).map(upperKeys) : [];
+}

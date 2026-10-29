@@ -75,6 +75,7 @@ const FIELD_LABELS: Record<string, string> = {
 	dateOfBirth: 'DOB',
 	intakeDate: 'Intake date',
 	originalIntakeDate: 'Original intake',
+	reentryDates: 'Re-entries',
 	goodWithDogs: 'Good w/ dogs',
 	goodWithCats: 'Good w/ cats',
 	goodWithKids: 'Good w/ kids',
@@ -307,6 +308,36 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 	};
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * Re-entries come from ASM: an intake later than the first one is a return. The full list
+ * is read from the dog's movements (server/asmReturnsSync); until that has run for this
+ * intake, ASM's latest entry stands in. Earlier returns already recorded are kept, as
+ * long as they fall between the first intake and the latest one. A stored date within a
+ * day of ASM's is the same return (the app used to stamp its own time), and ASM's wins.
+ */
+export function asmReentryDates(animal: AsmAnimal, stored: unknown, historyFor?: unknown): string[] {
+	const original = normalizeDateStr(animal.DATEBROUGHTIN);
+	const latest = normalizeDateStr(animal.MOSTRECENTENTRYDATE);
+	if (!original) return [];
+	// Already read from the dog's ASM movements for this intake: that's the full record.
+	if (latest && historyFor === latest && Array.isArray(stored)) {
+		return stored.map((d) => normalizeDateStr(String(d))).filter((d): d is string => Boolean(d));
+	}
+	const isReturn = Boolean(latest && latest > original);
+	const latestMs = isReturn ? Date.parse(latest as string) : NaN;
+	const days = new Set<string>();
+	for (const value of Array.isArray(stored) ? stored : []) {
+		const day = typeof value === 'string' ? normalizeDateStr(value) : null;
+		if (!day || day <= original || (latest && day > latest)) continue;
+		if (isReturn && Math.abs(Date.parse(day) - latestMs) <= DAY_MS) continue;
+		days.add(day);
+	}
+	if (isReturn) days.add(latest as string);
+	return [...days].sort();
+}
+
 function defaultStoredFields(now: string) {
 	return {
 		reentryDates: [],
@@ -417,7 +448,10 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 	}
 
 	function asmFieldsFor(animal: AsmAnimal, existing: Record<string, unknown> | undefined) {
-		return applySelectivePrecedence(applyPhotoPrecedence(asmToStoredFields(animal, now), existing), existing);
+		return {
+			...applySelectivePrecedence(applyPhotoPrecedence(asmToStoredFields(animal, now), existing), existing),
+			reentryDates: asmReentryDates(animal, existing?.reentryDates, existing?.returnHistoryFor)
+		};
 	}
 
 	for (const animal of dogs) {
@@ -433,6 +467,10 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 			const changedFields = (Object.entries(comparable) as [string, unknown][])
 				.filter(([k, v]) => {
 					const stored = existing[k];
+					if (k === 'reentryDates') {
+						const storedDays = (Array.isArray(stored) ? stored : []).map((d) => normalizeDateStr(String(d)));
+						return storedDays.join(',') !== (v as string[]).join(',');
+					}
 					if (DATE_FIELDS.has(k)) {
 						// Normalize both sides — existing may be in old full-timestamp format
 						return normalizeDateStr(stored as string) !== normalizeDateStr(v as string);
