@@ -16,7 +16,7 @@ const AT_ONCE = 5;
  */
 export async function syncReturnsFromASM(
 	opts: { limit?: number; budgetMs?: number; neverRead?: boolean } = {}
-): Promise<{ read: number; failed: number; left: number; failures: { name: string; error: string }[] }> {
+): Promise<{ read: number; failed: number; left: number; failures: { name: string; error: string }[]; dogs: number; due: number }> {
 	const stopAt = Date.now() + (opts.budgetMs ?? Infinity);
 	const db = getAdminDb();
 	const snapshot = await db.collection('dogs').get();
@@ -59,5 +59,6 @@ export async function syncReturnsFromASM(
 		read += Math.min(AT_ONCE, batch.length - i);
 	}
 	read -= failed;
-	return { read, failed, left: due.length - read, failures };
+	// dogs/due say what the run had to work with, for the Admin card.
+	return { read, failed, left: due.length - read, failures, dogs: docs.size, due: due.length };
 }
