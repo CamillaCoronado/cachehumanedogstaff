@@ -234,11 +234,13 @@ async function webJson(path: string, what: string): Promise<unknown> {
 		res = await webFetch(s, path);
 		text = await res.text();
 	}
-	if (!res.ok) throw new Error(`ASM website ${what} returned ${res.status}`);
+	// ASM's own error text (a permission or not-found message) says more than the code.
+	const said = () => text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+	if (!res.ok) throw new Error(`ASM website ${what} returned ${res.status}${said() ? `: ${said()}` : ''}`);
 	try {
 		return JSON.parse(text);
 	} catch {
-		throw new Error(`ASM website ${what} didn't return JSON: ${text.slice(0, 120)}`);
+		throw new Error(`ASM website ${what} didn't return JSON: ${said()}`);
 	}
 }
 

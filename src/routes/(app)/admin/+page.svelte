@@ -259,12 +259,14 @@
 	let returnsBusy = false;
 	let returnsRead = 0;
 	let returnsLeft: number | null = null;
+	let returnsFailures: { name: string; error: string }[] = [];
 
 	async function runReturnsBackfill() {
 		if (returnsBusy) return;
 		returnsBusy = true;
 		returnsRead = 0;
 		returnsLeft = null;
+		returnsFailures = [];
 		try {
 			const token = await $authUser?.getIdToken();
 			for (;;) {
@@ -273,9 +275,15 @@
 					headers: { authorization: `Bearer ${token}` }
 				});
 				if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-				const { read, failed, left } = (await res.json()) as { read: number; failed: number; left: number };
+				const { read, failed, left, failures } = (await res.json()) as {
+					read: number;
+					failed: number;
+					left: number;
+					failures?: { name: string; error: string }[];
+				};
 				returnsRead += read;
 				returnsLeft = left;
+				returnsFailures = failures ?? [];
 				// Only dogs ASM wouldn't show are left: say so instead of retrying forever.
 				if (left === 0 || read === 0) {
 					if (left > 0) toast.error(`ASM wouldn't show movements for ${failed} dog${failed === 1 ? '' : 's'}.`);
@@ -1214,6 +1222,13 @@
 						<span class="section-copy">All returned dogs read ({returnsRead} this run).</span>
 					{/if}
 				</div>
+				{#if !returnsBusy && returnsFailures.length > 0}
+					<ul class="section-copy">
+						{#each returnsFailures as f}
+							<li><strong>{f.name}</strong>: {f.error}</li>
+						{/each}
+					</ul>
+				{/if}
 			</section>
 
 			<section class="admin-card panel-steel">

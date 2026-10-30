@@ -16,7 +16,7 @@ const AT_ONCE = 5;
  */
 export async function syncReturnsFromASM(
 	opts: { limit?: number; budgetMs?: number; neverRead?: boolean } = {}
-): Promise<{ read: number; failed: number; left: number }> {
+): Promise<{ read: number; failed: number; left: number; failures: { name: string; error: string }[] }> {
 	const stopAt = Date.now() + (opts.budgetMs ?? Infinity);
 	const db = getAdminDb();
 	const snapshot = await db.collection('dogs').get();
@@ -26,6 +26,7 @@ export async function syncReturnsFromASM(
 	const batch = due.slice(0, opts.limit ?? PER_SYNC);
 	let read = 0;
 	let failed = 0;
+	const failures: { name: string; error: string }[] = [];
 	for (let i = 0; i < batch.length && Date.now() < stopAt; i += AT_ONCE) {
 		await Promise.all(
 			batch.slice(i, i + AT_ONCE).map(async ({ id, asmId, intake }) => {
@@ -37,6 +38,10 @@ export async function syncReturnsFromASM(
 					// tried again next time.
 					console.error(`[asm returns] dog ${id}`, e);
 					failed++;
+					failures.push({
+						name: `${String(docs.get(id)?.name ?? id)} (ASM ${asmId})`,
+						error: e instanceof Error ? e.message : String(e)
+					});
 					return;
 				}
 				const returns = parseAsmReturns(rows, today);
@@ -54,5 +59,5 @@ export async function syncReturnsFromASM(
 		read += Math.min(AT_ONCE, batch.length - i);
 	}
 	read -= failed;
-	return { read, failed, left: due.length - read };
+	return { read, failed, left: due.length - read, failures };
 }
