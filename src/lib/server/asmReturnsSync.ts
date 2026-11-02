@@ -30,19 +30,24 @@ export async function syncReturnsFromASM(
 	for (let i = 0; i < batch.length && Date.now() < stopAt; i += AT_ONCE) {
 		await Promise.all(
 			batch.slice(i, i + AT_ONCE).map(async ({ id, asmId, intake }) => {
-				let rows: Record<string, unknown>[];
+				let rows: Record<string, unknown>[] = [];
 				try {
 					rows = await loadAsmMovements(asmId);
 				} catch (e) {
-					// One dog ASM won't show (deleted, no rights) mustn't stop the rest; it's
-					// tried again next time.
-					console.error(`[asm returns] dog ${id}`, e);
-					failed++;
-					failures.push({
-						name: `${String(docs.get(id)?.name ?? id)} (ASM ${asmId})`,
-						error: e instanceof Error ? e.message : String(e)
-					});
-					return;
+					// ASM has no such animal (deleted or merged there): nothing to read, so it
+					// counts as read with no returns rather than being retried forever.
+					const gone = e instanceof Error && / returned 404\b/.test(e.message);
+					if (!gone) {
+						// One dog ASM won't show for another reason mustn't stop the rest; it's
+						// tried again next time.
+						console.error(`[asm returns] dog ${id}`, e);
+						failed++;
+						failures.push({
+							name: `${String(docs.get(id)?.name ?? id)} (ASM ${asmId})`,
+							error: e instanceof Error ? e.message : String(e)
+						});
+						return;
+					}
 				}
 				const returns = parseAsmReturns(rows, today);
 				await db.collection('dogs').doc(id).set(
