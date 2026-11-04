@@ -121,9 +121,15 @@
 			if (!has.has(h)) el('rect', { x: x(h), y: 20, width: x(h + 1) - x(h), height: base - 20, fill: 'var(--ld-line)', 'fill-opacity': 0.35 }, hoursEl);
 		if (dog.activeWindow) {
 			const [a, b] = dog.activeWindow;
-			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-width': 1 }, hoursEl);
+			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'none', stroke: 'var(--ld-ping)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }, hoursEl);
 			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
 			t.textContent = 'MOST MOVEMENT';
+		}
+		if (dog.pingWindow) {
+			const [a, b] = dog.pingWindow;
+			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-width': 1.5 }, hoursEl);
+			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
+			t.textContent = 'MOST PINGS';
 		}
 		el('line', { x1: L, y1: base, x2: R, y2: base, stroke: 'var(--ld-muted)', 'stroke-width': 1 }, hoursEl);
 		for (let h = 0; h <= 24; h += 3) {

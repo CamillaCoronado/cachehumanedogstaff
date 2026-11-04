@@ -44,6 +44,8 @@ export interface LostDog {
 	summary?: { lastKnown?: string; hotspot?: string; mostActive?: string };
 	/** Busiest window for the hour chart, [from, to] in hours. */
 	activeWindow?: [number, number];
+	/** Hour window with the most AirTag pings (he's near houses and the street), [from, to]. */
+	pingWindow?: [number, number];
 	events: LostDogEvent[];
 	/** Undated saved pins from someone's map app, [w, s]. */
 	pins?: [number, number][];

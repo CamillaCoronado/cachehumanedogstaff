@@ -16,6 +16,10 @@ export const PRETZEL: LostDog = {
 		"rw": 110,
 		"rs": 72
 	},
+	"pingWindow": [
+		7,
+		8
+	],
 	"activeWindow": [
 		9.5,
 		12.6
@@ -23,7 +27,7 @@ export const PRETZEL: LostDog = {
 	"summary": {
 		"lastKnown": "11/4 morning ping at ~2114 W 2200 S, north side of the pond. The 11/3 ~11pm and 11/4 2:21am pings were in the same spot.",
 		"hotspot": "11 of 16 AirTag pings are within about a block of the foster home at 2081 W 2200 S. He keeps circling back to where he escaped.",
-		"mostActive": "Late morning to midday. On 10/31 he covered about half a mile between 11:20am and 12:20pm. From ~10pm to 8am (incl. a 2:21am ping) he stays at the hotspot."
+		"mostActive": "Most pings (near houses and the street): 7–8am. 4 pings on 4 different mornings (10/28, 10/29, 11/3, 11/4), all by the foster home on 2200 S. Next most: 11pm–midnight (3 pings). Most movement: late morning to midday. On 10/31 he covered about half a mile between 11:20am and 12:20pm."
 	},
 	"events": [
 		{
