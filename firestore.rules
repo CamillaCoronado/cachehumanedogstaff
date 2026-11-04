@@ -172,6 +172,13 @@ service cloud.firestore {
       allow update, delete: if canEditDogs();
     }
 
+    // Lost-dog search maps (/lost): sightings, pings and the foster address live here,
+    // not in the repo, because the repo is public. Staff and up keep them current.
+    match /lostDogs/{dogId} {
+      allow read: if isApproved();
+      allow write: if canEditPlaygroups();
+    }
+
     // What the last ASM sync observed — adoptions, fosters, transfers, arrivals.
     // The sync reconciles Firestore with ASM, so the diff exists exactly once; writing
     // it here is what lets every user see the celebration instead of only the browser
