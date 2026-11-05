@@ -25,9 +25,9 @@ export const PRETZEL: LostDog = {
 		12.6
 	],
 	"summary": {
-		"lastKnown": "11/4 ~7:47pm ping just south of 2200 S at ~2180 W, about a block west of the foster home. 35 min earlier (~7:12pm) he pinged at a house on 2400 W around 2520 S, where Mellissa left his bowls. The 11/4 morning, 2:21am and 11/3 ~11pm pings were in the same area by the foster home.",
+		"lastKnown": "11/4 ~7:47pm ping just south of 2200 S at ~2180 W, about a block west of the foster home. 35 min earlier (~7:12pm) he pinged at the house at 2400 S 2400 W, where Mellissa left his bowls. The 11/4 morning, 2:21am and 11/3 ~11pm pings were in the same area by the foster home.",
 		"hotspot": "12 of 18 AirTag pings are within about a block of the foster home at 2081 W 2200 S. He keeps circling back to where he escaped.",
-		"mostActive": "Most pings (near houses and the street): 7–8am. 4 pings on 4 different mornings (10/28, 10/29, 11/3, 11/4), all by the foster home on 2200 S. Next most: 11pm–midnight (3 pings). Most movement: late morning to midday. On 10/31 he covered about half a mile between 11:20am and 12:20pm. 11/4 evening he moved from 2400 W ~2520 S back toward the foster home (~0.45 mi) between ~7:12 and ~7:47pm."
+		"mostActive": "Most pings (near houses and the street): 7–8am. 4 pings on 4 different mornings (10/28, 10/29, 11/3, 11/4), all by the foster home on 2200 S. Next most: 11pm–midnight (3 pings). Most movement: late morning to midday. On 10/31 he covered about half a mile between 11:20am and 12:20pm. 11/4 evening he moved from 2400 S 2400 W back toward the foster home (~0.35 mi) between ~7:12 and ~7:47pm."
 	},
 	"events": [
 		{
@@ -429,10 +429,10 @@ export const PRETZEL: LostDog = {
 			"d": "11/4",
 			"t": "~7:12 pm",
 			"k": "ping",
-			"w": 2383,
-			"s": 2520,
+			"w": 2390,
+			"s": 2400,
 			"who": "Liz",
-			"q": "Find My screenshot at 7:46 pm, \"34 minutes ago\": on a house on the east side of 2400 W, just south of where the creek crosses, about 2520 S (placed by matching the screenshot to OpenStreetMap). Mellissa: \"That's where I left all his bowls today.\"",
+			"q": "Find My screenshot at 7:46 pm, \"34 minutes ago\": on the house at 2400 S 2400 W. Mellissa: \"That's where I left all his bowls today.\"",
 			"c": "approx",
 			"channel": "#woof-crew",
 			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793846783855159",
