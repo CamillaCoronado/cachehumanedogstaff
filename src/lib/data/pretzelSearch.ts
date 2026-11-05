@@ -25,7 +25,7 @@ export const PRETZEL: LostDog = {
 		12.6
 	],
 	"summary": {
-		"lastKnown": "11/4 ~7:47pm, just south of 2200 S at ~2180 W",
+		"lastKnown": "11/4 ~9:25pm, Mellissa saw him going in and out of the barn behind 2114 W 2200 S (across from the foster home)",
 		"hotspot": "dashed circle by the foster home (9 of 18 pings); also overnight by 1600 W",
 		"mostActive": "most pings 7–8am, most movement late morning"
 	},
@@ -453,6 +453,20 @@ export const PRETZEL: LostDog = {
 			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793847467415879",
 			"h": 19.78,
 			"mv": true
+		},
+		{
+			"d": "11/4",
+			"t": "~9:25 pm",
+			"k": "seen",
+			"w": 2095,
+			"s": 2228,
+			"who": "Mellissa",
+			"q": "Watched him go into the barn on this property, come out, walk around, then go back in. Across from the foster home; lights were off so she didn't go onto the property. House has cameras. Plan: ask the owner to check cameras and let us set a trap there. (Time is a guess: her Google Earth screenshot is 9:28 pm, posted 9:58 pm.)",
+			"c": "approx",
+			"addr": "barn behind 2114 W 2200 S",
+			"channel": "#woof-crew",
+			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793854736495709",
+			"h": 21.42
 		},
 		{
 			"d": "11/4",
