@@ -114,7 +114,7 @@
 		if (!hoursEl) return;
 		hoursEl.replaceChildren();
 		const L = 40, R = 880, base = 110, x = (h: number) => L + ((R - L) * h) / 24;
-		const timed = dog.events.filter((e) => e.h != null && e.k !== 'clue').sort((a, b) => (a.h ?? 0) - (b.h ?? 0));
+		const timed = dog.events.filter((e) => e.h != null && !e.hide && (e.k !== 'clue' || !e.search)).sort((a, b) => (a.h ?? 0) - (b.h ?? 0));
 		// Shade the hours that have no reports at all.
 		const has = new Set(timed.map((e) => Math.floor(e.h ?? 0)));
 		for (let h = 0; h < 24; h++)
@@ -141,13 +141,13 @@
 		for (const e of timed) {
 			const b = Math.floor((e.h ?? 0) * 2) / 2;
 			const k = (stack[b] = (stack[b] ?? 0) + 1);
-			const c = e.k === 'seen' ? 'var(--ld-seen)' : 'var(--ld-ping)';
+			const c = col[e.k] ?? 'var(--ld-ping)';
 			const m = el('circle', { cx: x(e.h ?? 0), cy: base - 8 - (k - 1) * 16, r: 6.5, fill: e.mv ? 'var(--ld-panel)' : c, stroke: c, 'stroke-width': 2.2 }, hoursEl);
 			const tt = el('title', {}, m);
 			tt.textContent = `${e.d} ${e.t} · ${e.who}`;
 		}
 		const lg = el('text', { x: R, y: base + 38, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--ld-muted)' }, hoursEl);
-		lg.textContent = '● same spot as last report   ○ had moved   red = ping · blue = seen';
+		lg.textContent = '● same spot as last report   ○ had moved   red = ping · blue = seen · orange = clue';
 	}
 
 	function setFilter(f: string) {

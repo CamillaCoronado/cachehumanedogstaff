@@ -197,7 +197,8 @@ export const PRETZEL: LostDog = {
 			"q": "Found what is probably dog poop! He's been eating random plants.",
 			"c": "approx",
 			"channel": "#woof-crew",
-			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793405507872649"
+			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793405507872649",
+			"h": 18.18
 		},
 		{
 			"d": "10/30",
