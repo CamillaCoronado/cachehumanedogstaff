@@ -18,7 +18,11 @@
 	let mounted = false;
 	let marks: (SVGGElement | undefined)[] = [];
 	let numbers: (number | undefined)[] = [];
-	const VW = 1300, VH = 1000, V0 = [20, 60, VW, VH];
+	// Wide screens get a landscape view of the whole search; phones get a taller, closer view
+	// centered on the foster home so the markers are big enough to tap.
+	let narrow = false;
+	let asp = 1000 / 1300; // view height / width
+	let V0 = [20, 60, 1300, 1000];
 	let view = [...V0];
 
 	const col: Record<string, string> = { ping: 'var(--ld-ping)', seen: 'var(--ld-seen)', clue: 'var(--ld-clue)', land: 'var(--ld-ok)' };
@@ -38,6 +42,9 @@
 		parent.appendChild(e);
 		return e;
 	}
+
+	// Markers are drawn in map units, so scale them up on phones where the map is small.
+	const big = (x: number, y: number) => (narrow ? `translate(${x} ${y}) scale(1.7) translate(${-x} ${-y})` : '');
 
 	function drawMap() {
 		if (!mapEl) return;
@@ -75,13 +82,13 @@
 		}
 		if (dog.home) {
 			const x = X(dog.home.w), y = Y(dog.home.s);
-			const g = el('g', {}, g0);
+			const g = el('g', { transform: big(x, y) }, g0);
 			el('circle', { cx: x, cy: y, r: 16, fill: 'var(--ld-fg)', stroke: 'var(--ld-halo)', 'stroke-width': 3 }, g);
 			el('path', { d: `M${x - 8},${y + 1} L${x},${y - 7} L${x + 8},${y + 1} M${x - 5},${y - 1} L${x - 5},${y + 7} L${x + 5},${y + 7} L${x + 5},${y - 1}`, fill: 'none', stroke: 'var(--ld-panel)', 'stroke-width': 2, 'stroke-linejoin': 'round' }, g);
 			lab(x, y + 32, dog.home.label, false, { fill: 'var(--ld-fg)', 'font-weight': 700 });
 		}
 		for (const [w, s] of dog.pins ?? []) {
-			const g = el('g', { class: 'mk', 'data-k': 'pin' }, g0);
+			const g = el('g', { class: 'mk', 'data-k': 'pin', transform: big(X(w), Y(s)) }, g0);
 			el('path', { class: 'pinbody', d: `M${X(w)},${Y(s)} c-2,-6 -8,-10 -8,-16 a8,8 0 1,1 16,0 c0,6 -6,10 -8,16 z`, fill: 'var(--ld-pin)', stroke: 'var(--ld-halo)', 'stroke-width': 1.5 }, g);
 		}
 		let n = 0;
@@ -90,7 +97,7 @@
 			numbers[i] = ++n;
 			const c = colorOf(e);
 			const x = X(e.w), y = Y(e.s);
-			const g = el('g', { class: 'mk', 'data-k': e.k }, g0);
+			const g = el('g', { class: 'mk', 'data-k': e.k, transform: big(x, y) }, g0);
 			if (e.arrow) el('path', { d: `M${x + 20},${y - 4} l0,-70 m-7,10 l7,-10 l7,10`, stroke: 'var(--ld-seen)', 'stroke-width': 3, fill: 'none', 'stroke-linecap': 'round' }, g);
 			if (e.search) el('circle', { class: 'pinbody', cx: x, cy: y, r: 9, fill: 'var(--ld-panel)', stroke: c, 'stroke-width': 2, 'stroke-dasharray': '3 2' }, g);
 			else el('path', { class: 'pinbody', d: `M${x},${y} c-3,-9 -13,-14 -13,-25 a13,13 0 1,1 26,0 c0,11 -10,16 -13,25 z`, fill: c, stroke: 'rgba(0,0,0,.25)', 'stroke-width': 1 }, g);
@@ -106,7 +113,9 @@
 	function drawHours() {
 		if (!hoursEl) return;
 		hoursEl.replaceChildren();
-		const L = 40, R = 880, base = 110, x = (h: number) => L + ((R - L) * h) / 24;
+		const HW = narrow ? 520 : 900;
+		hoursEl.setAttribute('viewBox', `0 0 ${HW} 165`);
+		const L = narrow ? 24 : 40, R = HW - 20, base = 110, x = (h: number) => L + ((R - L) * h) / 24;
 		const timed = dog.events.filter((e) => e.h != null && !e.hide && (e.k !== 'clue' || !e.search)).sort((a, b) => (a.h ?? 0) - (b.h ?? 0));
 		// Shade the hours that have no reports at all.
 		const has = new Set(timed.map((e) => Math.floor(e.h ?? 0)));
@@ -116,13 +125,13 @@
 			const [a, b] = dog.activeWindow;
 			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'none', stroke: 'var(--ld-ping)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }, hoursEl);
 			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
-			t.textContent = 'MOST MOVEMENT';
+			t.textContent = narrow ? 'MOVING' : 'MOST MOVEMENT';
 		}
 		if (dog.pingWindow) {
 			const [a, b] = dog.pingWindow;
 			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-width': 1.5 }, hoursEl);
 			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
-			t.textContent = 'MOST PINGS';
+			t.textContent = narrow ? 'PINGS' : 'MOST PINGS';
 		}
 		el('line', { x1: L, y1: base, x2: R, y2: base, stroke: 'var(--ld-muted)', 'stroke-width': 1 }, hoursEl);
 		for (let h = 0; h <= 24; h += 3) {
@@ -140,7 +149,7 @@
 			tt.textContent = `${e.d} ${e.t} · ${e.who}`;
 		}
 		const lg = el('text', { x: R, y: base + 46, 'text-anchor': 'end', 'font-size': 16, fill: 'var(--ld-muted)' }, hoursEl);
-		lg.textContent = '● same spot as last report   ○ had moved   red = ping · blue = seen · orange = clue';
+		lg.textContent = narrow ? '○ had moved · red ping · blue seen · orange clue' : '● same spot as last report   ○ had moved   red = ping · blue = seen · orange = clue';
 	}
 
 	function setFilter(f: string) {
@@ -167,7 +176,7 @@
 	function zoom(f: number) {
 		const cx = view[0] + view[2] / 2, cy = view[1] + view[3] / 2;
 		const w = clampW(view[2] * f);
-		view = [cx - w / 2, cy - (w * VH) / VW / 2, w, (w * VH) / VW];
+		view = [cx - w / 2, cy - (w * asp) / 2, w, w * asp];
 		setView();
 	}
 	// One finger/mouse pans; two fingers pinch-zoom around their midpoint; the wheel zooms at the cursor.
@@ -181,7 +190,7 @@
 	function zoomAt(cx: number, cy: number, w: number, v: number[]) {
 		const r = mapEl.getBoundingClientRect();
 		const p = toSvg(cx, cy, v);
-		const h = (w * VH) / VW;
+		const h = w * asp;
 		view = [p.x - ((cx - r.left) / r.width) * w, p.y - ((cy - r.top) / r.height) * h, w, h];
 		setView();
 	}
@@ -206,7 +215,7 @@
 			const w = clampW(pinch0.v[2] * (pinch0.d / d));
 			const anchor = toSvg(pinch0.mx, pinch0.my, pinch0.v);
 			const r = mapEl.getBoundingClientRect();
-			const h = (w * VH) / VW;
+			const h = w * asp;
 			view = [anchor.x - ((mx - r.left) / r.width) * w, anchor.y - ((my - r.top) / r.height) * h, w, h];
 			setView();
 			return;
@@ -231,6 +240,13 @@
 	}
 
 	onMount(() => {
+		narrow = window.innerWidth <= 600;
+		if (narrow) {
+			asp = 1.25;
+			V0 = [360, -80, 880, 1100];
+			view = [...V0];
+			setView();
+		}
 		mounted = true;
 	});
 	$: if (mounted && dog) { drawMap(); drawHours(); }
@@ -255,6 +271,7 @@
 
 	<div class="grid">
 		<div class="mapbox">
+			<div class="mapwrap">
 			<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 			<svg bind:this={mapEl} viewBox="20 60 1300 1000" class="map" role="img" aria-label="Map of {dog.name} sightings"
 				on:pointerdown={down} on:pointermove={move} on:pointerup={up} on:pointercancel={up} on:pointerleave={up} on:wheel|nonpassive={wheel}></svg>
@@ -262,6 +279,7 @@
 				<button type="button" aria-label="Zoom in" on:click={() => zoom(0.7)}>+</button>
 				<button type="button" aria-label="Zoom out" on:click={() => zoom(1 / 0.7)}>−</button>
 				<button type="button" aria-label="Reset view" on:click={() => { view = [...V0]; setView(); }}>⟲</button>
+			</div>
 			</div>
 			<div class="legend">
 				<span><i class="dot" style="background:var(--ld-ping)"></i>AirTag ping</span>
@@ -338,7 +356,8 @@
 	@media (max-width:880px) { .grid { grid-template-columns:1fr; } }
 	.mapbox { position:relative; background:var(--ld-panel); border:1px solid var(--ld-line); border-radius:8px; overflow:hidden; }
 	.map { width:100%; height:auto; display:block; touch-action:none; cursor:grab; background:var(--ld-land); }
-	.zoom { position:absolute; right:10px; bottom:52px; display:flex; flex-direction:column; background:var(--ld-panel); border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,.3); overflow:hidden; }
+	.mapwrap { position:relative; }
+	.zoom { position:absolute; right:10px; bottom:10px; display:flex; flex-direction:column; background:var(--ld-panel); border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,.3); overflow:hidden; }
 	.zoom button { width:36px; height:36px; border:0; background:var(--ld-panel); color:var(--ld-muted); font-size:20px; cursor:pointer; }
 	.zoom button + button { border-top:1px solid var(--ld-line); }
 	.legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:.8rem; color:var(--ld-muted); padding:8px 12px; border-top:1px solid var(--ld-line); }
