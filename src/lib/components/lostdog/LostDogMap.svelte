@@ -166,12 +166,51 @@
 	const setView = () => mapEl?.setAttribute('viewBox', view.join(' '));
 	function zoom(f: number) {
 		const cx = view[0] + view[2] / 2, cy = view[1] + view[3] / 2;
-		const w = Math.min(2000, Math.max(200, view[2] * f));
+		const w = clampW(view[2] * f);
 		view = [cx - w / 2, cy - (w * VH) / VW / 2, w, (w * VH) / VW];
 		setView();
 	}
-	function down(e: PointerEvent) { p0 = { x: e.clientX, y: e.clientY, v: [...view] }; dragged = false; }
+	// One finger/mouse pans; two fingers pinch-zoom around their midpoint; the wheel zooms at the cursor.
+	const pts = new Map<number, { x: number; y: number }>();
+	let pinch0: { d: number; mx: number; my: number; v: number[] } | null = null;
+	const clampW = (w: number) => Math.min(2000, Math.max(150, w));
+	function toSvg(cx: number, cy: number, v: number[]) {
+		const r = mapEl.getBoundingClientRect();
+		return { x: v[0] + ((cx - r.left) / r.width) * v[2], y: v[1] + ((cy - r.top) / r.height) * v[3] };
+	}
+	function zoomAt(cx: number, cy: number, w: number, v: number[]) {
+		const r = mapEl.getBoundingClientRect();
+		const p = toSvg(cx, cy, v);
+		const h = (w * VH) / VW;
+		view = [p.x - ((cx - r.left) / r.width) * w, p.y - ((cy - r.top) / r.height) * h, w, h];
+		setView();
+	}
+	function startPinch() {
+		const [a, b] = [...pts.values()];
+		pinch0 = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, v: [...view] };
+		p0 = null;
+		dragged = true;
+	}
+	function down(e: PointerEvent) {
+		pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (pts.size === 2) startPinch();
+		else if (pts.size === 1) { p0 = { x: e.clientX, y: e.clientY, v: [...view] }; dragged = false; }
+	}
 	function move(e: PointerEvent) {
+		if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (pinch0 && pts.size >= 2) {
+			const [a, b] = [...pts.values()];
+			const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+			const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+			// Zoom around the starting midpoint, then pan by how far the midpoint moved.
+			const w = clampW(pinch0.v[2] * (pinch0.d / d));
+			const anchor = toSvg(pinch0.mx, pinch0.my, pinch0.v);
+			const r = mapEl.getBoundingClientRect();
+			const h = (w * VH) / VW;
+			view = [anchor.x - ((mx - r.left) / r.width) * w, anchor.y - ((my - r.top) / r.height) * h, w, h];
+			setView();
+			return;
+		}
 		if (!p0) return;
 		const k = view[2] / mapEl.getBoundingClientRect().width;
 		const dx = e.clientX - p0.x, dy = e.clientY - p0.y;
@@ -179,7 +218,17 @@
 		view = [p0.v[0] - dx * k, p0.v[1] - dy * k, view[2], view[3]];
 		setView();
 	}
-	function up() { p0 = null; setTimeout(() => (dragged = false), 0); }
+	function up(e: PointerEvent) {
+		pts.delete(e.pointerId);
+		if (pts.size < 2) pinch0 = null;
+		if (pts.size === 1) { const [q] = [...pts.values()]; p0 = { x: q.x, y: q.y, v: [...view] }; }
+		else p0 = null;
+		setTimeout(() => (dragged = false), 0);
+	}
+	function wheel(e: WheelEvent) {
+		e.preventDefault();
+		zoomAt(e.clientX, e.clientY, clampW(view[2] * Math.exp(e.deltaY * 0.0015)), view);
+	}
 
 	onMount(() => {
 		mounted = true;
@@ -197,17 +246,10 @@
 </script>
 
 <div class="ld">
-	{#if dog.summary}
-		<div class="now">
-			{#if dog.summary.lastKnown}<div class="card"><b>Last known</b>{dog.summary.lastKnown}</div>{/if}
-			{#if dog.summary.hotspot}<div class="card"><b>Hotspot</b>{dog.summary.hotspot}</div>{/if}
-			{#if dog.summary.mostActive}<div class="card hl"><b>Most active</b>{dog.summary.mostActive}</div>{/if}
-		</div>
-	{/if}
 
 	<section class="act">
 		<h2>When he's been found, by hour</h2>
-		<p>Each mark is one ping or sighting with a known time. Hollow marks are where he had moved since the last report. A ping only happens when an iPhone passes him, so hours when people were out searching are over-counted.</p>
+		<p>Each mark is one ping or sighting with a known time. Hollow marks are where he had moved since the last report.</p>
 		<div class="hscroll"><svg bind:this={hoursEl} viewBox="0 0 900 165" class="hours" role="img" aria-label="Pings and sightings by hour of day"></svg></div>
 	</section>
 
@@ -215,7 +257,7 @@
 		<div class="mapbox">
 			<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 			<svg bind:this={mapEl} viewBox="20 60 1300 1000" class="map" role="img" aria-label="Map of {dog.name} sightings"
-				on:pointerdown={down} on:pointermove={move} on:pointerup={up} on:pointercancel={up}></svg>
+				on:pointerdown={down} on:pointermove={move} on:pointerup={up} on:pointercancel={up} on:pointerleave={up} on:wheel|nonpassive={wheel}></svg>
 			<div class="zoom">
 				<button type="button" aria-label="Zoom in" on:click={() => zoom(0.7)}>+</button>
 				<button type="button" aria-label="Zoom out" on:click={() => zoom(1 / 0.7)}>−</button>
@@ -224,11 +266,18 @@
 			<div class="legend">
 				<span><i class="dot" style="background:var(--ld-ping)"></i>AirTag ping</span>
 				<span><i class="dot" style="background:var(--ld-seen)"></i>seen by a person</span>
-				<span><i class="dot" style="background:var(--ld-clue)"></i>clue / searcher (not a sighting)</span>
+				<span><i class="dot" style="background:var(--ld-clue)"></i>clue (not a sighting)</span>
 				<span><i class="dot" style="background:var(--ld-pin)"></i>saved pin (no date)</span>
 				<span><i class="dot" style="background:var(--ld-nogo)"></i>stay off</span>
 				<span><i class="dot" style="background:var(--ld-ok)"></i>OK to search</span>
 			</div>
+			{#if dog.summary}
+				<div class="keyfacts">
+					{#if dog.summary.lastKnown}<span><b>Last known:</b> {dog.summary.lastKnown}</span>{/if}
+					{#if dog.summary.hotspot}<span><b>Hotspot:</b> {dog.summary.hotspot}</span>{/if}
+					{#if dog.summary.mostActive}<span><b>Most active:</b> {dog.summary.mostActive}</span>{/if}
+				</div>
+			{/if}
 			<div class="osm">Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
 		</div>
 		<div>
@@ -280,10 +329,6 @@
 			--ld-ping:#f28b82; --ld-seen:#8ab4f8; --ld-clue:#fcad70; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
 		}
 	}
-	.now { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-bottom:12px; }
-	.card { background:var(--ld-panel); border:1px solid var(--ld-line); border-radius:8px; padding:12px 14px; min-width:0; }
-	.card b { display:block; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; color:var(--ld-muted); font-weight:700; margin-bottom:2px; }
-	.card.hl { border-color:var(--ld-ping); }
 	.act { margin-bottom:16px; }
 	.act h2 { font-size:1rem; font-weight:600; margin:0 0 2px; }
 	.act p { margin:0 0 6px; color:var(--ld-muted); font-size:.9rem; max-width:80ch; }
@@ -317,6 +362,8 @@
 	.conf { font-size:.68rem; padding:1px 6px; border-radius:4px; border:1px solid var(--ld-line); margin-left:6px; white-space:nowrap; color:var(--ld-muted); }
 	.map :global(.mk) { cursor:pointer; }
 	@media (prefers-color-scheme: dark) { .map :global(.tiles) { filter:invert(.92) hue-rotate(180deg) brightness(.95) contrast(.9); } }
+	.keyfacts { display:flex; flex-direction:column; gap:2px; font-size:.8rem; color:var(--ld-fg); padding:0 12px 8px; }
+	.keyfacts b { font-weight:600; }
 	.osm { font-size:.7rem; color:var(--ld-muted); padding:0 12px 8px; }
 	.osm a { color:inherit; }
 	.map :global(.mk.dim) { opacity:.15; }
