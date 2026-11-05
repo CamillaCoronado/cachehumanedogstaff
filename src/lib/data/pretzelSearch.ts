@@ -25,9 +25,9 @@ export const PRETZEL: LostDog = {
 		12.6
 	],
 	"summary": {
-		"lastKnown": "11/4 ~7:47pm ping just south of 2200 S at ~2180 W, about a block west of the foster home. 35 min earlier (~7:12pm) he pinged at the house at 2400 S 2400 W, where Mellissa left his bowls. Overnight 11/3–11/4 (~11:11pm, ~11:23pm, 2:21am) he was half a mile EAST, just north of 2200 S by S 1600 W.",
-		"hotspot": "9 of 18 AirTag pings are within about a block of the foster home at 2081 W 2200 S. He keeps circling back to where he escaped. Second cluster: 3 overnight pings by S 1600 W & 2200 S (11/3–11/4).",
-		"mostActive": "Most pings (near houses and the street): 7–8am. 4 pings on 4 different mornings (10/28, 10/29, 11/3, 11/4), all by the foster home on 2200 S. Next most: 11pm–midnight (3 pings), 2 of them by S 1600 W. Most movement: late morning to midday. On 10/31 he covered about half a mile between 11:20am and 12:20pm. 11/4 evening he moved from 2400 S 2400 W back toward the foster home (~0.35 mi) between ~7:12 and ~7:47pm."
+		"lastKnown": "11/4 ~7:47pm, just south of 2200 S at ~2180 W",
+		"hotspot": "dashed circle by the foster home (9 of 18 pings); also overnight by 1600 W",
+		"mostActive": "most pings 7–8am, most movement late morning"
 	},
 	"events": [
 		{

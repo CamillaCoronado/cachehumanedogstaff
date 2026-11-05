@@ -197,17 +197,10 @@
 </script>
 
 <div class="ld">
-	{#if dog.summary}
-		<div class="now">
-			{#if dog.summary.lastKnown}<div class="card"><b>Last known</b>{dog.summary.lastKnown}</div>{/if}
-			{#if dog.summary.hotspot}<div class="card"><b>Hotspot</b>{dog.summary.hotspot}</div>{/if}
-			{#if dog.summary.mostActive}<div class="card hl"><b>Most active</b>{dog.summary.mostActive}</div>{/if}
-		</div>
-	{/if}
 
 	<section class="act">
 		<h2>When he's been found, by hour</h2>
-		<p>Each mark is one ping or sighting with a known time. Hollow marks are where he had moved since the last report. A ping only happens when an iPhone passes him, so hours when people were out searching are over-counted.</p>
+		<p>Each mark is one ping or sighting with a known time. Hollow marks are where he had moved since the last report.</p>
 		<div class="hscroll"><svg bind:this={hoursEl} viewBox="0 0 900 165" class="hours" role="img" aria-label="Pings and sightings by hour of day"></svg></div>
 	</section>
 
@@ -224,11 +217,18 @@
 			<div class="legend">
 				<span><i class="dot" style="background:var(--ld-ping)"></i>AirTag ping</span>
 				<span><i class="dot" style="background:var(--ld-seen)"></i>seen by a person</span>
-				<span><i class="dot" style="background:var(--ld-clue)"></i>clue / searcher (not a sighting)</span>
+				<span><i class="dot" style="background:var(--ld-clue)"></i>clue (not a sighting)</span>
 				<span><i class="dot" style="background:var(--ld-pin)"></i>saved pin (no date)</span>
 				<span><i class="dot" style="background:var(--ld-nogo)"></i>stay off</span>
 				<span><i class="dot" style="background:var(--ld-ok)"></i>OK to search</span>
 			</div>
+			{#if dog.summary}
+				<div class="keyfacts">
+					{#if dog.summary.lastKnown}<span><b>Last known:</b> {dog.summary.lastKnown}</span>{/if}
+					{#if dog.summary.hotspot}<span><b>Hotspot:</b> {dog.summary.hotspot}</span>{/if}
+					{#if dog.summary.mostActive}<span><b>Most active:</b> {dog.summary.mostActive}</span>{/if}
+				</div>
+			{/if}
 			<div class="osm">Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
 		</div>
 		<div>
@@ -280,10 +280,6 @@
 			--ld-ping:#f28b82; --ld-seen:#8ab4f8; --ld-clue:#fcad70; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
 		}
 	}
-	.now { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-bottom:12px; }
-	.card { background:var(--ld-panel); border:1px solid var(--ld-line); border-radius:8px; padding:12px 14px; min-width:0; }
-	.card b { display:block; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; color:var(--ld-muted); font-weight:700; margin-bottom:2px; }
-	.card.hl { border-color:var(--ld-ping); }
 	.act { margin-bottom:16px; }
 	.act h2 { font-size:1rem; font-weight:600; margin:0 0 2px; }
 	.act p { margin:0 0 6px; color:var(--ld-muted); font-size:.9rem; max-width:80ch; }
@@ -317,6 +313,8 @@
 	.conf { font-size:.68rem; padding:1px 6px; border-radius:4px; border:1px solid var(--ld-line); margin-left:6px; white-space:nowrap; color:var(--ld-muted); }
 	.map :global(.mk) { cursor:pointer; }
 	@media (prefers-color-scheme: dark) { .map :global(.tiles) { filter:invert(.92) hue-rotate(180deg) brightness(.95) contrast(.9); } }
+	.keyfacts { display:flex; flex-direction:column; gap:2px; font-size:.8rem; color:var(--ld-fg); padding:0 12px 8px; }
+	.keyfacts b { font-weight:600; }
 	.osm { font-size:.7rem; color:var(--ld-muted); padding:0 12px 8px; }
 	.osm a { color:inherit; }
 	.map :global(.mk.dim) { opacity:.15; }
