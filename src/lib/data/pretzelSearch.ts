@@ -331,19 +331,6 @@ export const PRETZEL: LostDog = {
 			"mv": true
 		},
 		{
-			"d": "10/31",
-			"t": "12:29 pm",
-			"k": "clue",
-			"w": 2400,
-			"s": 1700,
-			"who": "Mellissa",
-			"q": "K I'm on 1700 S 2400 West. (searching, not a sighting)",
-			"c": "approx",
-			"channel": "#woof-crew",
-			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793471397156689",
-			"search": true
-		},
-		{
 			"d": "11/1",
 			"t": "~3:32 pm",
 			"k": "ping",
