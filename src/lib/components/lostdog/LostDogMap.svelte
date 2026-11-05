@@ -122,19 +122,19 @@
 		if (dog.activeWindow) {
 			const [a, b] = dog.activeWindow;
 			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'none', stroke: 'var(--ld-ping)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }, hoursEl);
-			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
+			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
 			t.textContent = 'MOST MOVEMENT';
 		}
 		if (dog.pingWindow) {
 			const [a, b] = dog.pingWindow;
 			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-width': 1.5 }, hoursEl);
-			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
+			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
 			t.textContent = 'MOST PINGS';
 		}
 		el('line', { x1: L, y1: base, x2: R, y2: base, stroke: 'var(--ld-muted)', 'stroke-width': 1 }, hoursEl);
 		for (let h = 0; h <= 24; h += 3) {
 			el('line', { x1: x(h), y1: base, x2: x(h), y2: base + 5, stroke: 'var(--ld-muted)' }, hoursEl);
-			const t = el('text', { x: x(h), y: base + 20, 'text-anchor': 'middle', 'font-size': 11, fill: 'var(--ld-muted)' }, hoursEl);
+			const t = el('text', { x: x(h), y: base + 24, 'text-anchor': 'middle', 'font-size': 16, fill: 'var(--ld-muted)' }, hoursEl);
 			t.textContent = h === 0 || h === 24 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`;
 		}
 		const stack: Record<number, number> = {};
@@ -142,11 +142,11 @@
 			const b = Math.floor((e.h ?? 0) * 2) / 2;
 			const k = (stack[b] = (stack[b] ?? 0) + 1);
 			const c = col[e.k] ?? 'var(--ld-ping)';
-			const m = el('circle', { cx: x(e.h ?? 0), cy: base - 8 - (k - 1) * 16, r: 6.5, fill: e.mv ? 'var(--ld-panel)' : c, stroke: c, 'stroke-width': 2.2 }, hoursEl);
+			const m = el('circle', { cx: x(e.h ?? 0), cy: base - 10 - (k - 1) * 20, r: 9, fill: e.mv ? 'var(--ld-panel)' : c, stroke: c, 'stroke-width': 2.2 }, hoursEl);
 			const tt = el('title', {}, m);
 			tt.textContent = `${e.d} ${e.t} · ${e.who}`;
 		}
-		const lg = el('text', { x: R, y: base + 38, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--ld-muted)' }, hoursEl);
+		const lg = el('text', { x: R, y: base + 46, 'text-anchor': 'end', 'font-size': 16, fill: 'var(--ld-muted)' }, hoursEl);
 		lg.textContent = '● same spot as last report   ○ had moved   red = ping · blue = seen · orange = clue';
 	}
 
@@ -215,7 +215,7 @@
 	<section class="act">
 		<h2>When he's been found, by hour</h2>
 		<p>Each mark is one ping or sighting with a known time. Hollow marks are where he had moved since the last report. A ping only happens when an iPhone passes him, so hours when people were out searching are over-counted.</p>
-		<div class="hscroll"><svg bind:this={hoursEl} viewBox="0 0 900 150" class="hours" role="img" aria-label="Pings and sightings by hour of day"></svg></div>
+		<div class="hscroll"><svg bind:this={hoursEl} viewBox="0 0 900 165" class="hours" role="img" aria-label="Pings and sightings by hour of day"></svg></div>
 	</section>
 
 	<div class="grid">
@@ -294,7 +294,7 @@
 	.act h2 { font-size:1rem; font-weight:600; margin:0 0 2px; }
 	.act p { margin:0 0 6px; color:var(--ld-muted); font-size:.9rem; max-width:80ch; }
 	.hscroll { overflow-x:auto; }
-	.hours { width:100%; min-width:560px; height:auto; display:block; }
+	.hours { width:100%; height:auto; display:block; }
 	.grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(0,1fr); gap:16px; align-items:start; }
 	@media (max-width:880px) { .grid { grid-template-columns:1fr; } }
 	.mapbox { position:relative; background:var(--ld-panel); border:1px solid var(--ld-line); border-radius:8px; overflow:hidden; }
