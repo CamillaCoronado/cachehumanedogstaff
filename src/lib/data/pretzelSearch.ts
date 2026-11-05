@@ -25,9 +25,9 @@ export const PRETZEL: LostDog = {
 		12.6
 	],
 	"summary": {
-		"lastKnown": "11/4 morning ping at ~2114 W 2200 S, north side of the pond. The 11/3 ~11pm and 11/4 2:21am pings were in the same spot.",
-		"hotspot": "11 of 16 AirTag pings are within about a block of the foster home at 2081 W 2200 S. He keeps circling back to where he escaped.",
-		"mostActive": "Most pings (near houses and the street): 7–8am. 4 pings on 4 different mornings (10/28, 10/29, 11/3, 11/4), all by the foster home on 2200 S. Next most: 11pm–midnight (3 pings). Most movement: late morning to midday. On 10/31 he covered about half a mile between 11:20am and 12:20pm."
+		"lastKnown": "11/4 ~7:47pm ping just south of 2200 S at ~2125 W, by the foster home. 35 min earlier (~7:12pm) he pinged on 2400 W where Mellissa left his bowls. The 11/4 morning, 2:21am and 11/3 ~11pm pings were in the same area by the foster home.",
+		"hotspot": "12 of 18 AirTag pings are within about a block of the foster home at 2081 W 2200 S. He keeps circling back to where he escaped.",
+		"mostActive": "Most pings (near houses and the street): 7–8am. 4 pings on 4 different mornings (10/28, 10/29, 11/3, 11/4), all by the foster home on 2200 S. Next most: 11pm–midnight (3 pings). Most movement: late morning to midday. On 10/31 he covered about half a mile between 11:20am and 12:20pm. 11/4 evening he moved from 2400 W back to the foster home (~1/4 mi) between ~7:12 and ~7:47pm."
 	},
 	"events": [
 		{
@@ -424,6 +424,34 @@ export const PRETZEL: LostDog = {
 			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793805648327259",
 			"h": 7.6,
 			"addr": "2114 W 2200 S"
+		},
+		{
+			"d": "11/4",
+			"t": "~7:12 pm",
+			"k": "ping",
+			"w": 2355,
+			"s": 2280,
+			"who": "Liz",
+			"q": "Find My screenshot at 7:46 pm, \"34 minutes ago\": east side of S 2400 W, north of 2600 S (distance north is approximate). Mellissa: \"That's where I left all his bowls today.\"",
+			"c": "approx",
+			"channel": "#woof-crew",
+			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793846783855159",
+			"h": 19.2,
+			"mv": true
+		},
+		{
+			"d": "11/4",
+			"t": "~7:47 pm",
+			"k": "ping",
+			"w": 2125,
+			"s": 2210,
+			"who": "Liz",
+			"q": "Find My screenshot at 7:57 pm, \"10 minutes ago\": just south of 2200 S, west of the foster home, same spot as the morning ping. Liz: \"No new pings\" after that. Liz/Camilla planning an evening stakeout Friday.",
+			"c": "approx",
+			"channel": "#woof-crew",
+			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793847467415879",
+			"h": 19.78,
+			"mv": true
 		},
 		{
 			"d": "11/4",
