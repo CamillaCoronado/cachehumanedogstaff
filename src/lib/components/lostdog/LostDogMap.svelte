@@ -166,12 +166,51 @@
 	const setView = () => mapEl?.setAttribute('viewBox', view.join(' '));
 	function zoom(f: number) {
 		const cx = view[0] + view[2] / 2, cy = view[1] + view[3] / 2;
-		const w = Math.min(2000, Math.max(200, view[2] * f));
+		const w = clampW(view[2] * f);
 		view = [cx - w / 2, cy - (w * VH) / VW / 2, w, (w * VH) / VW];
 		setView();
 	}
-	function down(e: PointerEvent) { p0 = { x: e.clientX, y: e.clientY, v: [...view] }; dragged = false; }
+	// One finger/mouse pans; two fingers pinch-zoom around their midpoint; the wheel zooms at the cursor.
+	const pts = new Map<number, { x: number; y: number }>();
+	let pinch0: { d: number; mx: number; my: number; v: number[] } | null = null;
+	const clampW = (w: number) => Math.min(2000, Math.max(150, w));
+	function toSvg(cx: number, cy: number, v: number[]) {
+		const r = mapEl.getBoundingClientRect();
+		return { x: v[0] + ((cx - r.left) / r.width) * v[2], y: v[1] + ((cy - r.top) / r.height) * v[3] };
+	}
+	function zoomAt(cx: number, cy: number, w: number, v: number[]) {
+		const r = mapEl.getBoundingClientRect();
+		const p = toSvg(cx, cy, v);
+		const h = (w * VH) / VW;
+		view = [p.x - ((cx - r.left) / r.width) * w, p.y - ((cy - r.top) / r.height) * h, w, h];
+		setView();
+	}
+	function startPinch() {
+		const [a, b] = [...pts.values()];
+		pinch0 = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, v: [...view] };
+		p0 = null;
+		dragged = true;
+	}
+	function down(e: PointerEvent) {
+		pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (pts.size === 2) startPinch();
+		else if (pts.size === 1) { p0 = { x: e.clientX, y: e.clientY, v: [...view] }; dragged = false; }
+	}
 	function move(e: PointerEvent) {
+		if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (pinch0 && pts.size >= 2) {
+			const [a, b] = [...pts.values()];
+			const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+			const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+			// Zoom around the starting midpoint, then pan by how far the midpoint moved.
+			const w = clampW(pinch0.v[2] * (pinch0.d / d));
+			const anchor = toSvg(pinch0.mx, pinch0.my, pinch0.v);
+			const r = mapEl.getBoundingClientRect();
+			const h = (w * VH) / VW;
+			view = [anchor.x - ((mx - r.left) / r.width) * w, anchor.y - ((my - r.top) / r.height) * h, w, h];
+			setView();
+			return;
+		}
 		if (!p0) return;
 		const k = view[2] / mapEl.getBoundingClientRect().width;
 		const dx = e.clientX - p0.x, dy = e.clientY - p0.y;
@@ -179,7 +218,17 @@
 		view = [p0.v[0] - dx * k, p0.v[1] - dy * k, view[2], view[3]];
 		setView();
 	}
-	function up() { p0 = null; setTimeout(() => (dragged = false), 0); }
+	function up(e: PointerEvent) {
+		pts.delete(e.pointerId);
+		if (pts.size < 2) pinch0 = null;
+		if (pts.size === 1) { const [q] = [...pts.values()]; p0 = { x: q.x, y: q.y, v: [...view] }; }
+		else p0 = null;
+		setTimeout(() => (dragged = false), 0);
+	}
+	function wheel(e: WheelEvent) {
+		e.preventDefault();
+		zoomAt(e.clientX, e.clientY, clampW(view[2] * Math.exp(e.deltaY * 0.0015)), view);
+	}
 
 	onMount(() => {
 		mounted = true;
@@ -208,7 +257,7 @@
 		<div class="mapbox">
 			<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 			<svg bind:this={mapEl} viewBox="20 60 1300 1000" class="map" role="img" aria-label="Map of {dog.name} sightings"
-				on:pointerdown={down} on:pointermove={move} on:pointerup={up} on:pointercancel={up}></svg>
+				on:pointerdown={down} on:pointermove={move} on:pointerup={up} on:pointercancel={up} on:pointerleave={up} on:wheel|nonpassive={wheel}></svg>
 			<div class="zoom">
 				<button type="button" aria-label="Zoom in" on:click={() => zoom(0.7)}>+</button>
 				<button type="button" aria-label="Zoom out" on:click={() => zoom(1 / 0.7)}>−</button>
