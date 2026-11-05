@@ -43,8 +43,21 @@
 		return e;
 	}
 
-	// Markers are drawn in map units, so scale them up on phones where the map is small.
-	const big = (x: number, y: number) => (narrow ? `translate(${x} ${y}) scale(1.7) translate(${-x} ${-y})` : '');
+	// Markers are drawn in map units. Scale them so they stay the same size on screen at any
+	// zoom (zooming in spreads them apart instead of growing them), and bigger on phones.
+	const scaled: [SVGElement, number, number, number][] = [];
+	const mkT = (x: number, y: number, k: number) => {
+		const f = k * (narrow ? 1.7 : 1) * (view[2] / V0[2]);
+		return `translate(${x} ${y}) scale(${f}) translate(${-x} ${-y})`;
+	};
+	const big = (x: number, y: number, k = 1) => mkT(x, y, k);
+	function track<T extends SVGElement>(g: T, x: number, y: number, k = 1): T {
+		scaled.push([g, x, y, k]);
+		return g;
+	}
+	function rescale() {
+		for (const [g, x, y, k] of scaled) g.setAttribute('transform', mkT(x, y, k));
+	}
 
 	function drawMap() {
 		if (!mapEl) return;
@@ -65,6 +78,7 @@
 		const lab = (x: number, y: number, txt: string, rot = false, extra: Record<string, string | number> = {}) => {
 			const t = el('text', { x, y, 'font-size': 12, 'text-anchor': 'middle', fill: 'var(--ld-label)', stroke: 'var(--ld-halo)', 'stroke-width': 3, 'paint-order': 'stroke', 'font-weight': 500, ...(rot ? { transform: `rotate(-90 ${x} ${y})` } : {}), ...extra }, g0);
 			t.textContent = txt;
+			return t;
 		};
 		for (const w of [1600, 2000, 2400, 2800]) lab(X(w) - 10, Y(2080), `S ${w} W`, true, { 'font-size': 15, 'font-weight': 700 });
 		for (const s of [1800, 2200, 2600]) lab(X(2300), Y(s) - 8, `W ${s} S`, false, { 'font-size': 15, 'font-weight': 700 });
@@ -80,15 +94,17 @@
 			el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 4, fill: c, 'fill-opacity': 0.1, stroke: c, 'stroke-dasharray': '5 4', 'stroke-width': 1.4 }, g0);
 			lab(X(w2) + (X(w1) - X(w2)) / 2, Y(s2) + 16, e.c === 'nogo' ? 'no-go (approx)' : e.zoneKind === 'area' ? 'first search area' : 'seen running in this field', false, { fill: c, 'font-size': 11, 'font-weight': 700 });
 		}
+		scaled.length = 0;
 		if (dog.home) {
 			const x = X(dog.home.w), y = Y(dog.home.s);
-			const g = el('g', { transform: big(x, y) }, g0);
+			const g = track(el('g', { transform: big(x, y, 0.6) }, g0), x, y, 0.6);
 			el('circle', { cx: x, cy: y, r: 16, fill: 'var(--ld-fg)', stroke: 'var(--ld-halo)', 'stroke-width': 3 }, g);
 			el('path', { d: `M${x - 8},${y + 1} L${x},${y - 7} L${x + 8},${y + 1} M${x - 5},${y - 1} L${x - 5},${y + 7} L${x + 5},${y + 7} L${x + 5},${y - 1}`, fill: 'none', stroke: 'var(--ld-panel)', 'stroke-width': 2, 'stroke-linejoin': 'round' }, g);
-			lab(x, y + 32, dog.home.label, false, { fill: 'var(--ld-fg)', 'font-weight': 700 });
+			const hl = lab(x, y + 40, dog.home.label, false, { fill: 'var(--ld-fg)', 'font-weight': 700 });
+			if (hl) { g.appendChild(hl); }
 		}
 		for (const [w, s] of dog.pins ?? []) {
-			const g = el('g', { class: 'mk', 'data-k': 'pin', transform: big(X(w), Y(s)) }, g0);
+			const g = track(el('g', { class: 'mk', 'data-k': 'pin', transform: big(X(w), Y(s)) }, g0), X(w), Y(s));
 			el('path', { class: 'pinbody', d: `M${X(w)},${Y(s)} c-2,-6 -8,-10 -8,-16 a8,8 0 1,1 16,0 c0,6 -6,10 -8,16 z`, fill: 'var(--ld-pin)', stroke: 'var(--ld-halo)', 'stroke-width': 1.5 }, g);
 		}
 		let n = 0;
@@ -97,7 +113,7 @@
 			numbers[i] = ++n;
 			const c = colorOf(e);
 			const x = X(e.w), y = Y(e.s);
-			const g = el('g', { class: 'mk', 'data-k': e.k, transform: big(x, y) }, g0);
+			const g = track(el('g', { class: 'mk', 'data-k': e.k, transform: big(x, y) }, g0), x, y);
 			if (e.arrow) el('path', { d: `M${x + 20},${y - 4} l0,-70 m-7,10 l7,-10 l7,10`, stroke: 'var(--ld-seen)', 'stroke-width': 3, fill: 'none', 'stroke-linecap': 'round' }, g);
 			if (e.search) el('circle', { class: 'pinbody', cx: x, cy: y, r: 9, fill: 'var(--ld-panel)', stroke: c, 'stroke-width': 2, 'stroke-dasharray': '3 2' }, g);
 			else el('path', { class: 'pinbody', d: `M${x},${y} c-3,-9 -13,-14 -13,-25 a13,13 0 1,1 26,0 c0,11 -10,16 -13,25 z`, fill: c, stroke: 'rgba(0,0,0,.25)', 'stroke-width': 1 }, g);
@@ -172,7 +188,7 @@
 	// Pan and zoom by moving the viewBox.
 	let dragged = false;
 	let p0: { x: number; y: number; v: number[] } | null = null;
-	const setView = () => mapEl?.setAttribute('viewBox', view.join(' '));
+	const setView = () => { mapEl?.setAttribute('viewBox', view.join(' ')); rescale(); };
 	function zoom(f: number) {
 		const cx = view[0] + view[2] / 2, cy = view[1] + view[3] / 2;
 		const w = clampW(view[2] * f);
@@ -182,7 +198,7 @@
 	// One finger/mouse pans; two fingers pinch-zoom around their midpoint; the wheel zooms at the cursor.
 	const pts = new Map<number, { x: number; y: number }>();
 	let pinch0: { d: number; mx: number; my: number; v: number[] } | null = null;
-	const clampW = (w: number) => Math.min(2000, Math.max(150, w));
+	const clampW = (w: number) => Math.min(2000, Math.max(30, w));
 	function toSvg(cx: number, cy: number, v: number[]) {
 		const r = mapEl.getBoundingClientRect();
 		return { x: v[0] + ((cx - r.left) / r.width) * v[2], y: v[1] + ((cy - r.top) / r.height) * v[3] };
@@ -201,6 +217,9 @@
 		dragged = true;
 	}
 	function down(e: PointerEvent) {
+		// A primary pointer means nothing else is touching, so drop any finger whose
+		// pointerup we never got (otherwise one finger acts like a pinch and zooms).
+		if (e.isPrimary) { pts.clear(); pinch0 = null; }
 		pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
 		if (pts.size === 2) startPinch();
 		else if (pts.size === 1) { p0 = { x: e.clientX, y: e.clientY, v: [...view] }; dragged = false; }
