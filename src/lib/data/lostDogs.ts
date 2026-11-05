@@ -10,7 +10,8 @@ export interface LostDogEvent {
 	t: string;
 	/** Hour of day in Mountain time, for the activity chart. Leave out when unknown. */
 	h?: number;
-	k: 'ping' | 'seen' | 'land';
+	/** seen = a person actually saw him. clue = heat source, poop, a searcher's spot, etc. */
+	k: 'ping' | 'seen' | 'clue' | 'land';
 	w: number;
 	s: number;
 	who: string;

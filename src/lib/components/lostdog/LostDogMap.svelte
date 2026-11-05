@@ -14,14 +14,14 @@
 
 	let mapEl: SVGSVGElement;
 	let hoursEl: SVGSVGElement;
-	let filter: 'all' | 'ping' | 'seen' | 'land' = 'all';
+	let filter: 'all' | 'ping' | 'seen' | 'clue' | 'land' = 'all';
 	let selected: number | null = null;
 	let mounted = false;
 	let marks: (SVGGElement | undefined)[] = [];
 	let numbers: (number | undefined)[] = [];
 	let view = [0, 0, 960, 1000];
 
-	const col: Record<string, string> = { ping: 'var(--ld-ping)', seen: 'var(--ld-seen)', land: 'var(--ld-ok)' };
+	const col: Record<string, string> = { ping: 'var(--ld-ping)', seen: 'var(--ld-seen)', clue: 'var(--ld-clue)', land: 'var(--ld-ok)' };
 	const confLabel: Record<string, string> = {
 		exact: 'exact address',
 		approx: 'approx',
@@ -114,7 +114,7 @@
 		if (!hoursEl) return;
 		hoursEl.replaceChildren();
 		const L = 40, R = 880, base = 110, x = (h: number) => L + ((R - L) * h) / 24;
-		const timed = dog.events.filter((e) => e.h != null).sort((a, b) => (a.h ?? 0) - (b.h ?? 0));
+		const timed = dog.events.filter((e) => e.h != null && e.k !== 'clue').sort((a, b) => (a.h ?? 0) - (b.h ?? 0));
 		// Shade the hours that have no reports at all.
 		const has = new Set(timed.map((e) => Math.floor(e.h ?? 0)));
 		for (let h = 0; h < 24; h++)
@@ -231,6 +231,7 @@
 			<div class="legend">
 				<span><i class="dot" style="background:var(--ld-ping)"></i>AirTag ping</span>
 				<span><i class="dot" style="background:var(--ld-seen)"></i>seen by a person</span>
+				<span><i class="dot" style="background:var(--ld-clue)"></i>clue / searcher (not a sighting)</span>
 				<span><i class="dot" style="background:var(--ld-pin)"></i>saved pin (no date)</span>
 				<span><i class="dot" style="background:var(--ld-nogo)"></i>stay off</span>
 				<span><i class="dot" style="background:var(--ld-ok)"></i>OK to search</span>
@@ -238,7 +239,7 @@
 		</div>
 		<div>
 			<div class="filters" role="group" aria-label="Filter">
-				{#each [['all', 'All'], ['ping', 'Pings'], ['seen', 'Seen'], ['land', 'Land / access']] as [f, label]}
+				{#each [['all', 'All'], ['ping', 'Pings'], ['seen', 'Seen'], ['clue', 'Clues'], ['land', 'Land / access']] as [f, label]}
 					<button type="button" aria-pressed={filter === f} on:click={() => setFilter(f)}>{label}</button>
 				{/each}
 			</div>
@@ -274,7 +275,7 @@
 		--ld-panel:#ffffff; --ld-fg:#202124; --ld-muted:#5f6368; --ld-line:#dadce0;
 		--ld-land:#f5f3ed; --ld-farm:#e6efd9; --ld-road:#ffffff; --ld-casing:#d4d6d9; --ld-major:#fde293; --ld-majorcase:#f2c94c;
 		--ld-water:#aadaff; --ld-creek:#73b3f2; --ld-label:#5f6368; --ld-halo:#ffffff;
-		--ld-ping:#ea4335; --ld-seen:#4285f4; --ld-pin:#a142f4; --ld-nogo:#d93025; --ld-ok:#188038; --ld-hot:rgba(234,67,53,.12);
+		--ld-ping:#ea4335; --ld-seen:#4285f4; --ld-clue:#e37400; --ld-pin:#a142f4; --ld-nogo:#d93025; --ld-ok:#188038; --ld-hot:rgba(234,67,53,.12);
 		color: var(--ld-fg);
 	}
 	@media (prefers-color-scheme: dark) {
@@ -282,7 +283,7 @@
 			--ld-panel:#202124; --ld-fg:#e8eaed; --ld-muted:#9aa0a6; --ld-line:#3c4043;
 			--ld-land:#242f3e; --ld-farm:#263c3f; --ld-road:#38414e; --ld-casing:#212a37; --ld-major:#746855; --ld-majorcase:#1f2835;
 			--ld-water:#17263c; --ld-creek:#3a6ea5; --ld-label:#9ca5b3; --ld-halo:#17263c;
-			--ld-ping:#f28b82; --ld-seen:#8ab4f8; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
+			--ld-ping:#f28b82; --ld-seen:#8ab4f8; --ld-clue:#fcad70; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
 		}
 	}
 	.now { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-bottom:12px; }

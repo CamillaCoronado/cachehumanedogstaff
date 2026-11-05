@@ -177,7 +177,7 @@ export const PRETZEL: LostDog = {
 		{
 			"d": "10/30",
 			"t": "5:31 pm",
-			"k": "seen",
+			"k": "clue",
 			"w": 2042,
 			"s": 1946,
 			"who": "Elizabeth",
@@ -190,7 +190,7 @@ export const PRETZEL: LostDog = {
 		{
 			"d": "10/30",
 			"t": "6:11 pm",
-			"k": "seen",
+			"k": "clue",
 			"w": 2078,
 			"s": 1952,
 			"who": "Elizabeth",
@@ -332,7 +332,7 @@ export const PRETZEL: LostDog = {
 		{
 			"d": "10/31",
 			"t": "12:29 pm",
-			"k": "seen",
+			"k": "clue",
 			"w": 2400,
 			"s": 1700,
 			"who": "Mellissa",
@@ -440,11 +440,11 @@ export const PRETZEL: LostDog = {
 		{
 			"d": "11/4",
 			"t": "time unknown",
-			"k": "seen",
+			"k": "clue",
 			"w": 2600,
 			"s": 2120,
 			"who": "Mellissa",
-			"q": "\"That's where I seen him running thru field.\" North of 2200 S, 2400–2800 W. Cow pasture with electric fencing; owners are nice, ask first.",
+			"q": "Posted 11/4 with no date; most likely where she saw him on 10/31 (2400 W heading north), not a separate sighting. \"That's where I seen him running thru field.\" North of 2200 S, 2400–2800 W. Cow pasture with electric fencing; owners are nice, ask first.",
 			"c": "area",
 			"channel": "#woof-crew",
 			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793809140942509",
