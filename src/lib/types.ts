@@ -71,7 +71,10 @@ export type TripColorReason =
  *  from energy or size. Unset means the dog still needs a play assessment. */
 export type DogPlayStyle = 'rough_and_rowdy' | 'gentle_and_dainty' | 'solo';
 export type IsolationStatus = 'none' | 'iso';
-export type IsolationReason = 'sick' | 'bite_quarantine';
+/** 'recovery' = medical iso for surgery complications: everything iso does, but the dog
+ *  isn't sick and keeps its own day-trip color. App-set, or from an ASM "recovery"
+ *  flag/location; the sync never clears it. */
+export type IsolationReason = 'sick' | 'bite_quarantine' | 'recovery';
 export type DogHandlingLevel = 'manager_only' | 'staff_only' | 'volunteer';
 /** 'selective' = picky about other dogs (ASM's 4th good-with value): solo playtime only. */
 export type Compatibility = 'yes' | 'no' | 'unknown' | 'selective';
@@ -253,6 +256,12 @@ export interface Dog {
 	sickHold?: boolean;
 	sickHoldReason?: string | null;
 	sickHoldSince?: DateValue | null;
+	/** Kennel rest: the dog stays in its own kennel (not iso, not sick, color unchanged) but
+	 *  gets no day trips, playgroups, yard or baths until kennelRestUntil (inclusive). A past
+	 *  date counts as over; see isKennelResting. */
+	kennelRest?: boolean;
+	kennelRestUntil?: DateValue | null;
+	kennelRestSince?: DateValue | null;
 	/** The contagion ("URI") staff said no to when the Medical page suggested marking this
 	 *  dog sick, so the same suggestion doesn't come back. A new contagion suggests again. */
 	sickSuggestDismissed?: string | null;

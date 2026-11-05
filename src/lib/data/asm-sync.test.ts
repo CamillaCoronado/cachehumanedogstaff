@@ -276,3 +276,30 @@ describe('re-entries read from movements', () => {
 		expect(store.get('7')?.reentryDates).toEqual(['2026-04-05', '2026-10-20']);
 	});
 });
+
+describe('recovery', () => {
+	it('keeps app-set recovery when ASM says not iso, and reads an ASM recovery flag', async () => {
+		const { env, store } = fakeEnv(
+			{
+				'4': { name: 'Stitches', status: 'active', asmId: 4, asmShelterCode: 'A4', isolationStatus: 'iso', isolationReason: 'recovery' },
+				'5': { name: 'Flagged', status: 'active', asmId: 5, asmShelterCode: 'A5', isolationStatus: 'none' },
+				'6': { name: 'Healed', status: 'active', asmId: 6, asmShelterCode: 'A6', isolationStatus: 'iso', isolationReason: 'recovery', asmRecovery: true }
+			},
+			{
+				animals: [
+					stayer,
+					{ ID: 4, ANIMALNAME: 'Stitches', SPECIESNAME: 'Dog', SHELTERCODE: 'A4', DISPLAYLOCATIONNAME: 'Kennel 3' },
+					{ ID: 5, ANIMALNAME: 'Flagged', SPECIESNAME: 'Dog', SHELTERCODE: 'A5', DISPLAYLOCATIONNAME: 'Kennel 4', ADDITIONALFLAGS: 'courtesy|Recovery|' },
+					{ ID: 6, ANIMALNAME: 'Healed', SPECIESNAME: 'Dog', SHELTERCODE: 'A6', DISPLAYLOCATIONNAME: 'Kennel 5' }
+				]
+			}
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('4')?.isolationStatus).toBe('iso');
+		expect(store.get('4')?.isolationReason).toBe('recovery');
+		expect(store.get('5')?.isolationStatus).toBe('iso');
+		expect(store.get('5')?.isolationReason).toBe('recovery');
+		expect(store.get('6')?.isolationStatus).toBe('none');
+		expect(store.get('6')?.isolationReason).toBeNull();
+	});
+});

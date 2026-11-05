@@ -5,13 +5,14 @@ import type {
 	DayTripStatus,
 	Dog,
 	DogHandlingLevel,
+	IsolationReason,
 	IsolationStatus,
 	TripColorReason,
 	UserRole
 } from '$lib/types';
 import { handlingRestrictionReason, resolveDogHandlingLevel } from '$lib/utils/permissions';
 
-const MIN_DAYS_AFTER_SURGERY_FOR_BATH = 10;
+export const MIN_DAYS_AFTER_SURGERY_FOR_BATH = 14;
 
 export function toDate(value: DateValue | string | null | undefined): Date | null {
 	if (!value) return null;
@@ -109,13 +110,40 @@ export function isSurgeryToday(surgeryDate: DateValue | string | null | undefine
 	return isSameCalendarDay(surgeryDate, today);
 }
 
-export function bathEligible(surgeryDate: DateValue | string | null | undefined, today = new Date()) {
-	if (!surgeryDate) return true;
-	const date = toDate(surgeryDate);
-	if (!date) return true;
-	const days = differenceInDays(startOfDay(today), startOfDay(date));
-	if (days < 0) return true;
-	return days >= MIN_DAYS_AFTER_SURGERY_FOR_BATH;
+type BathDog = Pick<Dog, 'surgeryDate' | 'lastSurgeryDate' | 'sickHold' | 'isolationStatus' | 'isolationReason' | 'kennelRest' | 'kennelRestUntil'>;
+
+/** Recovery: medical iso for surgery complications. Iso in every way except color/sick. */
+export function isRecovery(dog: Pick<Dog, 'isolationStatus' | 'isolationReason'>): boolean {
+	return dog.isolationStatus !== 'none' && dog.isolationReason === 'recovery';
+}
+
+/** On kennel rest today. The until date is the last rest day; past it, rest is over. */
+export function isKennelResting(dog: Pick<Dog, 'kennelRest' | 'kennelRestUntil'>, today = new Date()): boolean {
+	if (!dog.kennelRest) return false;
+	const until = toDate(dog.kennelRestUntil);
+	return !until || startOfDay(until).getTime() >= startOfDay(today).getTime();
+}
+
+/**
+ * Why a dog can't have a bath today, or null. Sick dogs (sick hold or sick iso), recovery
+ * and kennel rest dogs get none, nor any dog within 14 days of its surgery. The sync moves
+ * a finished surgery to lastSurgeryDate once rest days end, so the newer of the two counts.
+ */
+export function bathBlockReason(dog: BathDog, today = new Date()): string | null {
+	if (dog.sickHold || (dog.isolationStatus !== 'none' && dog.isolationReason === 'sick')) return 'Sick — no baths';
+	if (isRecovery(dog)) return 'In recovery — no baths';
+	if (isKennelResting(dog, today)) return 'On kennel rest — no baths';
+	const dates = [toDate(dog.surgeryDate), toDate(dog.lastSurgeryDate)].filter((d): d is Date => d !== null);
+	if (dates.length === 0) return null;
+	const latest = new Date(Math.max(...dates.map((d) => d.getTime())));
+	const days = differenceInDays(startOfDay(today), startOfDay(latest));
+	if (days < 0 || days >= MIN_DAYS_AFTER_SURGERY_FOR_BATH) return null;
+	const left = MIN_DAYS_AFTER_SURGERY_FOR_BATH - days;
+	return `No baths for ${MIN_DAYS_AFTER_SURGERY_FOR_BATH} days after surgery — ${left} day${left === 1 ? '' : 's'} left`;
+}
+
+export function bathEligible(dog: BathDog, today = new Date()) {
+	return bathBlockReason(dog, today) === null;
 }
 
 export interface DayTripEligibility {
@@ -155,7 +183,9 @@ export function checkDayTripEligibility(
 	vaccineCount: number | null | undefined = null,
 	vaccinesOutstanding: number | null | undefined = null,
 	puppyDayTripOverride: boolean | null | undefined = null,
-	sickHold: boolean | null | undefined = null
+	sickHold: boolean | null | undefined = null,
+	isolationReason: IsolationReason | null | undefined = null,
+	kennelRest = false
 ): DayTripEligibility {
 	const reasons: string[] = [];
 	const trimmedTripNotes = dayTripNotes?.trim() ?? '';
@@ -189,7 +219,11 @@ export function checkDayTripEligibility(
 	}
 
 	if (isolationStatus !== 'none') {
-		reasons.push('In isolation');
+		reasons.push(isolationReason === 'recovery' ? 'In recovery' : 'In isolation');
+	}
+
+	if (kennelRest) {
+		reasons.push('On kennel rest');
 	}
 
 	if (sickHold) {
@@ -265,7 +299,7 @@ export function checkDayTripEligibility(
 	void vaccineCount;
 	const blockedByRequirements = !isVaccinated || !isFixed || hasOutstandingVaccines;
 	const blockedByStatus =
-		isolationStatus !== 'none' || Boolean(sickHold) || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay || Boolean(awaitingEvaluation) || puppyTooNew;
+		isolationStatus !== 'none' || Boolean(sickHold) || kennelRest || manuallyBlocked || requiresManagerOnly || blockedByHandlingRole || blockedBySurgery || isSurgeryDay || Boolean(awaitingEvaluation) || puppyTooNew;
 	const eligible = !(blockedByRequirements || blockedByStatus);
 
 	let status: DayTripStatus = 'ineligible';
@@ -275,7 +309,7 @@ export function checkDayTripEligibility(
 		status = 'ineligible';
 	} else if (isolationStatus !== 'none') {
 		status = 'ineligible';
-	} else if (sickHold) {
+	} else if (sickHold || kennelRest) {
 		status = 'ineligible';
 	} else if (manuallyBlocked) {
 		status = 'ineligible';
@@ -337,7 +371,8 @@ export function dogColorReasonLabel(dog: Dog): string | null {
 export function dogColorReason(dog: Dog): TripColorReason | null {
 	if (dog.manualTripColorReason) return dog.manualTripColorReason;
 	const level = resolveDogHandlingLevel(dog.handlingLevel);
-	if (dog.isolationStatus !== 'none') return 'isolation';
+	// Recovery is iso that doesn't change the dog's color.
+	if (dog.isolationStatus !== 'none' && !isRecovery(dog)) return 'isolation';
 	if (dog.sickHold) return 'sick';
 	if (level === 'manager_only') {
 		if (dog.dayTripManagerOnlyReason === 'behavior') return 'behavior';
@@ -360,7 +395,7 @@ export function dogStripeColor(dog: Dog): 'green' | 'yellow' | 'red' {
 	if (dog.manualTripColor) return dog.manualTripColor;
 	// Otherwise, a computed default from the dog's status.
 	const level = resolveDogHandlingLevel(dog.handlingLevel);
-	if (dog.isolationStatus !== 'none') return 'red';
+	if (dog.isolationStatus !== 'none' && !isRecovery(dog)) return 'red';
 	if (dog.sickHold) return 'red';
 	if (level === 'manager_only' || level === 'staff_only') return 'red';
 	if (dog.awaitingEvaluation) return 'red';

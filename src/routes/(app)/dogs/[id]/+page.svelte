@@ -30,7 +30,8 @@
 	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, EnrichmentKind, FeedingLog, MealTime, StoolLog, UserRole, YardLog } from '$lib/types';
 	import {
 		formatAge,
-		bathEligible,
+		bathBlockReason,
+		isKennelResting,
 		daysSince,
 		sinceReturn,
 		dogStripeColor,
@@ -105,7 +106,9 @@
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
 	$: canViewInternal = canViewInternalDogInfo(role);
-	$: bathIsEligible = dog ? bathEligible(dog.surgeryDate, today) : true;
+	$: bathBlock = dog ? bathBlockReason(dog, today) : null;
+	$: bathIsEligible = bathBlock === null;
+	$: kennelResting = dog ? isKennelResting(dog, today) : false;
 	$: feedToday = dog ? !isSurgeryToday(dog.surgeryDate, today) : true;
 	$: treatmentSummary = (dog?.treatments ?? []).map((t) => {
 		const label = t.condition?.trim() ? `${t.name} for ${t.condition.trim()}` : t.name;
@@ -260,7 +263,9 @@
 					? 'Manager only: sick isolation'
 					: dog.isolationReason === 'bite_quarantine'
 						? 'Manager only: bite quarantine'
-						: 'Manager only: isolation'
+						: dog.isolationReason === 'recovery'
+							? 'Manager only: recovery'
+							: 'Manager only: isolation'
 				: isManagerOnly
 					? managerOnlyNote
 					: isManagerHandlingOnly
@@ -429,8 +434,8 @@
 	async function handleLogBath() {
 		if (!dog || savingBath) return;
 		if (!$authProfile) { toast.error('Not signed in.'); return; }
-		if (!bathIsEligible) {
-			toast.error('Baths are blocked for 10 days after surgery.');
+		if (bathBlock) {
+			toast.error(`${bathBlock}.`);
 			return;
 		}
 		savingBath = true;
@@ -559,7 +564,7 @@
 
 	async function handleSaveBath() {
 		if (!dog || !newBathDate) return;
-		if (!bathIsEligible) { toast.error('Baths are blocked for 10 days after surgery.'); return; }
+		if (bathBlock) { toast.error(`${bathBlock}.`); return; }
 		savingBath = true;
 		try {
 			await logBath(dog.id, $authProfile, new Date(newBathDate + 'T12:00:00'));
@@ -949,12 +954,20 @@
 					<div>
 						<dt>Isolation</dt>
 						<dd>
-							{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : 'ISO'}
+							{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : dog.isolationReason === 'recovery' ? 'ISO – Recovery' : 'ISO'}
 							{#if dog.isolationStatus !== 'none' && dog.isolationUntilDate}
 								(until {formatDate(dog.isolationUntilDate)})
 							{/if}
 						</dd>
 					</div>
+					{#if kennelResting}
+						<div>
+							<dt>Kennel rest</dt>
+							<dd>
+								Yes{dog.kennelRestUntil ? ` (until ${formatDate(dog.kennelRestUntil)})` : ''} · no playgroups / day-trips / yard / baths
+							</dd>
+						</div>
+					{/if}
 					{#if dog.sickHold}
 						<div>
 							<dt>Sick hold</dt>
@@ -1002,7 +1015,7 @@
 					</div>
 					<div>
 						<dt>Bath Hold</dt>
-						<dd>{bathIsEligible ? 'Clear' : `${daysSince(dog.surgeryDate, today) ?? 0} days post-surgery`}</dd>
+						<dd>{bathBlock ?? 'Clear'}</dd>
 					</div>
 					<div>
 						<dt>Last Surgery</dt>

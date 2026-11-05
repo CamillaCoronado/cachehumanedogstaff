@@ -92,6 +92,7 @@ const FIELD_LABELS: Record<string, string> = {
 	permanentFoster: 'Permanent foster',
 	isolationStatus: 'Isolation',
 	isolationReason: 'Isolation reason',
+	asmRecovery: 'Recovery',
 	status: 'Status',
 	asmShelterCode: 'Shelter code',
 	origin: 'Origin'
@@ -169,6 +170,8 @@ export interface AsmAnimal {
 	HASPERMANENTFOSTER: number;
 	/** ASM's Quarantine flag — a bite quarantine here. */
 	ISQUARANTINE?: number;
+	/** ASM's custom animal flags, pipe-separated (e.g. "courtesy|recovery|"). */
+	ADDITIONALFLAGS?: string | null;
 	/** ASM's Hold checkbox (1 = on hold) and the date it runs to. */
 	ISHOLD?: number;
 	HOLDUNTILDATE?: string | null;
@@ -235,8 +238,13 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 	const isIncoming = locationName.includes('incoming');
 	// ASM's Quarantine flag is a bite quarantine: isolated whatever the location says.
 	const quarantined = animal.ISQUARANTINE === 1;
+	// Recovery (medical iso for surgery complications) from an ASM flag or location named
+	// "recovery". ASM has no built-in recovery, so this only fires if the shelter adds one.
+	const asmRecovery =
+		locationName.includes('recovery') ||
+		(animal.ADDITIONALFLAGS ?? '').split('|').some((f) => f.trim().toLowerCase() === 'recovery');
 	const isolationStatus: 'none' | 'iso' =
-		locationName.includes('iso') || quarantined ? 'iso' : 'none';
+		locationName.includes('iso') || quarantined || asmRecovery ? 'iso' : 'none';
 	// ASM's batch clears Hold once its date passes; a past date is treated as cleared
 	// so a dog isn't held for the hours before that runs.
 	const holdUntil = normalizeDateStr(animal.HOLDUNTILDATE);
@@ -293,7 +301,12 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		isIncoming,
 		isolationStatus,
 		// Only written when ASM has it, so a reason staff gave ("sick") isn't wiped.
-		...(quarantined ? { isolationReason: 'bite_quarantine' as const } : {}),
+		...(quarantined
+			? { isolationReason: 'bite_quarantine' as const }
+			: asmRecovery
+				? { isolationReason: 'recovery' as const }
+				: {}),
+		asmRecovery,
 		permanentFoster: isPermanentFoster,
 		// ASM wins. Hold here means someone is adopting the dog; it only blocks adoption.
 		asmHold,
@@ -447,9 +460,30 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		return fields;
 	}
 
+	// Recovery set in the app isn't in ASM, so ASM saying "not iso" must not end it; only
+	// staff (or its until date) do. Recovery that came from ASM ends when ASM drops it.
+	// asmRecovery is only written once ASM has had it, so other dogs don't all show a change.
+	function applyRecoveryPrecedence<T extends { isolationStatus: 'none' | 'iso'; asmRecovery: boolean }>(
+		fields: T,
+		existing: Record<string, unknown> | undefined
+	): Omit<T, 'asmRecovery'> & { asmRecovery?: boolean; isolationReason?: string | null } {
+		const { asmRecovery, ...rest } = fields;
+		const hadAsmRecovery = existing?.asmRecovery === true;
+		const appRecovery =
+			!hadAsmRecovery && existing?.isolationStatus === 'iso' && existing?.isolationReason === 'recovery';
+		const out: Omit<T, 'asmRecovery'> & { asmRecovery?: boolean; isolationReason?: string | null } = { ...rest };
+		if (asmRecovery || hadAsmRecovery) out.asmRecovery = asmRecovery;
+		if (!asmRecovery && appRecovery && out.isolationStatus === 'none') out.isolationStatus = 'iso';
+		if (hadAsmRecovery && !asmRecovery && !('isolationReason' in rest)) out.isolationReason = null;
+		return out;
+	}
+
 	function asmFieldsFor(animal: AsmAnimal, existing: Record<string, unknown> | undefined) {
 		return {
-			...applySelectivePrecedence(applyPhotoPrecedence(asmToStoredFields(animal, now), existing), existing),
+			...applyRecoveryPrecedence(
+				applySelectivePrecedence(applyPhotoPrecedence(asmToStoredFields(animal, now), existing), existing),
+				existing
+			),
 			reentryDates: asmReentryDates(animal, existing?.reentryDates, existing?.returnHistoryFor)
 		};
 	}

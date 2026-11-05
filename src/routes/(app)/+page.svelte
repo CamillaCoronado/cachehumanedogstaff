@@ -441,6 +441,7 @@
 	function isolationLabel(dog: Dog) {
 		if (dog.isolationReason === 'sick') return 'sick';
 		if (dog.isolationReason === 'bite_quarantine') return 'bite quarantine';
+		if (dog.isolationReason === 'recovery') return 'recovery';
 		return 'isolation';
 	}
 
@@ -459,6 +460,7 @@
 	function isolationBullet(dog: Dog) {
 		if (dog.isolationReason === 'sick') return '🩺';
 		if (dog.isolationReason === 'bite_quarantine') return '⚠';
+		if (dog.isolationReason === 'recovery') return '🩹';
 		return '🔒';
 	}
 

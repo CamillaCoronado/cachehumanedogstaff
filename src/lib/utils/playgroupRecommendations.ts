@@ -1,5 +1,5 @@
 import type { Dog, DogPlayStyle, PlaygroupSession } from '$lib/types';
-import { daysSince, toDate } from '$lib/utils/dates';
+import { daysSince, isKennelResting, toDate } from '$lib/utils/dates';
 import { dogAgeWeeks, isPuppyVaccinated, isSurgeryResting } from '$lib/utils/attention';
 
 export { isPuppyVaccinated };
@@ -56,7 +56,8 @@ export function readinessLabel(readiness: DogReadiness) {
 export function guidanceForDog(dog: Dog) {
 	const readiness = getReadiness(dog);
 	if (readiness === 'hold') {
-		if (dog.isolationStatus !== 'none') return 'In isolation: do not schedule.';
+		if (dog.isolationStatus !== 'none') return dog.isolationReason === 'recovery' ? 'In recovery: do not schedule.' : 'In isolation: do not schedule.';
+		if (isKennelResting(dog)) return 'On kennel rest: no playgroups.';
 		if (dog.sickHold) return 'Sick (outbreak hold): no playgroups.';
 		if (dog.goodWithDogs === 'no') return 'Marked not dog-social: behavior team only.';
 		if (dog.goodWithDogs === 'selective') return 'Selective with dogs: solo playtime only.';
@@ -166,7 +167,9 @@ export function checkSelectionWarnings(selected: Dog[]): SelectionWarning[] {
 
 	for (const dog of selected) {
 		if (dog.isolationStatus !== 'none') {
-			warnings.push({ id: `iso-${dog.id}`, message: `${dog.name} is in isolation.` });
+			warnings.push({ id: `iso-${dog.id}`, message: `${dog.name} is ${dog.isolationReason === 'recovery' ? 'in recovery' : 'in isolation'}.` });
+		} else if (isKennelResting(dog)) {
+			warnings.push({ id: `rest-${dog.id}`, message: `${dog.name} is on kennel rest — no playgroups.` });
 		} else if (dog.sickHold) {
 			warnings.push({ id: `sick-${dog.id}`, message: `${dog.name} is on a sick (outbreak) hold — no playgroups.` });
 		} else if (isSurgeryResting(dog, new Date())) {
