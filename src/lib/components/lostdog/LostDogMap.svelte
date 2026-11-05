@@ -5,23 +5,23 @@
 	export let dog: LostDog;
 
 	// Grid → SVG. W grows west (left), S grows south (down). 400 grid units ≈ 0.5 mi.
-	// The base layer (roads, Spring Creek, the pond, fields) is drawn for the fields west of
-	// Wellsville between 1700–2600 S and 1900–2860 W, which is where Pretzel's search is.
-	// A search somewhere else would need its own base layer.
+	// The base layer is OpenStreetMap tiles calibrated to the grid around Pretzel's search
+	// (west of Nibley / north of Wellsville). A search somewhere else would need its own calibration.
 	const X = (w: number) => 2860 - w;
 	const Y = (s: number) => s - 1640;
 	const NS = 'http://www.w3.org/2000/svg';
 
 	let mapEl: SVGSVGElement;
 	let hoursEl: SVGSVGElement;
-	let filter: 'all' | 'ping' | 'seen' | 'land' = 'all';
+	let filter: 'all' | 'ping' | 'seen' | 'clue' | 'land' = 'all';
 	let selected: number | null = null;
 	let mounted = false;
 	let marks: (SVGGElement | undefined)[] = [];
 	let numbers: (number | undefined)[] = [];
-	let view = [0, 0, 960, 1000];
+	const VW = 1300, VH = 1000, V0 = [20, 60, VW, VH];
+	let view = [...V0];
 
-	const col: Record<string, string> = { ping: 'var(--ld-ping)', seen: 'var(--ld-seen)', land: 'var(--ld-ok)' };
+	const col: Record<string, string> = { ping: 'var(--ld-ping)', seen: 'var(--ld-seen)', clue: 'var(--ld-clue)', land: 'var(--ld-ok)' };
 	const confLabel: Record<string, string> = {
 		exact: 'exact address',
 		approx: 'approx',
@@ -46,28 +46,21 @@
 		numbers = [];
 		const g0 = el('g', {}, mapEl);
 		el('rect', { x: -2000, y: -2000, width: 5000, height: 5000, fill: 'var(--ld-land)' }, g0);
-		const fields = [[1900,1660,1990,1790],[2010,1660,2390,1790],[2410,1660,2790,1790],[2810,1660,2860,1790],[2120,1810,2390,1880],[2490,1810,2790,1870],[2240,2230,2390,2590],[2410,2230,2790,2590],[2060,2240,2190,2590],[1900,2240,1990,2590],[2410,1960,2790,2040],[2140,1960,2390,2185]];
-		for (const [w1, s1, w2, s2] of fields)
-			el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 3, fill: 'var(--ld-farm)' }, g0);
-		el('path', { d: `M${X(2030)},${Y(2190)} C${X(2060)},${Y(2150)} ${X(2140)},${Y(2120)} ${X(2160)},${Y(2060)} C${X(2175)},${Y(2020)} ${X(2140)},${Y(2010)} ${X(2120)},${Y(2050)} C${X(2100)},${Y(2100)} ${X(2050)},${Y(2120)} ${X(2015)},${Y(2160)} Z`, fill: 'var(--ld-water)' }, g0);
-		el('path', { d: `M${X(1900)},${Y(1960)} C${X(1990)},${Y(1900)} ${X(2050)},${Y(1940)} ${X(2120)},${Y(1915)} S${X(2250)},${Y(1960)} ${X(2330)},${Y(1915)} S${X(2420)},${Y(1930)} ${X(2470)},${Y(1900)} S${X(2620)},${Y(1880)} ${X(2700)},${Y(1860)} S${X(2800)},${Y(1830)} ${X(2860)},${Y(1840)}`, fill: 'none', stroke: 'var(--ld-creek)', 'stroke-width': 4, 'stroke-linecap': 'round' }, g0);
-		const roadsW: [number, boolean][] = [[2000, true], [2400, false], [2800, false]];
-		const roadsS: [number, boolean][] = [[1700, false], [1800, true], [2200, true]];
-		const road = (x1: number, y1: number, x2: number, y2: number, major: boolean, casing: boolean) =>
-			el('line', { x1, y1, x2, y2, stroke: casing ? (major ? 'var(--ld-majorcase)' : 'var(--ld-casing)') : major ? 'var(--ld-major)' : 'var(--ld-road)', 'stroke-width': casing ? (major ? 11 : 9) : major ? 8 : 6, 'stroke-linecap': 'round' }, g0);
-		for (const casing of [true, false]) {
-			for (const [w, m] of roadsW) road(X(w), -50, X(w), 1050, m, casing);
-			for (const [s, m] of roadsS) road(-50, Y(s), 1010, Y(s), m, casing);
-		}
+		// Base layer: OpenStreetMap tiles placed on the county grid. Calibrated against the labeled
+		// roads in the tiles (2000 W / 2200 S at z17 global pixel GX, GY; K z17 pixels per grid unit).
+		const GX = 24797 * 256 + 1068, GY = 48804 * 256 + 596, K = 2.25, Z = 16, T = 512 / K;
+		const tiles = el('g', { class: 'tiles' }, g0);
+		const tx0 = Math.floor((GX + (-400 - 860) * K) / 512), tx1 = Math.floor((GX + (1700 - 860) * K) / 512);
+		const ty0 = Math.floor((GY + (-300 - 560) * K) / 512), ty1 = Math.floor((GY + (1300 - 560) * K) / 512);
+		for (let tx = tx0; tx <= tx1; tx++)
+			for (let ty = ty0; ty <= ty1; ty++)
+				el('image', { href: `https://tile.openstreetmap.org/${Z}/${tx}/${ty}.png`, x: 860 + (tx * 512 - GX) / K, y: 560 + (ty * 512 - GY) / K, width: T + 0.5, height: T + 0.5, preserveAspectRatio: 'none' }, tiles);
 		const lab = (x: number, y: number, txt: string, rot = false, extra: Record<string, string | number> = {}) => {
 			const t = el('text', { x, y, 'font-size': 12, 'text-anchor': 'middle', fill: 'var(--ld-label)', stroke: 'var(--ld-halo)', 'stroke-width': 3, 'paint-order': 'stroke', 'font-weight': 500, ...(rot ? { transform: `rotate(-90 ${x} ${y})` } : {}), ...extra }, g0);
 			t.textContent = txt;
 		};
-		for (const [w] of roadsW) { lab(X(w) - 12, 140, `S ${w} W`, true); lab(X(w) - 12, 820, `S ${w} W`, true); }
-		for (const [s] of roadsS) { lab(140, Y(s) - 9, `W ${s} S`); lab(620, Y(s) - 9, `W ${s} S`); }
-		lab(X(2620), Y(1860), 'Spring Creek', false, { fill: 'var(--ld-creek)', 'font-style': 'italic' });
-		lab(X(2095), Y(2085), 'pond', false, { fill: 'var(--ld-creek)', 'font-style': 'italic', 'font-size': 11 });
-
+		for (const w of [1600, 2000, 2400, 2800]) lab(X(w) - 10, Y(2080), `S ${w} W`, true, { 'font-size': 15, 'font-weight': 700 });
+		for (const s of [1800, 2200, 2600]) lab(X(2300), Y(s) - 8, `W ${s} S`, false, { 'font-size': 15, 'font-weight': 700 });
 		if (dog.hotspot) {
 			const h = dog.hotspot;
 			el('ellipse', { cx: X(h.w), cy: Y(h.s), rx: h.rw, ry: h.rs, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-dasharray': '6 5', 'stroke-width': 1.4 }, g0);
@@ -114,7 +107,7 @@
 		if (!hoursEl) return;
 		hoursEl.replaceChildren();
 		const L = 40, R = 880, base = 110, x = (h: number) => L + ((R - L) * h) / 24;
-		const timed = dog.events.filter((e) => e.h != null).sort((a, b) => (a.h ?? 0) - (b.h ?? 0));
+		const timed = dog.events.filter((e) => e.h != null && !e.hide && (e.k !== 'clue' || !e.search)).sort((a, b) => (a.h ?? 0) - (b.h ?? 0));
 		// Shade the hours that have no reports at all.
 		const has = new Set(timed.map((e) => Math.floor(e.h ?? 0)));
 		for (let h = 0; h < 24; h++)
@@ -122,32 +115,32 @@
 		if (dog.activeWindow) {
 			const [a, b] = dog.activeWindow;
 			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'none', stroke: 'var(--ld-ping)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }, hoursEl);
-			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
+			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
 			t.textContent = 'MOST MOVEMENT';
 		}
 		if (dog.pingWindow) {
 			const [a, b] = dog.pingWindow;
 			el('rect', { x: x(a), y: 14, width: x(b) - x(a), height: base - 14, rx: 4, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-width': 1.5 }, hoursEl);
-			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
+			const t = el('text', { x: (x(a) + x(b)) / 2, y: 12, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: 'var(--ld-ping)' }, hoursEl);
 			t.textContent = 'MOST PINGS';
 		}
 		el('line', { x1: L, y1: base, x2: R, y2: base, stroke: 'var(--ld-muted)', 'stroke-width': 1 }, hoursEl);
 		for (let h = 0; h <= 24; h += 3) {
 			el('line', { x1: x(h), y1: base, x2: x(h), y2: base + 5, stroke: 'var(--ld-muted)' }, hoursEl);
-			const t = el('text', { x: x(h), y: base + 20, 'text-anchor': 'middle', 'font-size': 11, fill: 'var(--ld-muted)' }, hoursEl);
+			const t = el('text', { x: x(h), y: base + 24, 'text-anchor': 'middle', 'font-size': 16, fill: 'var(--ld-muted)' }, hoursEl);
 			t.textContent = h === 0 || h === 24 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`;
 		}
 		const stack: Record<number, number> = {};
 		for (const e of timed) {
 			const b = Math.floor((e.h ?? 0) * 2) / 2;
 			const k = (stack[b] = (stack[b] ?? 0) + 1);
-			const c = e.k === 'seen' ? 'var(--ld-seen)' : 'var(--ld-ping)';
-			const m = el('circle', { cx: x(e.h ?? 0), cy: base - 8 - (k - 1) * 16, r: 6.5, fill: e.mv ? 'var(--ld-panel)' : c, stroke: c, 'stroke-width': 2.2 }, hoursEl);
+			const c = col[e.k] ?? 'var(--ld-ping)';
+			const m = el('circle', { cx: x(e.h ?? 0), cy: base - 10 - (k - 1) * 20, r: 9, fill: e.mv ? 'var(--ld-panel)' : c, stroke: c, 'stroke-width': 2.2 }, hoursEl);
 			const tt = el('title', {}, m);
 			tt.textContent = `${e.d} ${e.t} · ${e.who}`;
 		}
-		const lg = el('text', { x: R, y: base + 38, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--ld-muted)' }, hoursEl);
-		lg.textContent = '● same spot as last report   ○ had moved   red = ping · blue = seen';
+		const lg = el('text', { x: R, y: base + 46, 'text-anchor': 'end', 'font-size': 16, fill: 'var(--ld-muted)' }, hoursEl);
+		lg.textContent = '● same spot as last report   ○ had moved   red = ping · blue = seen · orange = clue';
 	}
 
 	function setFilter(f: string) {
@@ -173,8 +166,8 @@
 	const setView = () => mapEl?.setAttribute('viewBox', view.join(' '));
 	function zoom(f: number) {
 		const cx = view[0] + view[2] / 2, cy = view[1] + view[3] / 2;
-		const w = Math.min(1600, Math.max(200, view[2] * f));
-		view = [cx - w / 2, cy - (w * 1000) / 960 / 2, w, (w * 1000) / 960];
+		const w = Math.min(2000, Math.max(200, view[2] * f));
+		view = [cx - w / 2, cy - (w * VH) / VW / 2, w, (w * VH) / VW];
 		setView();
 	}
 	function down(e: PointerEvent) { p0 = { x: e.clientX, y: e.clientY, v: [...view] }; dragged = false; }
@@ -215,30 +208,32 @@
 	<section class="act">
 		<h2>When he's been found, by hour</h2>
 		<p>Each mark is one ping or sighting with a known time. Hollow marks are where he had moved since the last report. A ping only happens when an iPhone passes him, so hours when people were out searching are over-counted.</p>
-		<div class="hscroll"><svg bind:this={hoursEl} viewBox="0 0 900 150" class="hours" role="img" aria-label="Pings and sightings by hour of day"></svg></div>
+		<div class="hscroll"><svg bind:this={hoursEl} viewBox="0 0 900 165" class="hours" role="img" aria-label="Pings and sightings by hour of day"></svg></div>
 	</section>
 
 	<div class="grid">
 		<div class="mapbox">
 			<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-			<svg bind:this={mapEl} viewBox="0 0 960 1000" class="map" role="img" aria-label="Map of {dog.name} sightings"
+			<svg bind:this={mapEl} viewBox="20 60 1300 1000" class="map" role="img" aria-label="Map of {dog.name} sightings"
 				on:pointerdown={down} on:pointermove={move} on:pointerup={up} on:pointercancel={up}></svg>
 			<div class="zoom">
 				<button type="button" aria-label="Zoom in" on:click={() => zoom(0.7)}>+</button>
 				<button type="button" aria-label="Zoom out" on:click={() => zoom(1 / 0.7)}>−</button>
-				<button type="button" aria-label="Reset view" on:click={() => { view = [0, 0, 960, 1000]; setView(); }}>⟲</button>
+				<button type="button" aria-label="Reset view" on:click={() => { view = [...V0]; setView(); }}>⟲</button>
 			</div>
 			<div class="legend">
 				<span><i class="dot" style="background:var(--ld-ping)"></i>AirTag ping</span>
 				<span><i class="dot" style="background:var(--ld-seen)"></i>seen by a person</span>
+				<span><i class="dot" style="background:var(--ld-clue)"></i>clue / searcher (not a sighting)</span>
 				<span><i class="dot" style="background:var(--ld-pin)"></i>saved pin (no date)</span>
 				<span><i class="dot" style="background:var(--ld-nogo)"></i>stay off</span>
 				<span><i class="dot" style="background:var(--ld-ok)"></i>OK to search</span>
 			</div>
+			<div class="osm">Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
 		</div>
 		<div>
 			<div class="filters" role="group" aria-label="Filter">
-				{#each [['all', 'All'], ['ping', 'Pings'], ['seen', 'Seen'], ['land', 'Land / access']] as [f, label]}
+				{#each [['all', 'All'], ['ping', 'Pings'], ['seen', 'Seen'], ['clue', 'Clues'], ['land', 'Land / access']] as [f, label]}
 					<button type="button" aria-pressed={filter === f} on:click={() => setFilter(f)}>{label}</button>
 				{/each}
 			</div>
@@ -274,7 +269,7 @@
 		--ld-panel:#ffffff; --ld-fg:#202124; --ld-muted:#5f6368; --ld-line:#dadce0;
 		--ld-land:#f5f3ed; --ld-farm:#e6efd9; --ld-road:#ffffff; --ld-casing:#d4d6d9; --ld-major:#fde293; --ld-majorcase:#f2c94c;
 		--ld-water:#aadaff; --ld-creek:#73b3f2; --ld-label:#5f6368; --ld-halo:#ffffff;
-		--ld-ping:#ea4335; --ld-seen:#4285f4; --ld-pin:#a142f4; --ld-nogo:#d93025; --ld-ok:#188038; --ld-hot:rgba(234,67,53,.12);
+		--ld-ping:#ea4335; --ld-seen:#4285f4; --ld-clue:#e37400; --ld-pin:#a142f4; --ld-nogo:#d93025; --ld-ok:#188038; --ld-hot:rgba(234,67,53,.12);
 		color: var(--ld-fg);
 	}
 	@media (prefers-color-scheme: dark) {
@@ -282,7 +277,7 @@
 			--ld-panel:#202124; --ld-fg:#e8eaed; --ld-muted:#9aa0a6; --ld-line:#3c4043;
 			--ld-land:#242f3e; --ld-farm:#263c3f; --ld-road:#38414e; --ld-casing:#212a37; --ld-major:#746855; --ld-majorcase:#1f2835;
 			--ld-water:#17263c; --ld-creek:#3a6ea5; --ld-label:#9ca5b3; --ld-halo:#17263c;
-			--ld-ping:#f28b82; --ld-seen:#8ab4f8; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
+			--ld-ping:#f28b82; --ld-seen:#8ab4f8; --ld-clue:#fcad70; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
 		}
 	}
 	.now { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-bottom:12px; }
@@ -293,7 +288,7 @@
 	.act h2 { font-size:1rem; font-weight:600; margin:0 0 2px; }
 	.act p { margin:0 0 6px; color:var(--ld-muted); font-size:.9rem; max-width:80ch; }
 	.hscroll { overflow-x:auto; }
-	.hours { width:100%; min-width:560px; height:auto; display:block; }
+	.hours { width:100%; height:auto; display:block; }
 	.grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(0,1fr); gap:16px; align-items:start; }
 	@media (max-width:880px) { .grid { grid-template-columns:1fr; } }
 	.mapbox { position:relative; background:var(--ld-panel); border:1px solid var(--ld-line); border-radius:8px; overflow:hidden; }
@@ -321,6 +316,9 @@
 	.meta a { color:var(--ld-seen); }
 	.conf { font-size:.68rem; padding:1px 6px; border-radius:4px; border:1px solid var(--ld-line); margin-left:6px; white-space:nowrap; color:var(--ld-muted); }
 	.map :global(.mk) { cursor:pointer; }
+	@media (prefers-color-scheme: dark) { .map :global(.tiles) { filter:invert(.92) hue-rotate(180deg) brightness(.95) contrast(.9); } }
+	.osm { font-size:.7rem; color:var(--ld-muted); padding:0 12px 8px; }
+	.osm a { color:inherit; }
 	.map :global(.mk.dim) { opacity:.15; }
 	.map :global(.mk.sel .pinbody) { stroke:var(--ld-fg); stroke-width:2.5; }
 	.map :global(text) { font-family:inherit; }
