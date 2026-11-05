@@ -5,9 +5,8 @@
 	export let dog: LostDog;
 
 	// Grid → SVG. W grows west (left), S grows south (down). 400 grid units ≈ 0.5 mi.
-	// The base layer (roads, Spring Creek, the pond, fields) is drawn for the fields west of
-	// Wellsville between 1700–2600 S and 1900–2860 W, which is where Pretzel's search is.
-	// A search somewhere else would need its own base layer.
+	// The base layer is OpenStreetMap tiles calibrated to the grid around Pretzel's search
+	// (west of Nibley / north of Wellsville). A search somewhere else would need its own calibration.
 	const X = (w: number) => 2860 - w;
 	const Y = (s: number) => s - 1640;
 	const NS = 'http://www.w3.org/2000/svg';
@@ -19,7 +18,8 @@
 	let mounted = false;
 	let marks: (SVGGElement | undefined)[] = [];
 	let numbers: (number | undefined)[] = [];
-	let view = [0, 0, 960, 1000];
+	const VW = 1300, VH = 1000, V0 = [20, 60, VW, VH];
+	let view = [...V0];
 
 	const col: Record<string, string> = { ping: 'var(--ld-ping)', seen: 'var(--ld-seen)', clue: 'var(--ld-clue)', land: 'var(--ld-ok)' };
 	const confLabel: Record<string, string> = {
@@ -46,28 +46,21 @@
 		numbers = [];
 		const g0 = el('g', {}, mapEl);
 		el('rect', { x: -2000, y: -2000, width: 5000, height: 5000, fill: 'var(--ld-land)' }, g0);
-		const fields = [[1900,1660,1990,1790],[2010,1660,2390,1790],[2410,1660,2790,1790],[2810,1660,2860,1790],[2120,1810,2390,1880],[2490,1810,2790,1870],[2240,2230,2390,2590],[2410,2230,2790,2590],[2060,2240,2190,2590],[1900,2240,1990,2590],[2410,1960,2790,2040],[2140,1960,2390,2185]];
-		for (const [w1, s1, w2, s2] of fields)
-			el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 3, fill: 'var(--ld-farm)' }, g0);
-		el('path', { d: `M${X(2030)},${Y(2190)} C${X(2060)},${Y(2150)} ${X(2140)},${Y(2120)} ${X(2160)},${Y(2060)} C${X(2175)},${Y(2020)} ${X(2140)},${Y(2010)} ${X(2120)},${Y(2050)} C${X(2100)},${Y(2100)} ${X(2050)},${Y(2120)} ${X(2015)},${Y(2160)} Z`, fill: 'var(--ld-water)' }, g0);
-		el('path', { d: `M${X(1900)},${Y(1960)} C${X(1990)},${Y(1900)} ${X(2050)},${Y(1940)} ${X(2120)},${Y(1915)} S${X(2250)},${Y(1960)} ${X(2330)},${Y(1915)} S${X(2420)},${Y(1930)} ${X(2470)},${Y(1900)} S${X(2620)},${Y(1880)} ${X(2700)},${Y(1860)} S${X(2800)},${Y(1830)} ${X(2860)},${Y(1840)}`, fill: 'none', stroke: 'var(--ld-creek)', 'stroke-width': 4, 'stroke-linecap': 'round' }, g0);
-		const roadsW: [number, boolean][] = [[2000, true], [2400, false], [2800, false]];
-		const roadsS: [number, boolean][] = [[1700, false], [1800, true], [2200, true]];
-		const road = (x1: number, y1: number, x2: number, y2: number, major: boolean, casing: boolean) =>
-			el('line', { x1, y1, x2, y2, stroke: casing ? (major ? 'var(--ld-majorcase)' : 'var(--ld-casing)') : major ? 'var(--ld-major)' : 'var(--ld-road)', 'stroke-width': casing ? (major ? 11 : 9) : major ? 8 : 6, 'stroke-linecap': 'round' }, g0);
-		for (const casing of [true, false]) {
-			for (const [w, m] of roadsW) road(X(w), -50, X(w), 1050, m, casing);
-			for (const [s, m] of roadsS) road(-50, Y(s), 1010, Y(s), m, casing);
-		}
+		// Base layer: OpenStreetMap tiles placed on the county grid. Calibrated against the labeled
+		// roads in the tiles (2000 W / 2200 S at z17 global pixel GX, GY; K z17 pixels per grid unit).
+		const GX = 24797 * 256 + 1068, GY = 48804 * 256 + 596, K = 2.25, Z = 16, T = 512 / K;
+		const tiles = el('g', { class: 'tiles' }, g0);
+		const tx0 = Math.floor((GX + (-400 - 860) * K) / 512), tx1 = Math.floor((GX + (1700 - 860) * K) / 512);
+		const ty0 = Math.floor((GY + (-300 - 560) * K) / 512), ty1 = Math.floor((GY + (1300 - 560) * K) / 512);
+		for (let tx = tx0; tx <= tx1; tx++)
+			for (let ty = ty0; ty <= ty1; ty++)
+				el('image', { href: `https://tile.openstreetmap.org/${Z}/${tx}/${ty}.png`, x: 860 + (tx * 512 - GX) / K, y: 560 + (ty * 512 - GY) / K, width: T + 0.5, height: T + 0.5, preserveAspectRatio: 'none' }, tiles);
 		const lab = (x: number, y: number, txt: string, rot = false, extra: Record<string, string | number> = {}) => {
 			const t = el('text', { x, y, 'font-size': 12, 'text-anchor': 'middle', fill: 'var(--ld-label)', stroke: 'var(--ld-halo)', 'stroke-width': 3, 'paint-order': 'stroke', 'font-weight': 500, ...(rot ? { transform: `rotate(-90 ${x} ${y})` } : {}), ...extra }, g0);
 			t.textContent = txt;
 		};
-		for (const [w] of roadsW) { lab(X(w) - 12, 140, `S ${w} W`, true); lab(X(w) - 12, 820, `S ${w} W`, true); }
-		for (const [s] of roadsS) { lab(140, Y(s) - 9, `W ${s} S`); lab(620, Y(s) - 9, `W ${s} S`); }
-		lab(X(2620), Y(1860), 'Spring Creek', false, { fill: 'var(--ld-creek)', 'font-style': 'italic' });
-		lab(X(2095), Y(2085), 'pond', false, { fill: 'var(--ld-creek)', 'font-style': 'italic', 'font-size': 11 });
-
+		for (const w of [1600, 2000, 2400, 2800]) lab(X(w) - 10, Y(2080), `S ${w} W`, true, { 'font-size': 15, 'font-weight': 700 });
+		for (const s of [1800, 2200, 2600]) lab(X(2300), Y(s) - 8, `W ${s} S`, false, { 'font-size': 15, 'font-weight': 700 });
 		if (dog.hotspot) {
 			const h = dog.hotspot;
 			el('ellipse', { cx: X(h.w), cy: Y(h.s), rx: h.rw, ry: h.rs, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-dasharray': '6 5', 'stroke-width': 1.4 }, g0);
@@ -173,8 +166,8 @@
 	const setView = () => mapEl?.setAttribute('viewBox', view.join(' '));
 	function zoom(f: number) {
 		const cx = view[0] + view[2] / 2, cy = view[1] + view[3] / 2;
-		const w = Math.min(1600, Math.max(200, view[2] * f));
-		view = [cx - w / 2, cy - (w * 1000) / 960 / 2, w, (w * 1000) / 960];
+		const w = Math.min(2000, Math.max(200, view[2] * f));
+		view = [cx - w / 2, cy - (w * VH) / VW / 2, w, (w * VH) / VW];
 		setView();
 	}
 	function down(e: PointerEvent) { p0 = { x: e.clientX, y: e.clientY, v: [...view] }; dragged = false; }
@@ -221,12 +214,12 @@
 	<div class="grid">
 		<div class="mapbox">
 			<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-			<svg bind:this={mapEl} viewBox="0 0 960 1000" class="map" role="img" aria-label="Map of {dog.name} sightings"
+			<svg bind:this={mapEl} viewBox="20 60 1300 1000" class="map" role="img" aria-label="Map of {dog.name} sightings"
 				on:pointerdown={down} on:pointermove={move} on:pointerup={up} on:pointercancel={up}></svg>
 			<div class="zoom">
 				<button type="button" aria-label="Zoom in" on:click={() => zoom(0.7)}>+</button>
 				<button type="button" aria-label="Zoom out" on:click={() => zoom(1 / 0.7)}>−</button>
-				<button type="button" aria-label="Reset view" on:click={() => { view = [0, 0, 960, 1000]; setView(); }}>⟲</button>
+				<button type="button" aria-label="Reset view" on:click={() => { view = [...V0]; setView(); }}>⟲</button>
 			</div>
 			<div class="legend">
 				<span><i class="dot" style="background:var(--ld-ping)"></i>AirTag ping</span>
@@ -236,6 +229,7 @@
 				<span><i class="dot" style="background:var(--ld-nogo)"></i>stay off</span>
 				<span><i class="dot" style="background:var(--ld-ok)"></i>OK to search</span>
 			</div>
+			<div class="osm">Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
 		</div>
 		<div>
 			<div class="filters" role="group" aria-label="Filter">
@@ -322,6 +316,9 @@
 	.meta a { color:var(--ld-seen); }
 	.conf { font-size:.68rem; padding:1px 6px; border-radius:4px; border:1px solid var(--ld-line); margin-left:6px; white-space:nowrap; color:var(--ld-muted); }
 	.map :global(.mk) { cursor:pointer; }
+	@media (prefers-color-scheme: dark) { .map :global(.tiles) { filter:invert(.92) hue-rotate(180deg) brightness(.95) contrast(.9); } }
+	.osm { font-size:.7rem; color:var(--ld-muted); padding:0 12px 8px; }
+	.osm a { color:inherit; }
 	.map :global(.mk.dim) { opacity:.15; }
 	.map :global(.mk.sel .pinbody) { stroke:var(--ld-fg); stroke-width:2.5; }
 	.map :global(text) { font-family:inherit; }
