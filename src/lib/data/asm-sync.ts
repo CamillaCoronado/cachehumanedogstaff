@@ -156,7 +156,8 @@ export interface AsmAnimal {
 	// Energy level: 0 = unknown, 1 = low, 2 = medium, 3 = high, 4 = very high
 	ENERGYLEVEL: number;
 	// Size / weight
-	WEIGHT: number;
+	// Usually a number, but some records come through as text ("13", "13 lbs").
+	WEIGHT: number | string | null;
 	// Dates
 	DATEOFBIRTH: string | null;
 	DATEBROUGHTIN: string | null;
@@ -198,6 +199,17 @@ function normalizeDateStr(val: string | null | undefined): string | null {
 	if (!val) return null;
 	const m = val.match(/(\d{4})[-/](\d{2})[-/](\d{2})/);
 	return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/** ASM weight as lbs, or null when ASM has none. Accepts numbers and numeric text. */
+export function parseAsmWeight(value: unknown): number | null {
+	const n =
+		typeof value === 'number'
+			? value
+			: typeof value === 'string'
+				? parseFloat(value.replace(/,/g, '.').trim())
+				: NaN;
+	return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function normalizeSex(sexName: string): 'male' | 'female' | 'unknown' {
@@ -274,7 +286,7 @@ function asmToStoredFields(animal: AsmAnimal, now: string) {
 		vaccineCount: animal.VACCGIVENCOUNT ?? 0,
 		vaccinesOutstanding: animal.VACCOUTSTANDINGCOUNT ?? 0,
 		vaccinatedDate: normalizeDateStr(animal.VACCRABIESDATE),
-		weightLbs: typeof animal.WEIGHT === 'number' && animal.WEIGHT > 0 ? animal.WEIGHT : null,
+		weightLbs: parseAsmWeight(animal.WEIGHT),
 		dateOfBirth: normalizeDateStr(animal.DATEOFBIRTH),
 		intakeDate: normalizeDateStr(animal.MOSTRECENTENTRYDATE || animal.DATEBROUGHTIN),
 		originalIntakeDate: normalizeDateStr(animal.DATEBROUGHTIN),
@@ -478,10 +490,25 @@ export async function syncAnimalsFromASM(env: SyncEnvironment): Promise<SyncResu
 		return out;
 	}
 
+	// ASM wins when it has a weight; a blank in ASM doesn't wipe the one the app has.
+	function applyWeightPrecedence<T extends { weightLbs: number | null }>(
+		fields: T,
+		existing: Record<string, unknown> | undefined
+	): T {
+		const stored = existing?.weightLbs;
+		if (fields.weightLbs === null && typeof stored === 'number' && Number.isFinite(stored) && stored > 0) {
+			return { ...fields, weightLbs: stored };
+		}
+		return fields;
+	}
+
 	function asmFieldsFor(animal: AsmAnimal, existing: Record<string, unknown> | undefined) {
 		return {
 			...applyRecoveryPrecedence(
-				applySelectivePrecedence(applyPhotoPrecedence(asmToStoredFields(animal, now), existing), existing),
+				applySelectivePrecedence(
+					applyPhotoPrecedence(applyWeightPrecedence(asmToStoredFields(animal, now), existing), existing),
+					existing
+				),
 				existing
 			),
 			reentryDates: asmReentryDates(animal, existing?.reentryDates, existing?.returnHistoryFor)

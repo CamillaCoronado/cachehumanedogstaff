@@ -303,3 +303,33 @@ describe('recovery', () => {
 		expect(store.get('6')?.isolationReason).toBeNull();
 	});
 });
+
+describe('weight', () => {
+	it('reads a weight ASM sends as text', async () => {
+		const { env, store } = fakeEnv(
+			{ '9': { name: 'Squishy', status: 'active', asmId: 9, asmShelterCode: 'A9', weightLbs: null } },
+			{ animals: [stayer, { ID: 9, ANIMALNAME: 'Squishy', SPECIESNAME: 'Dog', SHELTERCODE: 'A9', WEIGHT: '13' }] }
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('9')?.weightLbs).toBe(13);
+	});
+
+	it("keeps the app's weight when ASM has none, but ASM's number wins", async () => {
+		const { env, store } = fakeEnv(
+			{
+				'10': { name: 'Blank', status: 'active', asmId: 10, asmShelterCode: 'A10', weightLbs: 40 },
+				'11': { name: 'Changed', status: 'active', asmId: 11, asmShelterCode: 'A11', weightLbs: 40 }
+			},
+			{
+				animals: [
+					stayer,
+					{ ID: 10, ANIMALNAME: 'Blank', SPECIESNAME: 'Dog', SHELTERCODE: 'A10', WEIGHT: 0 },
+					{ ID: 11, ANIMALNAME: 'Changed', SPECIESNAME: 'Dog', SHELTERCODE: 'A11', WEIGHT: 13.5 }
+				]
+			}
+		);
+		await syncAnimalsFromASM(env);
+		expect(store.get('10')?.weightLbs).toBe(40);
+		expect(store.get('11')?.weightLbs).toBe(13.5);
+	});
+});
