@@ -15,7 +15,7 @@
 	import type { PendingPlaygroup } from '$lib/data/playgroups';
 	import { parsePlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
 	import type { ParsedPlaygroupMessage } from '$lib/utils/parsePlaygroupMessage';
-	import { formatDate, formatDateTime, isSameCalendarDay, toDate } from '$lib/utils/dates';
+	import { formatDate, formatDateTime, isKennelResting, isSameCalendarDay, toDate } from '$lib/utils/dates';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import PlayStyleMoveRow from '$lib/components/playgroups/PlayStyleMoveRow.svelte';
 	import { getCautionDogs } from '$lib/utils/attention';
@@ -117,6 +117,7 @@
 	$: soloPlaytimeDogs = activeDogs.filter(
 		(dog) =>
 			dog.isolationStatus === 'none' &&
+			!isKennelResting(dog) &&
 			(dog.goodWithDogs === 'no' || dog.goodWithDogs === 'selective' || (dog.playStyles ?? []).includes('solo'))
 	);
 	$: cautionDogs = getCautionDogs(activeDogs, sessions);

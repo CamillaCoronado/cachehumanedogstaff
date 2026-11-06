@@ -102,7 +102,7 @@ export function getAdoptionAvailability(
 			available: false,
 			state: 'isolation_hold',
 			missingMedicalRequirements: [],
-			holdReason: dog.isolationReason === 'sick' ? 'sick isolation' : dog.isolationReason === 'bite_quarantine' ? 'bite quarantine' : 'isolation'
+			holdReason: dog.isolationReason === 'sick' ? 'sick isolation' : dog.isolationReason === 'bite_quarantine' ? 'bite quarantine' : dog.isolationReason === 'recovery' ? 'recovery' : 'isolation'
 		};
 	}
 

@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { Dog } from '$lib/types';
 import {
 	dogColorReasonLabel,
+	bathBlockReason,
 	bathEligible,
+	checkDayTripEligibility,
 	daysSince,
+	dogColorReason,
+	dogStripeColor,
+	isKennelResting,
 	formatAge,
 	formatDate,
 	isPuppyAge,
@@ -128,15 +133,57 @@ describe('isPuppyAge', () => {
 
 describe('bathEligible', () => {
 	const today = new Date(2026, 5, 12);
+	const dog = (o: Partial<Dog>) => ({ isolationStatus: 'none', isolationReason: null, ...o }) as Dog;
 
-	it('requires 10 days after surgery', () => {
-		expect(bathEligible(new Date(2026, 5, 5), today)).toBe(false);
-		expect(bathEligible(new Date(2026, 5, 2), today)).toBe(true);
+	it('requires 14 days after surgery', () => {
+		expect(bathEligible(dog({ surgeryDate: new Date(2026, 5, 2) }), today)).toBe(false);
+		expect(bathBlockReason(dog({ surgeryDate: new Date(2026, 5, 2) }), today)).toContain('4 days left');
+		expect(bathEligible(dog({ surgeryDate: new Date(2026, 4, 29) }), today)).toBe(true);
+	});
+
+	it('still counts a surgery the sync moved to lastSurgeryDate', () => {
+		expect(bathEligible(dog({ surgeryDate: null, lastSurgeryDate: new Date(2026, 5, 5) }), today)).toBe(false);
 	});
 
 	it('is eligible with no surgery date or a future one', () => {
-		expect(bathEligible(null, today)).toBe(true);
-		expect(bathEligible(new Date(2026, 5, 20), today)).toBe(true);
+		expect(bathEligible(dog({}), today)).toBe(true);
+		expect(bathEligible(dog({ surgeryDate: new Date(2026, 5, 20) }), today)).toBe(true);
+	});
+
+	it('blocks sick, recovery and kennel rest dogs', () => {
+		expect(bathEligible(dog({ sickHold: true }), today)).toBe(false);
+		expect(bathEligible(dog({ isolationStatus: 'iso', isolationReason: 'sick' }), today)).toBe(false);
+		expect(bathEligible(dog({ isolationStatus: 'iso', isolationReason: 'recovery' }), today)).toBe(false);
+		expect(bathEligible(dog({ kennelRest: true, kennelRestUntil: new Date(2026, 5, 12) }), today)).toBe(false);
+		expect(bathEligible(dog({ kennelRest: true, kennelRestUntil: new Date(2026, 5, 11) }), today)).toBe(true);
+	});
+});
+
+describe('recovery', () => {
+	const dog = (o: Partial<Dog>) => ({ isolationStatus: 'none', handlingLevel: 'volunteer', ...o }) as Dog;
+
+	it("keeps the dog's own color, unlike other iso", () => {
+		expect(dogStripeColor(dog({ isolationStatus: 'iso', isolationReason: 'sick' }))).toBe('red');
+		expect(dogStripeColor(dog({ isolationStatus: 'iso', isolationReason: 'recovery' }))).toBe('green');
+		expect(dogStripeColor(dog({ isolationStatus: 'iso', isolationReason: 'recovery', dayTripStatus: 'difficult' }))).toBe('yellow');
+		expect(dogColorReason(dog({ isolationStatus: 'iso', isolationReason: 'recovery' }))).toBeNull();
+	});
+
+	it('still blocks day trips like iso', () => {
+		const r = checkDayTripEligibility(new Date(2026, 0, 1), true, true, 'eligible', 'iso', null, null, null, 'volunteer', null, null, false, null, new Date(2026, 5, 12), null, null, 0, null, false, 'recovery');
+		expect(r.eligible).toBe(false);
+		expect(r.reasons).toContain('In recovery');
+	});
+});
+
+describe('kennel rest', () => {
+	it('blocks day trips and ends after its until date', () => {
+		const today = new Date(2026, 5, 12);
+		const r = checkDayTripEligibility(new Date(2026, 0, 1), true, true, 'eligible', 'none', null, null, null, 'volunteer', null, null, false, null, today, null, null, 0, null, false, null, true);
+		expect(r.eligible).toBe(false);
+		expect(r.reasons).toContain('On kennel rest');
+		expect(isKennelResting({ kennelRest: true, kennelRestUntil: null }, today)).toBe(true);
+		expect(isKennelResting({ kennelRest: true, kennelRestUntil: new Date(2026, 5, 11) }, today)).toBe(false);
 	});
 });
 

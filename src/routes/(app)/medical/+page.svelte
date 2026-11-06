@@ -5,7 +5,7 @@
 	import { dogs as dogsStore, dogsLoaded, ensureDogsLoaded, refreshDogs } from '$lib/stores/dogs';
 	import { createId } from '$lib/utils/storage';
 	import type { Dog, IsolationReason, Treatment } from '$lib/types';
-	import { formatDate, toDate } from '$lib/utils/dates';
+	import { formatDate, isKennelResting, toDate } from '$lib/utils/dates';
 	import { differenceInDays, startOfDay } from 'date-fns';
 	import toast from 'svelte-french-toast';
 	import TreatmentEditor from '$lib/components/medical/TreatmentEditor.svelte';
@@ -34,10 +34,16 @@
 
 	// Isolation form
 	let isoDogId = '';
-	let isoReason: 'sick' | 'bite_quarantine' | '' = '';
+	let isoReason: IsolationReason | '' = '';
 	let isoDate = today.toISOString().slice(0, 10);
 	let isolating = false;
 	let showAddIso = false;
+
+	// Kennel rest form (until date optional: blank = until cleared)
+	let restDogId = '';
+	let restDate = '';
+	let resting = false;
+	let showAddRest = false;
 
 	// Treatment form
 	let txDogId = '';
@@ -106,7 +112,8 @@
 	const isoReasonOptions: { value: IsolationReason | null; label: string }[] = [
 		{ value: null, label: 'ISO' },
 		{ value: 'sick', label: 'Sick' },
-		{ value: 'bite_quarantine', label: 'Bite' }
+		{ value: 'bite_quarantine', label: 'Bite' },
+		{ value: 'recovery', label: 'Recovery' }
 	];
 
 	$: eligibleToAdd = dogs
@@ -115,6 +122,19 @@
 
 	$: eligibleForFf = dogs
 		.filter((d) => d.status === 'active' && !d.fortifloraDate)
+		.sort((a, b) => a.name.localeCompare(b.name));
+
+	$: kennelRestDogs = dogs
+		.filter((d) => d.status === 'active' && isKennelResting(d, today))
+		.map((d) => {
+			const until = toDate(d.kennelRestUntil ?? null);
+			const daysLeft = until ? differenceInDays(startOfDay(until), startOfDay(today)) : null;
+			return { dog: d, daysLeft };
+		})
+		.sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity) || a.dog.name.localeCompare(b.dog.name));
+
+	$: eligibleToRest = dogs
+		.filter((d) => d.status === 'active' && !isKennelResting(d, today))
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	$: eligibleToIsolate = dogs
@@ -685,7 +705,7 @@
 
 	async function clearIsolation(dog: Dog) {
 		try {
-			await updateDog(dog.id, { isolationStatus: 'none', isolationUntilDate: null });
+			await updateDog(dog.id, { isolationStatus: 'none', isolationReason: null, isolationUntilDate: null });
 			await refreshDogs();
 			toast.success(`${dog.name} cleared from isolation.`);
 		} catch {
@@ -754,6 +774,62 @@
 		}
 	}
 
+	async function putOnKennelRest() {
+		if (!restDogId) return;
+		resting = true;
+		try {
+			await updateDog(restDogId, {
+				kennelRest: true,
+				kennelRestSince: new Date(),
+				kennelRestUntil: restDate ? new Date(restDate + 'T12:00:00') : null
+			});
+			await refreshDogs();
+			restDogId = '';
+			restDate = '';
+			showAddRest = false;
+			toast.success('Dog put on kennel rest.');
+		} catch {
+			toast.error('Could not put dog on kennel rest.');
+		} finally {
+			resting = false;
+		}
+	}
+
+	async function clearKennelRest(dog: Dog) {
+		try {
+			await updateDog(dog.id, { kennelRest: false, kennelRestSince: null, kennelRestUntil: null });
+			await refreshDogs();
+			toast.success(`${dog.name} off kennel rest.`);
+		} catch {
+			toast.error('Could not clear kennel rest.');
+		}
+	}
+
+	async function updateRestDate(dog: Dog, dateStr: string) {
+		try {
+			await updateDog(dog.id, { kennelRestUntil: dateStr ? new Date(dateStr + 'T12:00:00') : null });
+			await refreshDogs();
+		} catch {
+			toast.error('Could not update kennel rest date.');
+		}
+	}
+
+	function restDateValue(dog: Dog): string {
+		const d = toDate(dog.kennelRestUntil ?? null);
+		return d ? d.toISOString().slice(0, 10) : '';
+	}
+
+	// A rest whose last day has passed is over; clear it so the enrichment clock resumes.
+	async function autoClearExpiredKennelRest() {
+		const expired = dogs.filter((d) => d.kennelRest && !isKennelResting(d, today));
+		if (expired.length === 0) return;
+		await Promise.all(
+			expired.map((d) => updateDog(d.id, { kennelRest: false, kennelRestSince: null, kennelRestUntil: null }))
+		);
+		await refreshDogs();
+		toast.success(`Kennel rest over: ${expired.map((d) => d.name).join(', ')}`);
+	}
+
 	async function autoClearExpiredIsolations() {
 		const expired = dogs.filter((d) => {
 			if (d.status !== 'active' || d.isolationStatus === 'none') return false;
@@ -763,7 +839,7 @@
 		});
 		if (expired.length === 0) return;
 		await Promise.all(
-			expired.map((d) => updateDog(d.id, { isolationStatus: 'none', isolationUntilDate: null }))
+			expired.map((d) => updateDog(d.id, { isolationStatus: 'none', isolationReason: null, isolationUntilDate: null }))
 		);
 		await refreshDogs();
 		toast.success(`Isolation cleared: ${expired.map((d) => d.name).join(', ')}`);
@@ -802,6 +878,7 @@
 		}
 		await ensureDogsLoaded();
 		await autoClearExpiredIsolations();
+		await autoClearExpiredKennelRest();
 		await autoClearExpiredTreatments();
 	});
 </script>
@@ -862,6 +939,7 @@
 							<option value="">ISO</option>
 							<option value="sick">Sick</option>
 							<option value="bite_quarantine">Bite</option>
+							<option value="recovery">Recovery</option>
 						</select>
 						<input class="med-input" type="date" bind:value={isoDate} required />
 						<button class="med-submit typewriter" type="submit" disabled={isolating || !isoDogId}>
@@ -909,6 +987,72 @@
 									</div>
 								</div>
 								<button class="med-clear typewriter" type="button" on:click={() => clearIsolation(dog)}>Clear</button>
+							</div>
+						{/each}
+					{/if}
+				</div>
+			</section>
+
+			<!-- Kennel rest (sage) -->
+			<section class="med-card med-card-sage">
+				<div class="med-card-head">
+					<h2>Kennel rest</h2>
+					<div class="med-head-right">
+						<span class="med-pill med-pill-sage">{kennelRestDogs.length}</span>
+						<button
+							class="med-add-toggle {showAddRest ? 'med-add-toggle-open' : ''}"
+							type="button"
+							on:click={() => (showAddRest = !showAddRest)}
+							aria-label="Add to kennel rest"
+						>+</button>
+					</div>
+				</div>
+
+				{#if showAddRest}
+					<form class="med-form" on:submit|preventDefault={putOnKennelRest}>
+						<select class="med-input med-input-grow" bind:value={restDogId} required>
+							<option value="" disabled>Dog…</option>
+							{#each eligibleToRest as dog}
+								<option value={dog.id}>{dog.name}</option>
+							{/each}
+						</select>
+						<input class="med-input" type="date" bind:value={restDate} title="Last rest day (blank = until cleared)" />
+						<button class="med-submit typewriter" type="submit" disabled={resting || !restDogId}>
+							{resting ? '…' : 'Add'}
+						</button>
+					</form>
+				{/if}
+
+				<div class="med-items">
+					{#if kennelRestDogs.length === 0}
+						<p class="med-empty">No dogs on kennel rest.</p>
+					{:else}
+						{#each kennelRestDogs as { dog, daysLeft }}
+							<div class="med-row">
+								<div class="med-row-body">
+									<button class="med-dog-link" on:click={() => goto(`/dogs/${dog.id}`)}>
+										{dog.name}
+										{#if dog.outdoorKennelAssignment}
+											<span class="med-kennel">· K{dog.outdoorKennelAssignment}</span>
+										{/if}
+									</button>
+									<div class="med-row-sub">
+										<span class="med-label">Until</span>
+										<input
+											class="med-date-inline"
+											type="date"
+											value={restDateValue(dog)}
+											on:change={(e) => updateRestDate(dog, e.currentTarget.value)}
+										/>
+										{#if daysLeft !== null}
+											<span class="med-tag {daysLeft === 0 ? 'med-tag-warn' : 'med-tag-info'}">
+												{daysLeft === 0 ? 'Last day' : `${daysLeft}d`}
+											</span>
+										{/if}
+									</div>
+									<p class="med-row-sub">No day trips, playgroups, yard or baths.</p>
+								</div>
+								<button class="med-clear typewriter" type="button" on:click={() => clearKennelRest(dog)}>Clear</button>
 							</div>
 						{/each}
 					{/if}

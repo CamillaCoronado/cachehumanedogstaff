@@ -1,5 +1,5 @@
 import { startOfDay } from 'date-fns';
-import { bathEligible, checkDayTripEligibility, daysSince, dogStripeColor, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
+import { bathEligible, checkDayTripEligibility, isKennelResting, daysSince, dogStripeColor, isSameCalendarDay, sinceReturn, toDate } from '$lib/utils/dates';
 import type { Dog, PlaygroupSession } from '$lib/types';
 
 // A dog under this age is a puppy: presumed good with dogs/cats/kids (no
@@ -16,7 +16,7 @@ export function isDayTripEligible(dog: Dog, today = new Date()): boolean {
 		dog.dayTripManagerOnlyReason, dog.dayTripNotes, dog.handlingLevel,
 		dog.surgeryDate, dog.surgeryRestDays, dog.awaitingEvaluation,
 		null, today, dog.dateOfBirth, dog.vaccineCount, dog.vaccinesOutstanding,
-		dog.dayTripPuppyOverride, dog.sickHold
+		dog.dayTripPuppyOverride, dog.sickHold, dog.isolationReason, isKennelResting(dog, today)
 	).eligible;
 }
 
@@ -68,7 +68,7 @@ export interface BathStatus {
 
 export function getBathStatus(dog: Dog, today: Date): BathStatus {
 	const absent = { isDue: false, isNewIntake: false, overdueDays: null, daysSinceArrival: 0 };
-	if (!bathEligible(dog.surgeryDate, today)) return absent;
+	if (!bathEligible(dog, today)) return absent;
 
 	// A real bath counts if it was given this stay (on or after intake — including while
 	// the dog was still in Incoming). Moving off Incoming is not a bath; coming back from
@@ -169,6 +169,8 @@ export function isSurgeryResting(dog: Dog, today: Date): boolean {
 		: null;
 	if (surgeryDaysAgo !== null && surgeryDaysAgo >= 0 && surgeryDaysAgo < (dog.surgeryRestDays ?? 0)) return true;
 	if (dog.dayTripStatus === 'ineligible' && dog.dayTripIneligibleReason === 'medical') return true;
+	// Kennel rest: no playgroups, day trips or yard, same as surgery rest.
+	if (isKennelResting(dog, today)) return true;
 	return false;
 }
 

@@ -16,7 +16,7 @@ import type {
 	EnrichmentKind
 } from '$lib/types';
 import { readJson, writeJson, createId } from '$lib/utils/storage';
-import { isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
+import { isKennelResting, isPuppyAge, toDate, toDateString } from '$lib/utils/dates';
 import { importedTripId } from '$lib/utils/hiddenNoteTrips';
 import { clockStart } from '$lib/utils/attention';
 import type { AsmReturn } from '$lib/utils/asmReturns';
@@ -151,8 +151,11 @@ interface StoredDog {
 	notAdoptable?: boolean;
 	notAdoptableReason?: string | null;
 	isolationStatus: 'none' | 'iso' | 'sick' | 'bite_quarantine';
-	isolationReason?: 'sick' | 'bite_quarantine' | null;
+	isolationReason?: 'sick' | 'bite_quarantine' | 'recovery' | null;
 	isolationUntilDate?: string | null;
+	kennelRest?: boolean;
+	kennelRestUntil?: string | null;
+	kennelRestSince?: string | null;
 	asmHold?: boolean;
 	asmHoldUntil?: string | null;
 	sickHold?: boolean;
@@ -340,11 +343,11 @@ function applyStatusTransition(current: Dog, updates: Partial<Dog>, now: Date): 
 		updatedAt: now
 	});
 
-	// An isolation or sick hold pauses the enrichment clock: a held dog couldn't get
+	// An isolation, sick hold or kennel rest pauses the enrichment clock: a held dog couldn't get
 	// enrichment, so the held days don't count, but the days before the hold still do.
 	// Entering a hold stamps its start; leaving it stamps the end (enrichmentResetDate).
-	const wasPaused = current.isolationStatus !== 'none' || Boolean(current.sickHold);
-	const isPaused = merged.isolationStatus !== 'none' || Boolean(merged.sickHold);
+	const wasPaused = current.isolationStatus !== 'none' || Boolean(current.sickHold) || isKennelResting(current, now);
+	const isPaused = merged.isolationStatus !== 'none' || Boolean(merged.sickHold) || isKennelResting(merged, now);
 	if (!wasPaused && isPaused) {
 		merged.enrichmentHoldStart = toDate(merged.sickHold ? merged.sickHoldSince : null) ?? now;
 	}
@@ -506,6 +509,9 @@ function serializeDog(dog: Dog): StoredDog {
 		isolationStatus: dog.isolationStatus,
 		isolationReason: dog.isolationReason ?? null,
 		isolationUntilDate: toDateString(dog.isolationUntilDate),
+		kennelRest: dog.kennelRest ?? false,
+		kennelRestUntil: dog.kennelRest ? (toDateString(dog.kennelRestUntil) ?? null) : null,
+		kennelRestSince: dog.kennelRest ? (toDateString(dog.kennelRestSince) ?? null) : null,
 		asmHold: dog.asmHold ?? false,
 		asmHoldUntil: dog.asmHold ? (toDateString(dog.asmHoldUntil) ?? null) : null,
 		sickHold: dog.sickHold ?? false,
@@ -727,8 +733,11 @@ function deserializeDog(stored: StoredDog): Dog {
 		notAdoptable: stored.notAdoptable ?? false,
 		notAdoptableReason: stored.notAdoptable ? (stored.notAdoptableReason ?? null) : null,
 		isolationStatus: (stored.isolationStatus === 'sick' || stored.isolationStatus === 'bite_quarantine' || stored.isolationStatus === 'iso') ? 'iso' : 'none',
-		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : null,
+		isolationReason: (stored.isolationStatus === 'sick' || stored.isolationReason === 'sick') ? 'sick' : (stored.isolationStatus === 'bite_quarantine' || stored.isolationReason === 'bite_quarantine') ? 'bite_quarantine' : stored.isolationReason === 'recovery' ? 'recovery' : null,
 		isolationUntilDate: stored.isolationUntilDate ? toDate(stored.isolationUntilDate) : null,
+		kennelRest: stored.kennelRest ?? false,
+		kennelRestUntil: stored.kennelRest && stored.kennelRestUntil ? toDate(stored.kennelRestUntil) : null,
+		kennelRestSince: stored.kennelRest && stored.kennelRestSince ? toDate(stored.kennelRestSince) : null,
 		asmHold: stored.asmHold ?? false,
 		asmHoldUntil: stored.asmHold && stored.asmHoldUntil ? toDate(stored.asmHoldUntil) : null,
 		sickHold: stored.sickHold ?? false,
