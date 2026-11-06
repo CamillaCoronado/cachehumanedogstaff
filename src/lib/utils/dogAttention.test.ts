@@ -126,3 +126,16 @@ describe('tripEligibilityFor', () => {
 		expect(tripEligibilityFor(makeDog({ manualTripColor: 'green' }), 'admin', today).eligible).toBe(true);
 	});
 });
+
+describe('no bath nags for dogs that can not be bathed', () => {
+	// Never bathed this stay, so it would otherwise be flagged.
+	const due = { intakeDate: new Date(2026, 4, 1), lastBathDate: null };
+	it('skips post-surgery (14 days, incl. a surgery moved to lastSurgeryDate), sick, recovery and kennel rest dogs', () => {
+		expect(kinds(makeDog(due))).toContain('bath');
+		expect(kinds(makeDog({ ...due, surgeryDate: new Date(2026, 5, 1) }))).not.toContain('bath');
+		expect(kinds(makeDog({ ...due, surgeryDate: null, lastSurgeryDate: new Date(2026, 5, 1) }))).not.toContain('bath');
+		expect(kinds(makeDog({ ...due, sickHold: true }))).not.toContain('bath');
+		expect(kinds(makeDog({ ...due, kennelRest: true, kennelRestUntil: null }))).not.toContain('bath');
+		expect(dogAttention(makeDog({ ...due, isolationStatus: 'iso', isolationReason: 'recovery' }), { today, lastPlaygroupDate: null }).map((f) => f.kind)).not.toContain('bath');
+	});
+});
