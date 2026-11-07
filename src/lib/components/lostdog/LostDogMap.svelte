@@ -34,7 +34,13 @@
 		area: 'area',
 		context: 'context'
 	};
-	const colorOf = (e: LostDogEvent) => (e.c === 'nogo' ? 'var(--ld-nogo)' : e.hide ? 'var(--ld-muted)' : col[e.k]);
+	// The most recent ping (by date, then hour) gets its own color so it's easy to find.
+	const when = (e: LostDogEvent) => {
+		const [m, d] = (e.d ?? '').split('/').map(Number);
+		return (m || 0) * 10000 + (d || 0) * 100 + (e.h ?? 0);
+	};
+	$: latest = dog.events.filter((e) => e.k === 'ping' && !e.hide && e.h != null).reduce<LostDogEvent | null>((a, e) => (!a || when(e) >= when(a) ? e : a), null);
+	const colorOf = (e: LostDogEvent) => (e === latest ? 'var(--ld-latest)' : e.c === 'nogo' ? 'var(--ld-nogo)' : e.hide ? 'var(--ld-muted)' : col[e.k]);
 
 	function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>, parent: Element) {
 		const e = document.createElementNS(NS, tag);
@@ -117,11 +123,15 @@
 			if (e.arrow) el('path', { d: `M${x + 20},${y - 4} l0,-70 m-7,10 l7,-10 l7,10`, stroke: 'var(--ld-seen)', 'stroke-width': 3, fill: 'none', 'stroke-linecap': 'round' }, g);
 			if (e.search) el('circle', { class: 'pinbody', cx: x, cy: y, r: 9, fill: 'var(--ld-panel)', stroke: c, 'stroke-width': 2, 'stroke-dasharray': '3 2' }, g);
 			else el('path', { class: 'pinbody', d: `M${x},${y} c-3,-9 -13,-14 -13,-25 a13,13 0 1,1 26,0 c0,11 -10,16 -13,25 z`, fill: c, stroke: 'rgba(0,0,0,.25)', 'stroke-width': 1 }, g);
-			const t = el('text', { x, y: e.search ? y + 4 : y - 21, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: e.search ? c : '#fff', 'pointer-events': 'none' }, g);
+			if (e === latest) el('circle', { cx: x, cy: y - 21, r: 19, fill: 'none', stroke: 'var(--ld-latest)', 'stroke-width': 3 }, g);
+			const t = el('text', { x, y: e.search ? y + 4 : y - 21, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: e.search ? c : e === latest ? '#202124' : '#fff', 'pointer-events': 'none' }, g);
 			t.textContent = String(n);
 			g.addEventListener('click', () => { if (!dragged) pick(i); });
 			marks[i] = g;
 		});
+		// keep the latest ping on top of anything near it
+		const li = latest ? dog.events.indexOf(latest) : -1;
+		if (li >= 0 && marks[li]) g0.appendChild(marks[li]);
 		applyFilter();
 		applySelection();
 	}
@@ -159,7 +169,7 @@
 		for (const e of timed) {
 			const b = Math.floor((e.h ?? 0) * 2) / 2;
 			const k = (stack[b] = (stack[b] ?? 0) + 1);
-			const c = col[e.k] ?? 'var(--ld-ping)';
+			const c = e === latest ? 'var(--ld-latest)' : col[e.k] ?? 'var(--ld-ping)';
 			const m = el('circle', { cx: x(e.h ?? 0), cy: base - 10 - (k - 1) * 20, r: 9, fill: e.mv ? 'var(--ld-panel)' : c, stroke: c, 'stroke-width': 2.2 }, hoursEl);
 			const tt = el('title', {}, m);
 			tt.textContent = `${e.d} ${e.t} · ${e.who}`;
@@ -263,9 +273,22 @@
 		if (narrow) {
 			asp = 1.25;
 			V0 = [360, -80, 880, 1100];
-			view = [...V0];
-			setView();
 		}
+		// Widen the starting view just enough to include the latest ping.
+		if (latest) {
+			const m = 60, lx = X(latest.w), ly = Y(latest.s);
+			let [x0, y0, w] = V0;
+			const x1 = Math.max(x0 + w, lx + m);
+			x0 = Math.min(x0, lx - m);
+			w = x1 - x0;
+			let h = Math.max(w * asp, V0[3]);
+			w = h / asp;
+			if (ly - m < y0) y0 = ly - m;
+			if (ly + m > y0 + h) y0 = ly + m - h;
+			V0 = [x0, y0, w, h];
+		}
+		view = [...V0];
+		setView();
 		mounted = true;
 	});
 	$: if (mounted && dog) { drawMap(); drawHours(); }
@@ -301,6 +324,7 @@
 			</div>
 			</div>
 			<div class="legend">
+				<span><i class="dot" style="background:var(--ld-latest)"></i>latest ping</span>
 				<span><i class="dot" style="background:var(--ld-ping)"></i>AirTag ping</span>
 				<span><i class="dot" style="background:var(--ld-seen)"></i>seen by a person</span>
 				<span><i class="dot" style="background:var(--ld-clue)"></i>clue (not a sighting)</span>
@@ -331,7 +355,7 @@
 							<div class="ev" class:sel={selected === i} role="button" tabindex="0"
 								on:click={(ev) => { if (!(ev.target instanceof HTMLAnchorElement)) pick(i); }}
 								on:keydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(i); } }}>
-								<span class="n" style="background:{colorOf(e)}">{numbers[i] ?? '·'}</span>
+								<span class="n" style="background:{colorOf(e)}{e === latest ? ";color:#202124" : ""}">{numbers[i] ?? '·'}</span>
 								<div class="body">
 									<span class="t">{e.t}</span> <span class="w">{e.who}</span>{#if e.addr} · {e.addr}{/if}<span class="conf">{confLabel[e.c] ?? e.c}</span>
 									<q>{e.q}</q>
@@ -355,7 +379,7 @@
 		--ld-panel:#ffffff; --ld-fg:#202124; --ld-muted:#5f6368; --ld-line:#dadce0;
 		--ld-land:#f5f3ed; --ld-farm:#e6efd9; --ld-road:#ffffff; --ld-casing:#d4d6d9; --ld-major:#fde293; --ld-majorcase:#f2c94c;
 		--ld-water:#aadaff; --ld-creek:#73b3f2; --ld-label:#5f6368; --ld-halo:#ffffff;
-		--ld-ping:#ea4335; --ld-seen:#4285f4; --ld-clue:#e37400; --ld-pin:#a142f4; --ld-nogo:#d93025; --ld-ok:#188038; --ld-hot:rgba(234,67,53,.12);
+		--ld-ping:#ea4335; --ld-latest:#f9ab00; --ld-seen:#4285f4; --ld-clue:#e37400; --ld-pin:#a142f4; --ld-nogo:#d93025; --ld-ok:#188038; --ld-hot:rgba(234,67,53,.12);
 		color: var(--ld-fg);
 	}
 	@media (prefers-color-scheme: dark) {
@@ -363,7 +387,7 @@
 			--ld-panel:#202124; --ld-fg:#e8eaed; --ld-muted:#9aa0a6; --ld-line:#3c4043;
 			--ld-land:#242f3e; --ld-farm:#263c3f; --ld-road:#38414e; --ld-casing:#212a37; --ld-major:#746855; --ld-majorcase:#1f2835;
 			--ld-water:#17263c; --ld-creek:#3a6ea5; --ld-label:#9ca5b3; --ld-halo:#17263c;
-			--ld-ping:#f28b82; --ld-seen:#8ab4f8; --ld-clue:#fcad70; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
+			--ld-ping:#f28b82; --ld-latest:#fdd663; --ld-seen:#8ab4f8; --ld-clue:#fcad70; --ld-pin:#c58af9; --ld-nogo:#f28b82; --ld-ok:#81c995; --ld-hot:rgba(242,139,130,.14);
 		}
 	}
 	.act { margin-bottom:16px; }
