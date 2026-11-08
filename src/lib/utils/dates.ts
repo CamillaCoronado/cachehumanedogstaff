@@ -110,7 +110,7 @@ export function isSurgeryToday(surgeryDate: DateValue | string | null | undefine
 	return isSameCalendarDay(surgeryDate, today);
 }
 
-type BathDog = Pick<Dog, 'surgeryDate' | 'lastSurgeryDate' | 'sickHold' | 'isolationStatus' | 'isolationReason' | 'kennelRest' | 'kennelRestUntil'>;
+type BathDog = Pick<Dog, 'surgeryDate' | 'lastSurgeryDate' | 'fixedDate' | 'sickHold' | 'isolationStatus' | 'isolationReason' | 'kennelRest' | 'kennelRestUntil'>;
 
 /** Recovery: medical iso for surgery complications. Iso in every way except color/sick. */
 export function isRecovery(dog: Pick<Dog, 'isolationStatus' | 'isolationReason'>): boolean {
@@ -128,12 +128,14 @@ export function isKennelResting(dog: Pick<Dog, 'kennelRest' | 'kennelRestUntil'>
  * Why a dog can't have a bath today, or null. Sick dogs (sick hold or sick iso), recovery
  * and kennel rest dogs get none, nor any dog within 14 days of its surgery. The sync moves
  * a finished surgery to lastSurgeryDate once rest days end, so the newer of the two counts.
+ * ASM's neuter date counts too: the sync only stamps surgeryDate when ASM booked it ahead
+ * or a sync ran on the day, so a neuter can land with no app surgery date at all.
  */
 export function bathBlockReason(dog: BathDog, today = new Date()): string | null {
 	if (dog.sickHold || (dog.isolationStatus !== 'none' && dog.isolationReason === 'sick')) return 'Sick — no baths';
 	if (isRecovery(dog)) return 'In recovery — no baths';
 	if (isKennelResting(dog, today)) return 'On kennel rest — no baths';
-	const dates = [toDate(dog.surgeryDate), toDate(dog.lastSurgeryDate)].filter((d): d is Date => d !== null);
+	const dates = [toDate(dog.surgeryDate), toDate(dog.lastSurgeryDate), toDate(dog.fixedDate)].filter((d): d is Date => d !== null);
 	if (dates.length === 0) return null;
 	const latest = new Date(Math.max(...dates.map((d) => d.getTime())));
 	const days = differenceInDays(startOfDay(today), startOfDay(latest));

@@ -134,6 +134,7 @@ describe('no bath nags for dogs that can not be bathed', () => {
 		expect(kinds(makeDog(due))).toContain('bath');
 		expect(kinds(makeDog({ ...due, surgeryDate: new Date(2026, 5, 1) }))).not.toContain('bath');
 		expect(kinds(makeDog({ ...due, surgeryDate: null, lastSurgeryDate: new Date(2026, 5, 1) }))).not.toContain('bath');
+		expect(kinds(makeDog({ ...due, surgeryDate: null, fixedDate: new Date(2026, 5, 1) }))).not.toContain('bath');
 		expect(kinds(makeDog({ ...due, sickHold: true }))).not.toContain('bath');
 		expect(kinds(makeDog({ ...due, kennelRest: true, kennelRestUntil: null }))).not.toContain('bath');
 		expect(dogAttention(makeDog({ ...due, isolationStatus: 'iso', isolationReason: 'recovery' }), { today, lastPlaygroupDate: null }).map((f) => f.kind)).not.toContain('bath');
