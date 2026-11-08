@@ -44,6 +44,7 @@
 	import { feedingFlags, foodAmountLabel, foodTypeInstruction, secondMealAmountLabel, specialFeedingReasons } from '$lib/utils/feeding';
 	import { tripEligibilityFor } from '$lib/utils/dogAttention';
 	import { shelterTimeLabel, stoolColor, stoolLabel, reentryDatesLabel } from '$lib/utils/labels';
+	import { leftAsLabel, timeAway } from '$lib/utils/asmReturns';
 	import { durationHours as dayTripHours } from '$lib/utils/daytrips';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -841,12 +842,21 @@
 										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate, today)}</strong></p>
 										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
 										{#each dog.returnHistory ?? [] as ret}
-											<p class="return-entry">
-												<span>Returned {formatDate(ret.returnedAt)}:</span>
-												<strong class="detail-note">
-													{ret.movement || 'Left'}{#if ret.leftAt} {formatDate(ret.leftAt)}{/if}{#if ret.category} · {ret.category}{/if}{#if ret.reason} · {ret.reason}{/if}
-												</strong>
-											</p>
+											{@const away = timeAway(ret.leftAt, ret.returnedAt)}
+											<div class="return-entry">
+												<p><strong class="detail-value">Returned {formatDate(ret.returnedAt)}</strong></p>
+												{#if ret.leftAt}
+													<p>
+														{leftAsLabel(ret.movement)} {formatDate(ret.leftAt)}{#if away && away !== 'the same day'}{' '}({away} before the return){:else if away}{' '}(returned the same day){/if}
+													</p>
+												{/if}
+												{#if ret.category}
+													<p><span>Category:</span> <strong class="detail-value">{ret.category}</strong></p>
+												{/if}
+												{#if ret.reason}
+													<p><span>Reason:</span> <strong class="detail-note">{ret.reason}</strong></p>
+												{/if}
+											</div>
 										{/each}
 										<p><span>Came From:</span> <strong class="detail-value">{dog.origin || 'Unknown'}</strong></p>
 										<p><span>Kennel:</span> <strong class="detail-value">{dog.outdoorKennelAssignment || 'Unassigned'}</strong></p>
@@ -1917,6 +1927,12 @@
 
 	.kennel-section-body {
 		padding: 0.54rem 0.74rem 0.64rem;
+	}
+
+	.return-entry {
+		margin: 0.35rem 0;
+		padding-left: 0.6rem;
+		border-left: 3px solid #c9d6e3;
 	}
 
 	.kennel-facts span {

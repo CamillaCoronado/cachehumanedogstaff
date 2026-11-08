@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dogsNeedingReturns, parseAsmReturns } from './asmReturns';
+import { dogsNeedingReturns, leftAsLabel, parseAsmReturns, timeAway } from './asmReturns';
 
 describe('parseAsmReturns', () => {
 	it('keeps returned exit movements with category and reason, oldest first', () => {
@@ -48,5 +48,22 @@ describe('dogsNeedingReturns for the backfill', () => {
 		]);
 		expect(dogsNeedingReturns(docs)).toEqual([]);
 		expect(dogsNeedingReturns(docs, { neverRead: true })).toEqual([{ id: '1', asmId: 1, intake: '2026-09-14' }]);
+	});
+});
+
+describe('return wording', () => {
+	it('names how the dog left', () => {
+		expect(leftAsLabel('Adoption')).toBe('Adopted');
+		expect(leftAsLabel('Transfer')).toBe('Transferred');
+		expect(leftAsLabel('Foo')).toBe('Left (Foo)');
+		expect(leftAsLabel('')).toBe('Left');
+	});
+
+	it('says how long the dog was gone', () => {
+		expect(timeAway('2024-09-06', '2026-10-24')).toBe('2 years');
+		expect(timeAway('2026-08-01', '2026-10-24')).toBe('2 months');
+		expect(timeAway('2026-10-28', '2026-10-31')).toBe('3 days');
+		expect(timeAway('2026-10-31', '2026-10-31')).toBe('the same day');
+		expect(timeAway(null, '2026-10-31')).toBeNull();
 	});
 });
