@@ -143,6 +143,9 @@ describe('bathEligible', () => {
 
 	it('still counts a surgery the sync moved to lastSurgeryDate', () => {
 		expect(bathEligible(dog({ surgeryDate: null, lastSurgeryDate: new Date(2026, 5, 5) }), today)).toBe(false);
+		// ASM neuter date with no app surgery date (sync never stamped one)
+		expect(bathEligible(dog({ surgeryDate: null, fixedDate: '2026-06-05' as never }), today)).toBe(false);
+		expect(bathEligible(dog({ surgeryDate: null, fixedDate: '2026-05-01' as never }), today)).toBe(true);
 	});
 
 	it('is eligible with no surgery date or a future one', () => {
