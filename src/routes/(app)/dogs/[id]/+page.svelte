@@ -559,6 +559,15 @@
 	}
 
 	$: filteredFeeding = feedingLogs;
+
+	// feeding history gets long fast; collapsed by default, choice remembered per device
+	const FEEDING_OPEN_KEY = 'dog-profile-feeding-open';
+	let feedingOpen = false;
+	try { feedingOpen = localStorage.getItem(FEEDING_OPEN_KEY) === '1'; } catch { /* storage blocked */ }
+	function toggleFeedingOpen() {
+		feedingOpen = !feedingOpen;
+		try { localStorage.setItem(FEEDING_OPEN_KEY, feedingOpen ? '1' : '0'); } catch { /* storage blocked */ }
+	}
 	$: filteredBath = bathLogs;
 	$: filteredStool = stoolLogs;
 
@@ -1292,7 +1301,16 @@
 				</div>
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
-						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Feeding History</h3>
+						<button
+							type="button"
+							class="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-ink-500"
+							on:click={toggleFeedingOpen}
+							aria-expanded={feedingOpen}
+						>
+							<span class="inline-block text-xs transition-transform" class:rotate-90={feedingOpen}>▶</span>
+							Feeding History
+							<span class="text-[11px] font-normal normal-case tracking-normal text-ink-400">({feedingLogs.length})</span>
+						</button>
 						<div class="flex flex-wrap items-center gap-2 text-xs">
 							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newFeedingDate} />
 							<select class="rounded-full border border-ink-100 px-3 py-1" bind:value={newFeedingMealTime}>
@@ -1309,6 +1327,7 @@
 							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveFeeding} disabled={savingFeeding}>Save</button>
 						</div>
 					</div>
+					{#if feedingOpen}
 					<div class="mt-4 overflow-x-auto">
 						<table class="min-w-full text-left text-xs">
 							<thead class="text-[11px] uppercase tracking-[0.2em] text-ink-400">
@@ -1337,6 +1356,7 @@
 							</tbody>
 						</table>
 					</div>
+					{/if}
 				</div>
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
