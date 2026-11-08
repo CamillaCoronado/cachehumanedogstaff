@@ -30,7 +30,8 @@
 	import type { AmountEaten, BathLog, BehavioralNote, DayTripLog, Dog, EnrichmentKind, FeedingLog, MealTime, StoolLog, UserRole, YardLog } from '$lib/types';
 	import {
 		formatAge,
-		bathEligible,
+		bathBlockReason,
+		isKennelResting,
 		daysSince,
 		sinceReturn,
 		dogStripeColor,
@@ -105,7 +106,9 @@
 	$: role = resolveRole($authProfile, $localRole as UserRole);
 	$: canEdit = canEditDogs(role);
 	$: canViewInternal = canViewInternalDogInfo(role);
-	$: bathIsEligible = dog ? bathEligible(dog.surgeryDate, today) : true;
+	$: bathBlock = dog ? bathBlockReason(dog, today) : null;
+	$: bathIsEligible = bathBlock === null;
+	$: kennelResting = dog ? isKennelResting(dog, today) : false;
 	$: feedToday = dog ? !isSurgeryToday(dog.surgeryDate, today) : true;
 	$: treatmentSummary = (dog?.treatments ?? []).map((t) => {
 		const label = t.condition?.trim() ? `${t.name} for ${t.condition.trim()}` : t.name;
@@ -260,7 +263,9 @@
 					? 'Manager only: sick isolation'
 					: dog.isolationReason === 'bite_quarantine'
 						? 'Manager only: bite quarantine'
-						: 'Manager only: isolation'
+						: dog.isolationReason === 'recovery'
+							? 'Manager only: recovery'
+							: 'Manager only: isolation'
 				: isManagerOnly
 					? managerOnlyNote
 					: isManagerHandlingOnly
@@ -429,8 +434,8 @@
 	async function handleLogBath() {
 		if (!dog || savingBath) return;
 		if (!$authProfile) { toast.error('Not signed in.'); return; }
-		if (!bathIsEligible) {
-			toast.error('Baths are blocked for 10 days after surgery.');
+		if (bathBlock) {
+			toast.error(`${bathBlock}.`);
 			return;
 		}
 		savingBath = true;
@@ -554,12 +559,21 @@
 	}
 
 	$: filteredFeeding = feedingLogs;
+
+	// feeding history gets long fast; collapsed by default, choice remembered per device
+	const FEEDING_OPEN_KEY = 'dog-profile-feeding-open';
+	let feedingOpen = false;
+	try { feedingOpen = localStorage.getItem(FEEDING_OPEN_KEY) === '1'; } catch { /* storage blocked */ }
+	function toggleFeedingOpen() {
+		feedingOpen = !feedingOpen;
+		try { localStorage.setItem(FEEDING_OPEN_KEY, feedingOpen ? '1' : '0'); } catch { /* storage blocked */ }
+	}
 	$: filteredBath = bathLogs;
 	$: filteredStool = stoolLogs;
 
 	async function handleSaveBath() {
 		if (!dog || !newBathDate) return;
-		if (!bathIsEligible) { toast.error('Baths are blocked for 10 days after surgery.'); return; }
+		if (bathBlock) { toast.error(`${bathBlock}.`); return; }
 		savingBath = true;
 		try {
 			await logBath(dog.id, $authProfile, new Date(newBathDate + 'T12:00:00'));
@@ -956,12 +970,20 @@
 					<div>
 						<dt>Isolation</dt>
 						<dd>
-							{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : 'ISO'}
+							{dog.isolationStatus === 'none' ? 'None' : dog.isolationReason === 'sick' ? 'ISO – Sick' : dog.isolationReason === 'bite_quarantine' ? 'ISO – Bite Quarantine' : dog.isolationReason === 'recovery' ? 'ISO – Recovery' : 'ISO'}
 							{#if dog.isolationStatus !== 'none' && dog.isolationUntilDate}
 								(until {formatDate(dog.isolationUntilDate)})
 							{/if}
 						</dd>
 					</div>
+					{#if kennelResting}
+						<div>
+							<dt>Kennel rest</dt>
+							<dd>
+								Yes{dog.kennelRestUntil ? ` (until ${formatDate(dog.kennelRestUntil)})` : ''} · no playgroups / day-trips / yard / baths
+							</dd>
+						</div>
+					{/if}
 					{#if dog.sickHold}
 						<div>
 							<dt>Sick hold</dt>
@@ -1009,7 +1031,7 @@
 					</div>
 					<div>
 						<dt>Bath Hold</dt>
-						<dd>{bathIsEligible ? 'Clear' : `${daysSince(dog.surgeryDate, today) ?? 0} days post-surgery`}</dd>
+						<dd>{bathBlock ?? 'Clear'}</dd>
 					</div>
 					<div>
 						<dt>Last Surgery</dt>
@@ -1286,7 +1308,16 @@
 				</div>
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">
-						<h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">Feeding History</h3>
+						<button
+							type="button"
+							class="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-ink-500"
+							on:click={toggleFeedingOpen}
+							aria-expanded={feedingOpen}
+						>
+							<span class="inline-block text-xs transition-transform" class:rotate-90={feedingOpen}>▶</span>
+							Feeding History
+							<span class="text-[11px] font-normal normal-case tracking-normal text-ink-400">({feedingLogs.length})</span>
+						</button>
 						<div class="flex flex-wrap items-center gap-2 text-xs">
 							<input type="date" class="rounded-full border border-ink-100 px-3 py-1" bind:value={newFeedingDate} />
 							<select class="rounded-full border border-ink-100 px-3 py-1" bind:value={newFeedingMealTime}>
@@ -1303,6 +1334,7 @@
 							<button class="rounded-full border border-ink-200 px-3 py-1" on:click={handleSaveFeeding} disabled={savingFeeding}>Save</button>
 						</div>
 					</div>
+					{#if feedingOpen}
 					<div class="mt-4 overflow-x-auto">
 						<table class="min-w-full text-left text-xs">
 							<thead class="text-[11px] uppercase tracking-[0.2em] text-ink-400">
@@ -1331,6 +1363,7 @@
 							</tbody>
 						</table>
 					</div>
+					{/if}
 				</div>
 				<div class="rounded-3xl bg-white p-6 shadow-card">
 					<div class="flex flex-wrap items-center justify-between gap-2">

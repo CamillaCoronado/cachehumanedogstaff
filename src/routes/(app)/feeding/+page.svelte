@@ -172,6 +172,7 @@
 	function isolationReasonLabel(dog: Dog) {
 		if (dog.isolationReason === 'sick') return 'Sick';
 		if (dog.isolationReason === 'bite_quarantine') return 'Bite quarantine';
+		if (dog.isolationReason === 'recovery') return 'Recovery';
 		return 'Isolation';
 	}
 

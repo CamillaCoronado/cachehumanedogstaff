@@ -127,7 +127,8 @@
 	];
 	const isolationReasons: { value: IsolationReason; label: string }[] = [
 		{ value: 'sick', label: 'Sick' },
-		{ value: 'bite_quarantine', label: 'Bite Quarantine' }
+		{ value: 'bite_quarantine', label: 'Bite Quarantine' },
+		{ value: 'recovery', label: 'Recovery' }
 	];
 
 	$: isInIsolation = value.isolationStatus !== 'none';
@@ -1344,7 +1345,7 @@
 			<div class="form-field md:col-span-2">
 				<label class="form-label typewriter">Day Trip Status</label>
 				{#if isInIsolation}
-					<p class="form-error">Automatically ineligible due to isolation{value.isolationReason ? ` (${value.isolationReason === 'sick' ? 'Sick' : 'Bite Quarantine'})` : ''}</p>
+					<p class="form-error">Automatically ineligible due to isolation{value.isolationReason ? ` (${value.isolationReason === 'sick' ? 'Sick' : value.isolationReason === 'recovery' ? 'Recovery' : 'Bite Quarantine'})` : ''}</p>
 				{:else}
 					<label class="flex items-center gap-2 cursor-pointer mb-2">
 						<input

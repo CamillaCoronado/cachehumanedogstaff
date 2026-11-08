@@ -10,7 +10,7 @@
 	import { dogs as dogsStore, ensureDogsLoaded, refreshDogs as refreshDogStore, patchDogInStore } from '$lib/stores/dogs';
 	import { listPlaygroupSessions } from '$lib/data/playgroups';
 	import type { Dog, PlaygroupSession, UserRole } from '$lib/types';
-	import { bathEligible, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
+	import { bathBlockReason, daysSince, sinceReturn, dogStripeColor, formatAge, isSurgeryToday, checkDayTripEligibility, toDate } from '$lib/utils/dates';
 	import { getBathStatus, isBathDue, getDayTripGapDays, isPlaygroupEligible, buildLastPlaygroupMap, isSurgeryResting, DAYTRIP_OVERDUE_DAYS, PLAYGROUP_OVERDUE_DAYS } from '$lib/utils/attention';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import { retryablePhoto } from '$lib/utils/photoRetry';
@@ -346,8 +346,9 @@ const today = new Date();
 
 	async function handleLogBath(dog: Dog) {
 		if (bathLoggingIds.has(dog.id)) return;
-		if (!bathEligible(dog.surgeryDate, today)) {
-			toast.error('Baths are blocked for 10 days after surgery.');
+		const bathBlock = bathBlockReason(dog, today);
+		if (bathBlock) {
+			toast.error(`${dog.name}: ${bathBlock}.`);
 			return;
 		}
 		bathLoggingIds.add(dog.id);

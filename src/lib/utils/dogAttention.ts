@@ -1,5 +1,5 @@
 import type { Dog, UserRole } from '$lib/types';
-import { checkDayTripEligibility, daysSince, dogColorReasonLabel, dogStripeColor } from '$lib/utils/dates';
+import { checkDayTripEligibility, daysSince, isKennelResting, dogColorReasonLabel, dogStripeColor } from '$lib/utils/dates';
 import { clockStart, enrichmentOverdueDays, getBathStatus, isBathDue, needsDogTest } from '$lib/utils/attention';
 
 /**
@@ -42,7 +42,9 @@ function profileTripEligibility(dog: Dog, role: UserRole | null | undefined, tod
 		dog.vaccineCount,
 		dog.vaccinesOutstanding,
 		dog.dayTripPuppyOverride,
-		dog.sickHold
+		dog.sickHold,
+		dog.isolationReason,
+		isKennelResting(dog, today)
 	);
 }
 

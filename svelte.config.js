@@ -5,7 +5,11 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
 	preprocess: vitePreprocess(),
 	kit: {
-		adapter: adapter()
+		adapter: adapter(),
+		// The service worker answers every page with the one cached copy of '/', so its
+		// links to the app's code must be absolute. Relative ones ('./_app/...') would
+		// point at '/dogs/_app/...' when that copy opens /dogs/123.
+		paths: { relative: false }
 	}
 };
 
