@@ -75,3 +75,35 @@ export function dogsNeedingReturns(
 	}
 	return out;
 }
+
+const LEFT_AS: Record<string, string> = {
+	adoption: 'Adopted',
+	'trial adoption': 'Trial adoption',
+	transfer: 'Transferred',
+	reclaimed: 'Reclaimed',
+	escaped: 'Escaped',
+	stolen: 'Stolen',
+	'released to wild': 'Released',
+	released: 'Released'
+};
+
+/** How the dog left, as a past-tense verb: "Adopted", "Transferred"... */
+export function leftAsLabel(movement: string): string {
+	const known = LEFT_AS[movement.trim().toLowerCase()];
+	if (known) return known;
+	return movement.trim() ? `Left (${movement.trim()})` : 'Left';
+}
+
+/** How long the dog was gone, e.g. "2 years", "3 days". Null without both dates. */
+export function timeAway(leftAt: string | null, returnedAt: string): string | null {
+	if (!leftAt) return null;
+	const [ly, lm, ld] = leftAt.split('-').map(Number);
+	const [ry, rm, rd] = returnedAt.split('-').map(Number);
+	const days = Math.round((Date.UTC(ry, rm - 1, rd) - Date.UTC(ly, lm - 1, ld)) / 86_400_000);
+	if (!(days >= 0)) return null;
+	const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+	const months = (ry - ly) * 12 + (rm - lm) - (rd < ld ? 1 : 0);
+	if (months >= 12) return plural(Math.floor(months / 12), 'year');
+	if (months >= 1) return plural(months, 'month');
+	return days === 0 ? 'the same day' : plural(days, 'day');
+}

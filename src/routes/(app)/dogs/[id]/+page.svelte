@@ -44,6 +44,7 @@
 	import { feedingFlags, foodAmountLabel, foodTypeInstruction, secondMealAmountLabel, specialFeedingReasons } from '$lib/utils/feeding';
 	import { tripEligibilityFor } from '$lib/utils/dogAttention';
 	import { shelterTimeLabel, stoolColor, stoolLabel, reentryDatesLabel } from '$lib/utils/labels';
+	import { leftAsLabel, timeAway } from '$lib/utils/asmReturns';
 	import { durationHours as dayTripHours } from '$lib/utils/daytrips';
 	import { getAdoptionAvailability } from '$lib/utils/adoption';
 	import DogForm from '$lib/components/dogs/DogForm.svelte';
@@ -841,17 +842,19 @@
 										<p><span>Time at Shelter:</span> <strong class="detail-value">{shelterTimeLabel(dog.intakeDate, today)}</strong></p>
 										<p><span>Re-entries:</span> <strong class="detail-value">{dog.reentryDates.length}</strong></p>
 										{#each dog.returnHistory ?? [] as ret}
+											{@const away = timeAway(ret.leftAt, ret.returnedAt)}
 											<div class="return-entry">
-												<p><span>Returned:</span> <strong class="detail-value">{formatDate(ret.returnedAt)}</strong></p>
-												<p>
-													<span>{ret.movement || 'Left'}:</span>
-													<strong class="detail-value">{ret.leftAt ? formatDate(ret.leftAt) : 'Unknown'}</strong>
-												</p>
+												<p><strong class="detail-value">Returned {formatDate(ret.returnedAt)}</strong></p>
+												{#if ret.leftAt}
+													<p>
+														{leftAsLabel(ret.movement)} {formatDate(ret.leftAt)}{#if away && away !== 'the same day'}{' '}({away} before the return){:else if away}{' '}(returned the same day){/if}
+													</p>
+												{/if}
 												{#if ret.category}
-													<p><span>Return Category:</span> <strong class="detail-value">{ret.category}</strong></p>
+													<p><span>Category:</span> <strong class="detail-value">{ret.category}</strong></p>
 												{/if}
 												{#if ret.reason}
-													<p><span>Return Reason:</span> <strong class="detail-note">{ret.reason}</strong></p>
+													<p><span>Reason:</span> <strong class="detail-note">{ret.reason}</strong></p>
 												{/if}
 											</div>
 										{/each}
