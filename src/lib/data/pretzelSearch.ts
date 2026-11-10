@@ -96,6 +96,19 @@ export const PRETZEL: LostDog = {
 		},
 		{
 			"d": "10/28",
+			"t": "4:18 am",
+			"k": "seen",
+			"w": 2060,
+			"s": 2150,
+			"who": "Darren Cox (game camera)",
+			"q": "Darren Cox's game camera (\"CoxSecurity1\") caught a white dog with dark patches at 10/28 4:18am, 45°F. Looks like Pretzel. Camera is somewhere on Cox ground behind the Olsen house (exact spot unknown, pin is approximate). Darren shared it with Mellissa on 11/10.",
+			"c": "area",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794333814530689",
+			"h": 4.3
+		},
+		{
+			"d": "10/28",
 			"t": "7:15 am",
 			"k": "ping",
 			"w": 2016,
@@ -636,11 +649,24 @@ export const PRETZEL: LostDog = {
 			"w": 2025,
 			"s": 2172,
 			"who": "Camilla",
-			"q": "Dawn spot: 4 of 5 first-light pings were here (10/28 7:15, 10/29 7:46, 11/3 ~7:10, 11/6 6:12). Sunrise ~7:20, first light ~6:50. Be parked on S 2000 W by ~5:45 and stay till ~7:45: engine and lights off, stay in the car, crack a window and toss smelly food (sardines, rotisserie chicken). If you see him, don't call or approach; sit or lie down sideways, look away, toss food. Ask the NW-corner owners first. Note: dawn may just be when commuter iPhones start passing, so he could be bedded here all night.",
+			"q": "Dawn spot: 4 of 5 first-light pings were here (10/28 7:15, 10/29 7:46, 11/3 ~7:10, 11/6 6:12). Sunrise ~7:20, first light ~6:50. Be parked on S 2000 W by ~5:45 and stay till ~7:45: engine and lights off, stay in the car, crack a window and toss smelly food (sardines, rotisserie chicken). If you see him, don't call or approach; sit or lie down sideways, look away, toss food. Ask the owners first (the lagoon house is Kelly Olsen's; the land behind it is Darren Cox's, who said OK). Note: dawn may just be when commuter iPhones start passing, so he could be bedded here all night.",
 			"c": "ok",
 			"addr": "W side of S 2000 W, 2175 S to 2200 S",
 			"zone": [2000, 2125, 2050, 2205],
 			"zoneKind": "dawn"
+		},
+		{
+			"d": "11/10",
+			"t": "permission",
+			"k": "land",
+			"w": 2150,
+			"s": 2110,
+			"who": "Mellissa",
+			"q": "Darren Cox OK'd searching his property: everything behind the Olsen house (the lagoon/wetland west of S 2000 W, north toward 1800 S) plus his ground by Hyrum Slough and Phoenix Tears nursery off 2400 W. Printed maps are on Elizabeth's desk. The house on the lagoon is Kelly Olsen's. A volunteer FAA-certified drone pilot (Kendall) will fly over Darren's property.",
+			"c": "ok",
+			"addr": "behind the Olsen house, W of S 2000 W",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794333814530689"
 		}
 	],
 	"pins": [
