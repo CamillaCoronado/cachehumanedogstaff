@@ -644,7 +644,7 @@ export const PRETZEL: LostDog = {
 			"w": 2000,
 			"s": 1812,
 			"who": "Mellissa",
-			"q": "\"I am on 1800 south in 2000 west. I am in sight of him. He is in the field.\" (Which corner's field wasn't said; pin is at the intersection.)",
+			"q": "\"I am on 1800 south in 2000 west. I am in sight of him. He is in the field.\" (Which corner's field wasn't said; pin is at the intersection.) Elizabeth headed out to come from the other side (1:51pm). 2:14pm: he slid into the ditch where the fence line ends, by where Elizabeth was parked (video in Slack).",
 			"c": "approx",
 			"addr": "field at W 1800 S & S 2000 W",
 			"channel": "#pretzel-pings",
