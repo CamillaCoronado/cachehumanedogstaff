@@ -96,6 +96,19 @@ export const PRETZEL: LostDog = {
 		},
 		{
 			"d": "10/28",
+			"t": "4:18 am",
+			"k": "clue",
+			"w": 2060,
+			"s": 2150,
+			"who": "Darren Cox (game camera)",
+			"q": "Darren Cox's game camera (\"CoxSecurity1\") caught a white dog with dark patches at 10/28 4:18am, 45°F. Darren thinks it was him; not confirmed, so it counts as a clue, not a sighting. Camera is somewhere on Cox ground behind the Olsen house (exact spot unknown, pin is approximate). Darren shared it with Mellissa on 11/10.",
+			"c": "area",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794333814530689",
+			"h": 4.3
+		},
+		{
+			"d": "10/28",
 			"t": "7:15 am",
 			"k": "ping",
 			"w": 2016,
@@ -636,11 +649,30 @@ export const PRETZEL: LostDog = {
 			"w": 2025,
 			"s": 2172,
 			"who": "Camilla",
-			"q": "Dawn spot: 4 of 5 first-light pings were here (10/28 7:15, 10/29 7:46, 11/3 ~7:10, 11/6 6:12). Sunrise ~7:20, first light ~6:50. Be parked on S 2000 W by ~5:45 and stay till ~7:45: engine and lights off, stay in the car, crack a window and toss smelly food (sardines, rotisserie chicken). If you see him, don't call or approach; sit or lie down sideways, look away, toss food. Ask the NW-corner owners first. Note: dawn may just be when commuter iPhones start passing, so he could be bedded here all night.",
+			"q": "Dawn spot: 4 of 5 first-light pings were here (10/28 7:15, 10/29 7:46, 11/3 ~7:10, 11/6 6:12). Sunrise ~7:20, first light ~6:50. Be parked on S 2000 W by ~5:45 and stay till ~7:45: engine and lights off, stay in the car, crack a window and toss smelly food (sardines, rotisserie chicken). If you see him, don't call or approach; sit or lie down sideways, look away, toss food. Ask the owners first (the lagoon house is Kelly Olsen's; the land behind it is Darren Cox's, who said OK). Note: dawn may just be when commuter iPhones start passing, so he could be bedded here all night.",
 			"c": "ok",
 			"addr": "W side of S 2000 W, 2175 S to 2200 S",
 			"zone": [2000, 2125, 2050, 2205],
-			"zoneKind": "dawn"
+			"zoneKind": "dawn",
+			"zoneTagAt": [2250, 2268]
+		},
+		{
+			"d": "11/10",
+			"t": "permission",
+			"k": "land",
+			"w": 2075,
+			"s": 2080,
+			"who": "Mellissa",
+			"q": "Darren Cox OK'd searching his property. Only what's on Mellissa's sharpie page: the lagoon and the land west of her line, from the Olsen property south to just above the 2200 S houses. NOT the Olsen property, the field north of it along 2000 W, or the 2200 S houses. Edges are by eye from her photo. Stay out of yards; the red no-go box is someone else's, still stay off it. Printed maps are on Elizabeth's desk. The house on the lagoon is Kelly Olsen's. A volunteer FAA-certified drone pilot (Kendall) will fly over Darren's property.",
+			"c": "ok",
+			"addr": "the lagoon behind the Olsen house, W of S 2000 W, N of W 2200 S",
+			"zone": [2009, 1995, 2099, 2184],
+			"zonePoly": [[2099, 1995], [2086, 1995], [2062, 2026], [2047, 2037], [2036, 2062], [2028, 2092], [2019, 2116], [2010, 2128], [2009, 2137], [2040, 2146], [2068, 2160], [2096, 2184], [2099, 2184]],
+			"zoneKind": "ok",
+			"zoneLabel": "Darren Cox's land",
+			"zoneTagAt": [2235, 1985],
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794333814530689"
 		}
 	],
 	"pins": [

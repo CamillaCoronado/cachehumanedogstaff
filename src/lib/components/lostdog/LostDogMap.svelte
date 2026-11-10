@@ -93,16 +93,42 @@
 			el('ellipse', { cx: X(h.w), cy: Y(h.s), rx: h.rw, ry: h.rs, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-dasharray': '6 5', 'stroke-width': 1.4 }, g0);
 			lab(X(h.w), Y(h.s) - h.rs - 8, 'HOTSPOT', false, { fill: 'var(--ld-ping)', 'font-weight': 700, 'font-size': 11 });
 		}
-		for (const e of dog.events) {
-			if (!e.zone) continue;
-			const [w1, s1, w2, s2] = e.zone;
-			const c = e.c === 'nogo' ? 'var(--ld-nogo)' : e.zoneKind === 'dawn' ? 'var(--ld-ok)' : 'var(--ld-seen)';
+		// Zone tags: [anchor x, y, tag x, y, lines, color]. Drawn after the zones, at a constant screen size.
+		const tags: [number, number, number, number, string[], string][] = [];
+		// Permission areas go underneath everything else, so a no-go inside one still shows red.
+		const zoned = dog.events.filter((e) => e.zone).sort((a, b) => Number(b.zoneKind === 'ok') - Number(a.zoneKind === 'ok'));
+		for (const e of zoned) {
+			const [w1, s1, w2, s2] = e.zone!;
+			const c = e.c === 'nogo' ? 'var(--ld-nogo)' : e.zoneKind === 'dawn' || e.zoneKind === 'ok' ? 'var(--ld-ok)' : 'var(--ld-seen)';
+			if (e.zoneKind === 'ok') {
+				const okStyle = { fill: c, 'fill-opacity': 0.08, stroke: c, 'stroke-width': 2.5, 'stroke-linejoin': 'round' };
+				if (e.zonePoly) el('polygon', { points: e.zonePoly.map(([w, s]) => `${X(w)},${Y(s)}`).join(' '), ...okStyle }, g0);
+				else el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 6, ...okStyle }, g0);
+				const [tw, ts] = e.zoneTagAt ?? [w2 + 120, s1];
+				tags.push([X(w2), Y(s1) + (Y(s2) - Y(s1)) * 0.15, X(tw), Y(ts), ['OK TO SEARCH', e.zoneLabel ?? ''], c]);
+				continue;
+			}
 			el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 4, fill: c, 'fill-opacity': 0.1, stroke: c, 'stroke-dasharray': '5 4', 'stroke-width': 1.4 }, g0);
-			// The dawn box sits in a crowd of markers, so its label goes to the left, over the lagoon.
-			if (e.zoneKind === 'dawn') lab(X(w2) - 6, Y(s1) + (Y(s2) - Y(s1)) / 2, 'DAWN SPOT 5:45–7:45am', false, { fill: c, 'font-size': 11, 'font-weight': 700, 'text-anchor': 'end' });
-			else lab(X(w2) + (X(w1) - X(w2)) / 2, Y(s2) + 16, e.c === 'nogo' ? 'no-go (approx)' : e.zoneKind === 'area' ? 'first search area' : 'seen running in this field', false, { fill: c, 'font-size': 11, 'font-weight': 700 });
+			// The dawn box sits in a crowd of markers, so it gets a tag out in open ground with a pointer line.
+			if (e.zoneKind === 'dawn') {
+				const [tw, ts] = e.zoneTagAt ?? [w2 + 150, s2 + 60];
+				tags.push([X(w2), Y(s1) + (Y(s2) - Y(s1)) / 2, X(tw), Y(ts), ['DAWN SPOT', 'be here 5:45–7:45am'], c]);
+			} else lab(X(w2) + (X(w1) - X(w2)) / 2, Y(s2) + 16, e.c === 'nogo' ? 'no-go (approx)' : e.zoneKind === 'area' ? 'first search area' : 'seen running in this field', false, { fill: c, 'font-size': 11, 'font-weight': 700 });
 		}
 		scaled.length = 0;
+		for (const [ax, ay, tx, ty, lines, c] of tags) {
+			el('line', { x1: ax, y1: ay, x2: tx, y2: ty, stroke: c, 'stroke-width': 2, 'vector-effect': 'non-scaling-stroke' }, g0);
+			el('circle', { cx: ax, cy: ay, r: 3, fill: c }, track(el('g', { transform: big(ax, ay) }, g0), ax, ay));
+			const g = track(el('g', { transform: big(tx, ty) }, g0), tx, ty);
+			const r = el('rect', { rx: 5, fill: c, stroke: 'var(--ld-halo)', 'stroke-width': 1.5 }, g);
+			const txt = el('text', { x: tx, y: ty - (lines.length - 1) * 6.5 + 4, 'text-anchor': 'middle', fill: '#fff', 'font-size': 11 }, g);
+			lines.filter(Boolean).forEach((l, i) => {
+				const sp = el('tspan', { x: tx, dy: i ? 13 : 0, 'font-weight': i ? 500 : 800, 'font-size': i ? 10 : 11.5 }, txt);
+				sp.textContent = l;
+			});
+			const b = txt.getBBox();
+			for (const [k, v] of Object.entries({ x: b.x - 6, y: b.y - 3, width: b.width + 12, height: b.height + 6 })) r.setAttribute(k, String(v));
+		}
 		if (dog.home) {
 			const x = X(dog.home.w), y = Y(dog.home.s);
 			const g = track(el('g', { transform: big(x, y, 0.6) }, g0), x, y, 0.6);
