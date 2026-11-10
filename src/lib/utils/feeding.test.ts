@@ -260,10 +260,11 @@ describe('puppy → adult food transition', () => {
 		expect(adultFoodStage({ foodType: 'No Fish', dateOfBirth: monthsAgo(11) }, now)).toBeNull();
 	});
 
-	it('food type set to Puppy stays puppy past 10 months', () => {
+	it('food type set to Puppy stays on puppy food, transition still offered from 10 months', () => {
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(9) }, now)).toEqual({ kind: 'puppy' });
 		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(10) }, now)).toEqual({ kind: 'suggested' });
-		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(11) }, now)).toEqual({ kind: 'puppy' });
-		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(20) }, now)).toEqual({ kind: 'puppy' });
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(11) }, now)).toEqual({ kind: 'suggested' });
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(20) }, now)).toEqual({ kind: 'suggested' });
 	});
 
 	it('runs the 7-day mix from the accepted day, then adult', () => {
