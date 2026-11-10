@@ -155,10 +155,11 @@ function fractionToLabel(value: number) {
 
 // Daily adult share for the standard 7-day switch; day 7 on is all adult food.
 const ADULT_TRANSITION_SCHEDULE = [0.25, 0.25, 0.5, 0.5, 0.75, 0.75];
+// The transition is only suggested during month 10; from 11 months a dog is
+// on adult food unless staff set its food type to Puppy (puppy food, with
+// the transition still offered).
 const ADULT_TRANSITION_SUGGEST_MONTHS = 10;
-// Normal-food dogs past this age with no transition on record already went
-// adult under the old automatic 12-month switch; don't re-suggest for them.
-const ADULT_TRANSITION_SUGGEST_UNTIL_MONTHS = 13;
+const ADULT_FOOD_DEFAULT_MONTHS = 11;
 
 export type AdultFoodStage =
 	| { kind: 'puppy' }
@@ -167,9 +168,11 @@ export type AdultFoodStage =
 	| { kind: 'adult' };
 
 /**
- * Where a dog is in moving from puppy to adult food. From 10 months the app
+ * Where a dog is in moving from puppy to adult food. At 10 months the app
  * only suggests the transition; it starts when staff accept it (stamping
- * adultFoodTransitionStart). Null for special diets (No Fish etc.).
+ * adultFoodTransitionStart). From 11 months it's adult food, unless staff set
+ * the food type to Puppy: then it stays puppy, with the transition still on
+ * offer. Null for special diets.
  */
 export function adultFoodStage(
 	dog: { foodType?: string | null; dateOfBirth?: DateValue | null; adultFoodTransitionStart?: DateValue | null },
@@ -197,7 +200,7 @@ export function adultFoodStage(
 
 	if (months === null) return { kind: 'adult' };
 	if (months < ADULT_TRANSITION_SUGGEST_MONTHS) return { kind: 'puppy' };
-	if (months < ADULT_TRANSITION_SUGGEST_UNTIL_MONTHS) return { kind: 'suggested' };
+	if (months < ADULT_FOOD_DEFAULT_MONTHS) return { kind: 'suggested' };
 	return { kind: 'adult' };
 }
 

@@ -68,7 +68,7 @@ describe('estimateFoodAmountPerMeal (per shelter wall chart)', () => {
 
 	it('matches the wall chart 10-12 month column (regression: rows were shifted)', () => {
 		const now = new Date(2026, 5, 12);
-		const dob = new Date(2025, 6, 12); // 11 months old
+		const dob = new Date(2025, 7, 12); // 10 months old
 		expect(estimateFoodAmountPerMeal({ weightLbs: 20, dateOfBirth: dob, now })).toBe('1 c');
 		expect(estimateFoodAmountPerMeal({ weightLbs: 25, dateOfBirth: dob, now })).toBe('1 1/4 c');
 		expect(estimateFoodAmountPerMeal({ weightLbs: 30, dateOfBirth: dob, now })).toBe('1 1/2 c');
@@ -250,15 +250,21 @@ describe('puppy → adult food transition', () => {
 	const now = new Date(2026, 9, 23, 12);
 	const monthsAgo = (m: number) => new Date(2026, 9 - m, 1);
 
-	it('stays puppy under 10 months and suggests from 10 without switching', () => {
+	it('stays puppy under 10 months, suggests at 10, adult from 11', () => {
 		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(9) }, now)).toEqual({ kind: 'puppy' });
 		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(10) }, now)).toEqual({ kind: 'suggested' });
-		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(11) }, now)).toEqual({ kind: 'suggested' });
-		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(12) }, now)).toEqual({ kind: 'suggested' });
-		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(20) }, now)).toEqual({ kind: 'suggested' });
-		// already adult under the old 12-month switch
+		expect(adultFoodStage({ foodType: '', dateOfBirth: monthsAgo(10) }, now)).toEqual({ kind: 'suggested' });
+		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(11) }, now)).toEqual({ kind: 'adult' });
+		expect(adultFoodStage({ foodType: '', dateOfBirth: monthsAgo(12) }, now)).toEqual({ kind: 'adult' });
 		expect(adultFoodStage({ foodType: 'Normal', dateOfBirth: monthsAgo(14) }, now)).toEqual({ kind: 'adult' });
 		expect(adultFoodStage({ foodType: 'No Fish', dateOfBirth: monthsAgo(11) }, now)).toBeNull();
+	});
+
+	it('food type set to Puppy stays on puppy food, transition still offered from 10 months', () => {
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(9) }, now)).toEqual({ kind: 'puppy' });
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(10) }, now)).toEqual({ kind: 'suggested' });
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(11) }, now)).toEqual({ kind: 'suggested' });
+		expect(adultFoodStage({ foodType: 'Puppy', dateOfBirth: monthsAgo(20) }, now)).toEqual({ kind: 'suggested' });
 	});
 
 	it('runs the 7-day mix from the accepted day, then adult', () => {
@@ -278,12 +284,14 @@ describe('puppy → adult food transition', () => {
 	});
 
 	it('keeps puppy amounts while suggested, blends while mixing, adult after', () => {
-		const dob = monthsAgo(11);
+		const dob = monthsAgo(10);
 		// 40 lb: puppy 10-12mo = 1 3/4 c, adult = 1 1/2 c
 		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Normal', dateOfBirth: dob, now })).toBe('1 3/4 c');
 		const start = (daysAgo: number) => new Date(2026, 9, 23 - daysAgo, 12);
 		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Normal', dateOfBirth: dob, adultFoodTransitionStart: start(2), now })).toBe('1 1/2 c');
 		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Normal', dateOfBirth: dob, adultFoodTransitionStart: start(7), now })).toBe('1 1/2 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Normal', dateOfBirth: monthsAgo(11), now })).toBe('1 1/2 c');
+		expect(estimateFoodAmountPerMeal({ weightLbs: 40, foodType: 'Puppy', dateOfBirth: monthsAgo(11), now })).toBe('1 3/4 c');
 	});
 
 	it('tells staff the mix', () => {
