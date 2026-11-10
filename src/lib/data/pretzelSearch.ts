@@ -662,9 +662,12 @@ export const PRETZEL: LostDog = {
 			"w": 2150,
 			"s": 2110,
 			"who": "Mellissa",
-			"q": "Darren Cox OK'd searching his property: everything behind the Olsen house (the lagoon/wetland west of S 2000 W, north toward 1800 S) plus his ground by Hyrum Slough and Phoenix Tears nursery off 2400 W. Printed maps are on Elizabeth's desk. The house on the lagoon is Kelly Olsen's. A volunteer FAA-certified drone pilot (Kendall) will fly over Darren's property.",
+			"q": "Darren Cox OK'd searching his property. Per the note on the printed map: 1800 S to 2200 S, from 2400 W east to the Olsen house / fence on 2000 W (the lagoon, wetland and Hyrum Slough). The houses along 2000 W and 2200 S are not his, so stay out of yards; the red no-go box is someone else's, still stay off it. Printed maps are on Elizabeth's desk. The house on the lagoon is Kelly Olsen's. A volunteer FAA-certified drone pilot (Kendall) will fly over Darren's property.",
 			"c": "ok",
-			"addr": "behind the Olsen house, W of S 2000 W",
+			"addr": "1800 S to 2200 S, 2400 W to the Olsen house / fence on 2000 W",
+			"zone": [2030, 1810, 2400, 2190],
+			"zoneKind": "ok",
+			"zoneLabel": "OK TO SEARCH: Darren Cox land (11/10)",
 			"channel": "#pretzel-pings",
 			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794333814530689"
 		}

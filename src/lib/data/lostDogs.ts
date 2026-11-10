@@ -32,8 +32,10 @@ export interface LostDogEvent {
 	hide?: boolean;
 	/** [w1, s1, w2, s2] rectangle on the grid. */
 	zone?: [number, number, number, number];
-	/** zone style: 'area' (first search area), 'field' (seen in this field), or 'dawn' (where to wait at first light). */
-	zoneKind?: 'area' | 'field' | 'dawn';
+	/** zone style: 'area' (first search area), 'field' (seen in this field), 'dawn' (where to wait at first light), or 'ok' (land we have permission to search). */
+	zoneKind?: 'area' | 'field' | 'dawn' | 'ok';
+	/** label drawn on an 'ok' zone. */
+	zoneLabel?: string;
 }
 
 export interface LostDog {

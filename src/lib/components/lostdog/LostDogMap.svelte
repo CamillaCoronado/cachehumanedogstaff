@@ -93,10 +93,16 @@
 			el('ellipse', { cx: X(h.w), cy: Y(h.s), rx: h.rw, ry: h.rs, fill: 'var(--ld-hot)', stroke: 'var(--ld-ping)', 'stroke-dasharray': '6 5', 'stroke-width': 1.4 }, g0);
 			lab(X(h.w), Y(h.s) - h.rs - 8, 'HOTSPOT', false, { fill: 'var(--ld-ping)', 'font-weight': 700, 'font-size': 11 });
 		}
-		for (const e of dog.events) {
-			if (!e.zone) continue;
-			const [w1, s1, w2, s2] = e.zone;
-			const c = e.c === 'nogo' ? 'var(--ld-nogo)' : e.zoneKind === 'dawn' ? 'var(--ld-ok)' : 'var(--ld-seen)';
+		// Permission areas go underneath everything else, so a no-go inside one still shows red.
+		const zoned = dog.events.filter((e) => e.zone).sort((a, b) => Number(b.zoneKind === 'ok') - Number(a.zoneKind === 'ok'));
+		for (const e of zoned) {
+			const [w1, s1, w2, s2] = e.zone!;
+			const c = e.c === 'nogo' ? 'var(--ld-nogo)' : e.zoneKind === 'dawn' || e.zoneKind === 'ok' ? 'var(--ld-ok)' : 'var(--ld-seen)';
+			if (e.zoneKind === 'ok') {
+				el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 6, fill: c, 'fill-opacity': 0.08, stroke: c, 'stroke-width': 2.5 }, g0);
+				lab(X(w2) + 8, Y(s1) + 18, e.zoneLabel ?? 'OK TO SEARCH', false, { fill: c, 'font-size': 13, 'font-weight': 700, 'text-anchor': 'start' });
+				continue;
+			}
 			el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 4, fill: c, 'fill-opacity': 0.1, stroke: c, 'stroke-dasharray': '5 4', 'stroke-width': 1.4 }, g0);
 			// The dawn box sits in a crowd of markers, so its label goes to the left, over the lagoon.
 			if (e.zoneKind === 'dawn') lab(X(w2) - 6, Y(s1) + (Y(s2) - Y(s1)) / 2, 'DAWN SPOT 5:45–7:45am', false, { fill: c, 'font-size': 11, 'font-weight': 700, 'text-anchor': 'end' });
