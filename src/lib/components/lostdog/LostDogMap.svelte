@@ -102,7 +102,8 @@
 				const okStyle = { fill: c, 'fill-opacity': 0.08, stroke: c, 'stroke-width': 2.5, 'stroke-linejoin': 'round' };
 				if (e.zonePoly) el('polygon', { points: e.zonePoly.map(([w, s]) => `${X(w)},${Y(s)}`).join(' '), ...okStyle }, g0);
 				else el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 6, ...okStyle }, g0);
-				lab(X(w2) + 8, Y(s1) + 18, e.zoneLabel ?? 'OK TO SEARCH', false, { fill: c, 'font-size': 13, 'font-weight': 700, 'text-anchor': 'start' });
+				// Label goes just left of the area's top corner, clear of the no-go box and the hotspot.
+				lab(X(w2) - 6, Y(s1) + 12, e.zoneLabel ?? 'OK TO SEARCH', false, { fill: c, 'font-size': 12, 'font-weight': 700, 'text-anchor': 'end' });
 				continue;
 			}
 			el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 4, fill: c, 'fill-opacity': 0.1, stroke: c, 'stroke-dasharray': '5 4', 'stroke-width': 1.4 }, g0);
