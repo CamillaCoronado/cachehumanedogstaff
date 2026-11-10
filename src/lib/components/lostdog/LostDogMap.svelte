@@ -266,11 +266,14 @@
 		el('circle', { cx: me.x, cy: me.y, r: 7 * f, fill: '#1a73e8', stroke: '#fff', 'stroke-width': 2.5, 'vector-effect': 'non-scaling-stroke' }, g);
 	}
 	const ft = (units: number) => Math.round((units * M_PER_UNIT * 3.281) / 10) * 10;
-	$: meNote = me && latest ? `You're ~${ft(Math.hypot(me.x - X(latest.w), me.y - Y(latest.s))).toLocaleString()} ft from the latest ping (gold). GPS ±${ft(me.acc / M_PER_UNIT)} ft.` : '';
+	// Far away (e.g. at the shelter) reads better in miles; up close, in feet.
+	const dist = (units: number) => { const f = ft(units); return f >= 2640 ? `${(f / 5280).toFixed(1)} mi` : `${f.toLocaleString()} ft`; };
+	$: meNote = me && latest ? `${offMap ? "You're off this map. " : ''}You're ~${dist(Math.hypot(me.x - X(latest.w), me.y - Y(latest.s)))} from the latest ping (gold). GPS ±${ft(me.acc / M_PER_UNIT)} ft.` : '';
+	let offMap = false;
 	function toggleGps() {
 		if (watchId !== null) {
 			navigator.geolocation.clearWatch(watchId);
-			watchId = null; me = null; gpsMsg = ''; drawMe();
+			watchId = null; me = null; offMap = false; gpsMsg = ''; drawMe();
 			return;
 		}
 		if (!('geolocation' in navigator)) { gpsMsg = "This browser can't share location."; return; }
@@ -279,12 +282,13 @@
 		watchId = navigator.geolocation.watchPosition(
 			(p) => {
 				me = { ...toMap(p.coords.latitude, p.coords.longitude), acc: p.coords.accuracy };
+				offMap = !(me.x > -400 && me.x < 1700 && me.y > -300 && me.y < 1300);
 				gpsMsg = '';
 				if (first) {
 					first = false;
 					// Center on you if you're inside the map area; otherwise leave the view alone.
 					if (me.x > -400 && me.x < 1700 && me.y > -300 && me.y < 1300) { view = [me.x - view[2] / 2, me.y - view[3] / 2, view[2], view[3]]; setView(); }
-					else gpsMsg = "You're outside this map's area.";
+					else offMap = true;
 				}
 				drawMe();
 			},
