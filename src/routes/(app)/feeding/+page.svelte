@@ -799,7 +799,7 @@
 										</p>
 										{@const adultStage = isOwnFood(dog) ? null : adultFoodStage(dog, selectedDay)}
 										{#if adultStage?.kind === 'suggested'}
-											<p class="feed-transition-label">10+ mo: adult food?</p>
+											<p class="feed-transition-label">10 mo: adult food?</p>
 											<div class="feed-transition-actions">
 												<button class="feed-transition-suggest" on:click={() => startAdultTransition(dog, 'transition')}>
 													Start 7-day transition
