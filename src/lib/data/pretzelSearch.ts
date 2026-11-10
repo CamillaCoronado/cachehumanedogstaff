@@ -25,9 +25,9 @@ export const PRETZEL: LostDog = {
 		12.6
 	],
 	"summary": {
-		"lastKnown": "11/9 ~9:08pm ping, just south of W 2200 S ~1/4 mi east of S 2000 W. Trap was taken back 11/8",
+		"lastKnown": "SEEN 11/10 1:42pm in the field at W 1800 S & S 2000 W. Before that: 11/9 9:41pm on a home camera S of W 2200 S ~1900 W. Trap was taken back 11/8",
 		"hotspot": "dashed circle by the foster home (13 of 28 pings + sightings); 2nd spot is 1600 W just N of 2200 S",
-		"mostActive": "since 11/4 every ping is 6:30pm–6am; on the move in the evenings",
+		"mostActive": "since 11/4 every ping is 6:30pm–6am, but he was seen out in daylight 11/10 1:42pm",
 		"dawn": "green box, W side of S 2000 W just N of 2200 S (NW-corner house to the 2175 S house, lagoon side). 4 of 5 dawn pings. Park on 2000 W by 5:45, engine + lights off, stay in the car, toss smelly food, don't call or chase. Ask the owners first."
 	},
 	"events": [
@@ -609,6 +609,47 @@ export const PRETZEL: LostDog = {
 			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794285383893149",
 			"h": 21.13,
 			"mv": true
+		},
+		{
+			"d": "11/9",
+			"t": "9:41 pm (camera)",
+			"k": "seen",
+			"w": 1912,
+			"s": 2216,
+			"who": "Mellissa",
+			"q": "Owners at the 9:08pm ping house checked their cameras: Pretzel was in their driveway at 9:41pm, walking to the back of the house (camera still posted in Slack).",
+			"c": "approx",
+			"addr": "S side of W 2200 S, ~1900 W",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794341694409639",
+			"h": 21.68
+		},
+		{
+			"d": "11/10",
+			"t": "permission",
+			"k": "land",
+			"w": 1900,
+			"s": 2228,
+			"who": "Mellissa",
+			"q": "Owners of the 9:08pm ping house (whole corner lot, goes all the way back): OK to come on the property anytime there's a ping there, any time of day. They'll watch their cameras tonight. Their 2 big yellow labs roam loose and are friendly. Their family owns pretty much everything within a half mile of the house, OK to enter as needed.",
+			"c": "ok",
+			"addr": "S side of W 2200 S, ~1900 W",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794341694409639"
+		},
+		{
+			"d": "11/10",
+			"t": "1:42 pm",
+			"k": "seen",
+			"w": 2000,
+			"s": 1812,
+			"who": "Mellissa",
+			"q": "\"I am on 1800 south in 2000 west. I am in sight of him. He is in the field.\" (Which corner's field wasn't said; pin is at the intersection.) Elizabeth headed out to come from the other side (1:51pm). 2:14pm: he slid into the ditch where the fence line ends, by where Elizabeth was parked (video in Slack).",
+			"c": "approx",
+			"addr": "field at W 1800 S & S 2000 W",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794343329396999",
+			"h": 13.7
 		},
 		{
 			"d": "11/4",

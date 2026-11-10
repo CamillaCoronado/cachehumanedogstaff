@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import type { LostDog, LostDogEvent } from '$lib/data/lostDogs';
 
 	export let dog: LostDog;
@@ -7,6 +7,10 @@
 	// Grid → SVG. W grows west (left), S grows south (down). 400 grid units ≈ 0.5 mi.
 	// The base layer is OpenStreetMap tiles calibrated to the grid around Pretzel's search
 	// (west of Nibley / north of Wellsville). A search somewhere else would need its own calibration.
+	// Tile calibration: 2000 W / 2200 S sit at z17 global pixel GX, GY; K z17 pixels per grid unit.
+	const GX = 24797 * 256 + 1068, GY = 48804 * 256 + 596, K = 2.25;
+	// One grid unit is about 2 m here (z17 is ~0.89 m per pixel at this latitude).
+	const M_PER_UNIT = (156543.03 * Math.cos((41.69 * Math.PI) / 180) / 2 ** 17) * K;
 	const X = (w: number) => 2860 - w;
 	const Y = (s: number) => s - 1640;
 	const NS = 'http://www.w3.org/2000/svg';
@@ -74,7 +78,7 @@
 		el('rect', { x: -2000, y: -2000, width: 5000, height: 5000, fill: 'var(--ld-land)' }, g0);
 		// Base layer: OpenStreetMap tiles placed on the county grid. Calibrated against the labeled
 		// roads in the tiles (2000 W / 2200 S at z17 global pixel GX, GY; K z17 pixels per grid unit).
-		const GX = 24797 * 256 + 1068, GY = 48804 * 256 + 596, K = 2.25, Z = 16, T = 512 / K;
+		const Z = 16, T = 512 / K;
 		const tiles = el('g', { class: 'tiles' }, g0);
 		const tx0 = Math.floor((GX + (-400 - 860) * K) / 512), tx1 = Math.floor((GX + (1700 - 860) * K) / 512);
 		const ty0 = Math.floor((GY + (-300 - 560) * K) / 512), ty1 = Math.floor((GY + (1300 - 560) * K) / 512);
@@ -170,6 +174,7 @@
 		if (li >= 0 && marks[li]) g0.appendChild(marks[li]);
 		applyFilter();
 		applySelection();
+		drawMe();
 	}
 
 	function drawHours() {
@@ -241,7 +246,53 @@
 	// Pan and zoom by moving the viewBox.
 	let dragged = false;
 	let p0: { x: number; y: number; v: number[] } | null = null;
-	const setView = () => { mapEl?.setAttribute('viewBox', view.join(' ')); rescale(); };
+	const setView = () => { mapEl?.setAttribute('viewBox', view.join(' ')); rescale(); drawMe(); };
+
+	// "Show me": the phone's GPS position as a blue dot with its accuracy circle.
+	let me: { x: number; y: number; acc: number } | null = null;
+	let watchId: number | null = null;
+	let gpsMsg = '';
+	function toMap(lat: number, lon: number) {
+		const n = 256 * 2 ** 17, r = (lat * Math.PI) / 180;
+		const px = ((lon + 180) / 360) * n, py = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n;
+		return { x: 860 + (px - GX) / K, y: 560 + (py - GY) / K };
+	}
+	function drawMe() {
+		mapEl?.querySelector('.me')?.remove();
+		if (!mapEl || !me) return;
+		const f = (narrow ? 1.7 : 1) * (view[2] / V0[2]);
+		const g = el('g', { class: 'me', 'pointer-events': 'none' }, mapEl);
+		el('circle', { cx: me.x, cy: me.y, r: Math.max(me.acc / M_PER_UNIT, 8 * f), fill: '#1a73e8', 'fill-opacity': 0.15, stroke: '#1a73e8', 'stroke-opacity': 0.4, 'stroke-width': 1, 'vector-effect': 'non-scaling-stroke' }, g);
+		el('circle', { cx: me.x, cy: me.y, r: 7 * f, fill: '#1a73e8', stroke: '#fff', 'stroke-width': 2.5, 'vector-effect': 'non-scaling-stroke' }, g);
+	}
+	const ft = (units: number) => Math.round((units * M_PER_UNIT * 3.281) / 10) * 10;
+	$: meNote = me && latest ? `You're ~${ft(Math.hypot(me.x - X(latest.w), me.y - Y(latest.s))).toLocaleString()} ft from the latest ping (gold). GPS ±${ft(me.acc / M_PER_UNIT)} ft.` : '';
+	function toggleGps() {
+		if (watchId !== null) {
+			navigator.geolocation.clearWatch(watchId);
+			watchId = null; me = null; gpsMsg = ''; drawMe();
+			return;
+		}
+		if (!('geolocation' in navigator)) { gpsMsg = "This browser can't share location."; return; }
+		gpsMsg = 'Finding you…';
+		let first = true;
+		watchId = navigator.geolocation.watchPosition(
+			(p) => {
+				me = { ...toMap(p.coords.latitude, p.coords.longitude), acc: p.coords.accuracy };
+				gpsMsg = '';
+				if (first) {
+					first = false;
+					// Center on you if you're inside the map area; otherwise leave the view alone.
+					if (me.x > -400 && me.x < 1700 && me.y > -300 && me.y < 1300) { view = [me.x - view[2] / 2, me.y - view[3] / 2, view[2], view[3]]; setView(); }
+					else gpsMsg = "You're outside this map's area.";
+				}
+				drawMe();
+			},
+			(err) => { gpsMsg = err.code === 1 ? 'Location is blocked. Allow location for this site in your browser settings.' : "Couldn't get your location."; if (watchId !== null) navigator.geolocation.clearWatch(watchId); watchId = null; },
+			{ enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+		);
+	}
+	onDestroy(() => { if (watchId !== null && typeof navigator !== 'undefined') navigator.geolocation.clearWatch(watchId); });
 	function zoom(f: number) {
 		const cx = view[0] + view[2] / 2, cy = view[1] + view[3] / 2;
 		const w = clampW(view[2] * f);
@@ -364,7 +415,9 @@
 				<button type="button" aria-label="Zoom in" on:click={() => zoom(0.7)}>+</button>
 				<button type="button" aria-label="Zoom out" on:click={() => zoom(1 / 0.7)}>−</button>
 				<button type="button" aria-label="Reset view" on:click={() => { view = [...V0]; setView(); }}>⟲</button>
+				<button type="button" aria-label="Show my location" aria-pressed={watchId !== null} class:on={watchId !== null} on:click={toggleGps}>◎</button>
 			</div>
+			{#if gpsMsg || meNote}<div class="gps">{gpsMsg || meNote}</div>{/if}
 			</div>
 			<div class="legend">
 				<span><i class="dot" style="background:var(--ld-latest)"></i>latest ping</span>
@@ -447,6 +500,8 @@
 	.zoom { position:absolute; right:10px; bottom:10px; display:flex; flex-direction:column; background:var(--ld-panel); border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,.3); overflow:hidden; }
 	.zoom button { width:36px; height:36px; border:0; background:var(--ld-panel); color:var(--ld-muted); font-size:20px; cursor:pointer; }
 	.zoom button + button { border-top:1px solid var(--ld-line); }
+	.zoom button.on { color:#1a73e8; }
+	.gps { position:absolute; left:10px; bottom:10px; right:56px; background:var(--ld-panel); color:var(--ld-fg); font-size:.8rem; padding:6px 9px; border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,.3); }
 	.legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:.8rem; color:var(--ld-muted); padding:8px 12px; border-top:1px solid var(--ld-line); }
 	.legend span { display:inline-flex; align-items:center; gap:6px; }
 	.dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
