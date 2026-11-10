@@ -96,9 +96,11 @@
 		for (const e of dog.events) {
 			if (!e.zone) continue;
 			const [w1, s1, w2, s2] = e.zone;
-			const c = e.c === 'nogo' ? 'var(--ld-nogo)' : 'var(--ld-seen)';
+			const c = e.c === 'nogo' ? 'var(--ld-nogo)' : e.zoneKind === 'dawn' ? 'var(--ld-ok)' : 'var(--ld-seen)';
 			el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 4, fill: c, 'fill-opacity': 0.1, stroke: c, 'stroke-dasharray': '5 4', 'stroke-width': 1.4 }, g0);
-			lab(X(w2) + (X(w1) - X(w2)) / 2, Y(s2) + 16, e.c === 'nogo' ? 'no-go (approx)' : e.zoneKind === 'area' ? 'first search area' : 'seen running in this field', false, { fill: c, 'font-size': 11, 'font-weight': 700 });
+			// The dawn box sits in a crowd of markers, so its label goes to the left, over the lagoon.
+			if (e.zoneKind === 'dawn') lab(X(w2) - 6, Y(s1) + (Y(s2) - Y(s1)) / 2, 'DAWN SPOT 5:45–7:45am', false, { fill: c, 'font-size': 11, 'font-weight': 700, 'text-anchor': 'end' });
+			else lab(X(w2) + (X(w1) - X(w2)) / 2, Y(s2) + 16, e.c === 'nogo' ? 'no-go (approx)' : e.zoneKind === 'area' ? 'first search area' : 'seen running in this field', false, { fill: c, 'font-size': 11, 'font-weight': 700 });
 		}
 		scaled.length = 0;
 		if (dog.home) {
@@ -337,6 +339,7 @@
 					{#if dog.summary.lastKnown}<span><b>Last known:</b> {dog.summary.lastKnown}</span>{/if}
 					{#if dog.summary.hotspot}<span><b>Hotspot:</b> {dog.summary.hotspot}</span>{/if}
 					{#if dog.summary.mostActive}<span><b>Most active:</b> {dog.summary.mostActive}</span>{/if}
+					{#if dog.summary.dawn}<span><b>Dawn spot:</b> {dog.summary.dawn}</span>{/if}
 				</div>
 			{/if}
 			<div class="osm">Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>

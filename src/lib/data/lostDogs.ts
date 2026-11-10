@@ -32,8 +32,8 @@ export interface LostDogEvent {
 	hide?: boolean;
 	/** [w1, s1, w2, s2] rectangle on the grid. */
 	zone?: [number, number, number, number];
-	/** zone style: 'area' (first search area) or 'field' (seen in this field). */
-	zoneKind?: 'area' | 'field';
+	/** zone style: 'area' (first search area), 'field' (seen in this field), or 'dawn' (where to wait at first light). */
+	zoneKind?: 'area' | 'field' | 'dawn';
 }
 
 export interface LostDog {
@@ -42,7 +42,7 @@ export interface LostDog {
 	status: 'missing' | 'found';
 	home?: { w: number; s: number; label: string; address: string };
 	hotspot?: { w: number; s: number; rw: number; rs: number };
-	summary?: { lastKnown?: string; hotspot?: string; mostActive?: string };
+	summary?: { lastKnown?: string; hotspot?: string; mostActive?: string; dawn?: string };
 	/** Busiest window for the hour chart, [from, to] in hours. */
 	activeWindow?: [number, number];
 	/** Hour window with the most AirTag pings (he's near houses and the street), [from, to]. */

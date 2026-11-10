@@ -26,8 +26,9 @@ export const PRETZEL: LostDog = {
 	],
 	"summary": {
 		"lastKnown": "11/9 ~9:08pm ping, just south of W 2200 S ~1/4 mi east of S 2000 W. Trap was taken back 11/8",
-		"hotspot": "dashed circle by the foster home (9 of 18 pings); also overnight by 1600 W",
-		"mostActive": "most pings 7–8am, most movement late morning"
+		"hotspot": "dashed circle by the foster home (13 of 28 pings + sightings); 2nd spot is 1600 W just N of 2200 S",
+		"mostActive": "since 11/4 every ping is 6:30pm–6am; on the move in the evenings",
+		"dawn": "green box, W side of S 2000 W just N of 2200 S (NW-corner house to the 2175 S house, lagoon side). 4 of 5 dawn pings. Park on 2000 W by 5:45, engine + lights off, stay in the car, toss smelly food, don't call or chase. Ask the owners first."
 	},
 	"events": [
 		{
@@ -627,6 +628,19 @@ export const PRETZEL: LostDog = {
 			"channel": "#woof-crew",
 			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793806902617019",
 			"hide": true
+		},
+		{
+			"d": "11/10",
+			"t": "plan",
+			"k": "land",
+			"w": 2025,
+			"s": 2172,
+			"who": "Camilla",
+			"q": "Dawn spot: 4 of 5 first-light pings were here (10/28 7:15, 10/29 7:46, 11/3 ~7:10, 11/6 6:12). Sunrise ~7:20, first light ~6:50. Be parked on S 2000 W by ~5:45 and stay till ~7:45: engine and lights off, stay in the car, crack a window and toss smelly food (sardines, rotisserie chicken). If you see him, don't call or approach; sit or lie down sideways, look away, toss food. Ask the NW-corner owners first. Note: dawn may just be when commuter iPhones start passing, so he could be bedded here all night.",
+			"c": "ok",
+			"addr": "W side of S 2000 W, 2175 S to 2200 S",
+			"zone": [2000, 2125, 2050, 2205],
+			"zoneKind": "dawn"
 		}
 	],
 	"pins": [
