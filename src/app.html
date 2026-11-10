@@ -18,9 +18,23 @@
 		<div id="boot" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#f0f5fa;color:#016aa5;font-family:system-ui,sans-serif;text-align:center;padding:16px;z-index:9999">
 			<p style="margin:0;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:14px">Cache Humane Society</p>
 			<p id="boot-msg" style="margin:0;font-size:18px">Loading…</p>
-			<button id="boot-retry" type="button" onclick="location.reload()" style="display:none;padding:10px 20px;border:0;border-radius:8px;background:#016aa5;color:#fff;font-size:16px">Try again</button>
+			<button id="boot-retry" type="button" onclick="bootReset()" style="display:none;padding:10px 20px;border:0;border-radius:8px;background:#016aa5;color:#fff;font-size:16px">Try again</button>
 		</div>
 		<script>
+			// "Try again" clears the offline cache and service worker first. A cached page from an
+			// older deploy (or a half-downloaded new one) can otherwise keep failing the same way.
+			window.bootReset = function () {
+				var jobs = [];
+				try { sessionStorage.setItem('boot-reset', String(Date.now())); } catch (e) {}
+				if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+					jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+				}
+				if (window.caches && caches.keys) {
+					jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+				}
+				Promise.all(jobs).catch(function () {}).then(function () { location.reload(); });
+				setTimeout(function () { location.reload(); }, 3000);
+			};
 			(function () {
 				function stuck() {
 					if (!document.getElementById('boot')) return;
@@ -28,20 +42,35 @@
 					document.getElementById('boot-retry').style.display = 'block';
 				}
 				setTimeout(stuck, 20000);
+				// Never leave anyone on this screen: if the app still hasn't started after a
+				// minute and a half, clear the offline cache and start fresh (at most once a minute).
+				setTimeout(function () { if (document.getElementById('boot')) recover(); }, 90000);
+				function recentlyDid(key) {
+					try { return Date.now() - (Number(sessionStorage.getItem(key)) || 0) < 60000; } catch (e) { return false; }
+				}
+				function recover() {
+					if (!recentlyDid('boot-reset')) { window.bootReset(); return; }
+					// Already started fresh in the last minute, so it's the connection: keep
+					// retrying quietly until it comes back.
+					stuck();
+					setTimeout(function () { if (document.getElementById('boot')) location.reload(); }, 15000);
+				}
 				// Only the app's own code failing to load means it cannot start. Other scripts
 				// (analytics, often blocked) and Firebase's network errors are not that.
 				function appCodeFailed() {
 					if (!document.getElementById('boot')) return;
-					// Usually a file from a deploy that has since been replaced: one reload
-					// picks up the current one.
-					try {
-						if (!sessionStorage.getItem('boot-reloaded')) {
-							sessionStorage.setItem('boot-reloaded', '1');
-							location.reload();
-							return;
-						}
-					} catch (e) {}
-					stuck();
+					// Usually a file from a deploy that has since been replaced, or one that didn't
+					// finish downloading: one reload picks up the current one. The guard against
+					// reload loops only lasts a minute, so a failure later in the day still gets
+					// its own automatic retry instead of going straight to "stuck".
+					// If a plain reload already failed, the cached copy itself is the problem:
+					// clear it and start fresh instead of showing a dead end.
+					if (!recentlyDid('boot-reloaded')) {
+						try { sessionStorage.setItem('boot-reloaded', String(Date.now())); } catch (e) {}
+						location.reload();
+						return;
+					}
+					recover();
 				}
 				window.addEventListener('error', function (e) {
 					var src = e.target && e.target.tagName === 'SCRIPT' ? e.target.src : '';

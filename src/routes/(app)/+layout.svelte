@@ -6,7 +6,7 @@
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 
 	injectAnalytics({ mode: dev ? 'development' : 'production' });
-	import { authReady, authUser, authProfile, authProfileFresh, initAuthListener } from '$lib/stores/auth';
+	import { authReady, authUser, authProfile, authProfileFresh, authStalled, initAuthListener } from '$lib/stores/auth';
 	import { isProfileApproved } from '$lib/data/users';
 	import { signOutUser } from '$lib/firebase/auth';
 	import { firebaseEnabled } from '$lib/firebase/config';
@@ -505,6 +505,12 @@
 	$: profileRole = normalizeText($authProfile?.role)?.toUpperCase() ?? 'STAFF';
 	$: profileInitial = profileName.trim().charAt(0).toUpperCase() || 'S';
 
+	function retryBoot() {
+		const w = window as unknown as { bootReset?: () => void };
+		if (w.bootReset) w.bootReset();
+		else location.reload();
+	}
+
 	async function handleLogout() {
 		loggingOut = true;
 		try {
@@ -536,6 +542,12 @@
 						Preparing your workspace...
 					{/if}
 				</p>
+				{#if $authStalled}
+					<p class="loading-stalled typewriter">
+						Weak signal — still trying to reach the server. It'll open on its own once it gets through.
+					</p>
+					<button class="pending-signout typewriter" on:click={retryBoot}>Try again</button>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -1003,6 +1015,12 @@
 		letter-spacing: 0.2em;
 		text-transform: uppercase;
 		color: var(--layout-muted);
+	}
+
+	.loading-stalled {
+		margin: 0.75rem 0 0;
+		font-size: 0.85rem;
+		opacity: 0.8;
 	}
 
 	.loading-note-text {
