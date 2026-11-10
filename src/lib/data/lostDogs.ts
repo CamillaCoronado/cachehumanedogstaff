@@ -36,6 +36,8 @@ export interface LostDogEvent {
 	zoneKind?: 'area' | 'field' | 'dawn' | 'ok';
 	/** exact outline (w, s points) for an 'ok' zone, traced from a hand-drawn map; zone stays the bounding box. */
 	zonePoly?: [number, number][];
+	/** where (w, s) to put the zone's tag; a pointer line runs from it to the zone. */
+	zoneTagAt?: [number, number];
 	/** label drawn on an 'ok' zone. */
 	zoneLabel?: string;
 }

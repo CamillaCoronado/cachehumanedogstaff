@@ -653,7 +653,8 @@ export const PRETZEL: LostDog = {
 			"c": "ok",
 			"addr": "W side of S 2000 W, 2175 S to 2200 S",
 			"zone": [2000, 2125, 2050, 2205],
-			"zoneKind": "dawn"
+			"zoneKind": "dawn",
+			"zoneTagAt": [2250, 2268]
 		},
 		{
 			"d": "11/10",
@@ -668,7 +669,8 @@ export const PRETZEL: LostDog = {
 			"zone": [2009, 1995, 2099, 2184],
 			"zonePoly": [[2099, 1995], [2086, 1995], [2062, 2026], [2047, 2037], [2036, 2062], [2028, 2092], [2019, 2116], [2010, 2128], [2009, 2137], [2040, 2146], [2068, 2160], [2096, 2184], [2099, 2184]],
 			"zoneKind": "ok",
-			"zoneLabel": "OK TO SEARCH (Cox)",
+			"zoneLabel": "Darren Cox's land",
+			"zoneTagAt": [2235, 1985],
 			"channel": "#pretzel-pings",
 			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794333814530689"
 		}
