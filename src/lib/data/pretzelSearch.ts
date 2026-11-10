@@ -97,11 +97,11 @@ export const PRETZEL: LostDog = {
 		{
 			"d": "10/28",
 			"t": "4:18 am",
-			"k": "seen",
+			"k": "clue",
 			"w": 2060,
 			"s": 2150,
 			"who": "Darren Cox (game camera)",
-			"q": "Darren Cox's game camera (\"CoxSecurity1\") caught a white dog with dark patches at 10/28 4:18am, 45°F. Looks like Pretzel. Camera is somewhere on Cox ground behind the Olsen house (exact spot unknown, pin is approximate). Darren shared it with Mellissa on 11/10.",
+			"q": "Darren Cox's game camera (\"CoxSecurity1\") caught a white dog with dark patches at 10/28 4:18am, 45°F. Darren thinks it was him; not confirmed, so it counts as a clue, not a sighting. Camera is somewhere on Cox ground behind the Olsen house (exact spot unknown, pin is approximate). Darren shared it with Mellissa on 11/10.",
 			"c": "area",
 			"channel": "#pretzel-pings",
 			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794333814530689",
