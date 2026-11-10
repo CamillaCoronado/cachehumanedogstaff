@@ -99,7 +99,9 @@
 			const [w1, s1, w2, s2] = e.zone!;
 			const c = e.c === 'nogo' ? 'var(--ld-nogo)' : e.zoneKind === 'dawn' || e.zoneKind === 'ok' ? 'var(--ld-ok)' : 'var(--ld-seen)';
 			if (e.zoneKind === 'ok') {
-				el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 6, fill: c, 'fill-opacity': 0.08, stroke: c, 'stroke-width': 2.5 }, g0);
+				const okStyle = { fill: c, 'fill-opacity': 0.08, stroke: c, 'stroke-width': 2.5, 'stroke-linejoin': 'round' };
+				if (e.zonePoly) el('polygon', { points: e.zonePoly.map(([w, s]) => `${X(w)},${Y(s)}`).join(' '), ...okStyle }, g0);
+				else el('rect', { x: X(w2), y: Y(s1), width: X(w1) - X(w2), height: Y(s2) - Y(s1), rx: 6, ...okStyle }, g0);
 				lab(X(w2) + 8, Y(s1) + 18, e.zoneLabel ?? 'OK TO SEARCH', false, { fill: c, 'font-size': 13, 'font-weight': 700, 'text-anchor': 'start' });
 				continue;
 			}

@@ -34,6 +34,8 @@ export interface LostDogEvent {
 	zone?: [number, number, number, number];
 	/** zone style: 'area' (first search area), 'field' (seen in this field), 'dawn' (where to wait at first light), or 'ok' (land we have permission to search). */
 	zoneKind?: 'area' | 'field' | 'dawn' | 'ok';
+	/** exact outline (w, s points) for an 'ok' zone, traced from a hand-drawn map; zone stays the bounding box. */
+	zonePoly?: [number, number][];
 	/** label drawn on an 'ok' zone. */
 	zoneLabel?: string;
 }
