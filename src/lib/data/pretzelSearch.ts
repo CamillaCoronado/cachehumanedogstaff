@@ -25,7 +25,7 @@ export const PRETZEL: LostDog = {
 		12.6
 	],
 	"summary": {
-		"lastKnown": "11/7 5:48am ping, east side of S 1600 W just north of 2200 S (by the new houses on W 2150 S). Trap + cameras at the foster home since 11/5",
+		"lastKnown": "11/9 ~9:08pm ping, just south of W 2200 S ~1/4 mi east of S 2000 W. Trap was taken back 11/8",
 		"hotspot": "dashed circle by the foster home (9 of 18 pings); also overnight by 1600 W",
 		"mostActive": "most pings 7–8am, most movement late morning"
 	},
@@ -488,7 +488,7 @@ export const PRETZEL: LostDog = {
 			"w": 2081,
 			"s": 2216,
 			"who": "Elizabeth",
-			"q": "Trap set up at the foster home, with cameras Elizabeth watches. Trapper: stay away (don't even drive through) so he goes in; he may watch the trap for hours first.",
+			"q": "Trap set up at the foster home, with cameras Elizabeth watches. Trapper: stay away (don't even drive through) so he goes in; he may watch the trap for hours first. He never went in; the trapper took her trap and gear back the morning of 11/8 (the shelter only has cat traps).",
 			"c": "context",
 			"channel": "#woof-crew",
 			"link": "https://cachehumane.slack.com/archives/C037C2KUZDF/p1793909046861959",
@@ -564,6 +564,36 @@ export const PRETZEL: LostDog = {
 			"channel": "#pretzel-pings",
 			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794072981673169",
 			"h": 5.8,
+			"mv": true
+		},
+		{
+			"d": "11/9",
+			"t": "1:38 am",
+			"k": "ping",
+			"w": 2012,
+			"s": 2138,
+			"who": "Liz",
+			"q": "Find My: \"Today at 1:38 AM\". The house on the west side of S 2000 W that backs onto the lagoon, a few houses north of 2200 S.",
+			"c": "approx",
+			"addr": "W side of S 2000 W on the lagoon, N of 2200 S",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794229105681009",
+			"h": 1.63,
+			"mv": true
+		},
+		{
+			"d": "11/9",
+			"t": "~9:08 pm",
+			"k": "ping",
+			"w": 1916,
+			"s": 2206,
+			"who": "Liz",
+			"q": "Find My at 9:36 pm, \"28 minutes ago\": just south of W 2200 S, about 1/4 mile east of S 2000 W, at the corner of the big field. Earlier that evening a team with thermal cameras went to check the shed where he was seen.",
+			"c": "approx",
+			"addr": "S side of W 2200 S, ~1900 W",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794285383893149",
+			"h": 21.13,
 			"mv": true
 		},
 		{
