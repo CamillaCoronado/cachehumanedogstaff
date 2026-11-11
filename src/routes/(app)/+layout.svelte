@@ -301,7 +301,12 @@
 		const uid = $authUser?.uid;
 		// The sync path calls this too. One check at a time; a call that lands mid-check
 		// runs after it, so the sync's new events are not dropped either.
-		if (!uid) return;
+		// Nothing until the server's copy of the profile is in: on a weak signal the sync
+		// can finish first, and checking then ran with no seen stamp (every popup from the
+		// last 14 days), an empty saved list (overwritten on "Save for later") and
+		// "send to list" off. The first check, once the profile lands, picks up whatever
+		// the sync added.
+		if (!uid || !overlayCheckStarted) return;
 		if (overlayCheckInFlight) {
 			overlayCheckAgain = true;
 			return;
