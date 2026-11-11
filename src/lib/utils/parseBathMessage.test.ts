@@ -107,3 +107,32 @@ describe('parseBathMessage', () => {
 		expect(parseBathMessage('Lilly got a bath', ['Lily', 'Lilyy']).dogNames).toEqual([]);
 	});
 });
+
+describe('parseBathMessage, one sentence at a time', () => {
+	const dogs = ['Titan', 'Gunner', 'Latte'];
+	it('reads a bath followed by an unrelated "need to"', () => {
+		// Kaitlyn, #dog-staff, 2026-11-09. Was dropped whole over the last sentence.
+		const msg =
+			"Titan got a flea and tick bath\nhe had some serious fleas and he's also matted. Not sure if the shampoo was able to kill them all through the mats. We’ll need to address the mats whether that's a good brushing or just shaving him";
+		const r = parseBathMessage(msg, dogs);
+		expect(r.dogNames).toEqual(['Titan']);
+		expect(r.notYet).toBe(false);
+	});
+	it('keeps the real bath when another dog still needs one', () => {
+		expect(parseBathMessage('Gunner got a bath. Latte needs a bath.', dogs).dogNames).toEqual(['Gunner']);
+	});
+	it('reads a bath followed by a question about something else', () => {
+		expect(parseBathMessage('Gunner and latte got baths\nwho fed captain crunch?', dogs).dogNames).toEqual([
+			'Gunner',
+			'Latte'
+		]);
+	});
+	it('finds the dog named a sentence before the bath', () => {
+		expect(parseBathMessage('Titan was so good today. He got a bath', dogs).dogNames).toEqual(['Titan']);
+	});
+	it('still skips when every bath sentence is not yet', () => {
+		const r = parseBathMessage('Titan was great. He needs a bath though', dogs);
+		expect(r.dogNames).toEqual([]);
+		expect(r.notYet).toBe(true);
+	});
+});
