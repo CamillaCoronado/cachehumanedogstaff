@@ -25,7 +25,7 @@ export const PRETZEL: LostDog = {
 		12.6
 	],
 	"summary": {
-		"lastKnown": "SEEN 11/10 1:42pm in the field at W 1800 S & S 2000 W. Before that: 11/9 9:41pm on a home camera S of W 2200 S ~1900 W. Trap was taken back 11/8",
+		"lastKnown": "SEEN 11/10 1:42pm in the field at W 1800 S & S 2000 W. Before that: 11/9 ~9:30pm by the red brick house at 1600 W & 2200 S (neighbor), then 9:41pm on a home camera S of W 2200 S ~1900 W. Trap was taken back 11/8",
 		"hotspot": "dashed circle by the foster home (13 of 28 pings + sightings); 2nd spot is 1600 W just N of 2200 S",
 		"mostActive": "since 11/4 every ping is 6:30pm–6am, but he was seen out in daylight 11/10 1:42pm",
 		"dawn": "green box, W side of S 2000 W just N of 2200 S (NW-corner house to the 2175 S house, lagoon side). 4 of 5 dawn pings. Park on 2000 W by 5:45, engine + lights off, stay in the car, toss smelly food, don't call or chase. Ask the owners first."
@@ -612,6 +612,20 @@ export const PRETZEL: LostDog = {
 		},
 		{
 			"d": "11/9",
+			"t": "~9:30 pm (neighbor)",
+			"k": "seen",
+			"w": 1606,
+			"s": 2196,
+			"who": "Mellissa",
+			"q": "Owners of the red brick corner house at 1600 W & 2200 S told Mellissa (11/10 2:48pm) they saw him around 9:30pm, a few minutes before he showed up on the ~1900 W house's camera. Secondhand, time approximate.",
+			"c": "approx",
+			"addr": "red brick corner house, S 1600 W & W 2200 S",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794347321135169",
+			"h": 21.5
+		},
+		{
+			"d": "11/9",
 			"t": "9:41 pm (camera)",
 			"k": "seen",
 			"w": 1912,
@@ -636,6 +650,19 @@ export const PRETZEL: LostDog = {
 			"addr": "S side of W 2200 S, ~1900 W",
 			"channel": "#pretzel-pings",
 			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794341694409639"
+		},
+		{
+			"d": "11/10",
+			"t": "permission",
+			"k": "land",
+			"w": 1606,
+			"s": 2196,
+			"who": "Mellissa",
+			"q": "Red brick corner house at 1600 W & 2200 S: if he pings there, OK to go on their property and get him.",
+			"c": "ok",
+			"addr": "red brick corner house, S 1600 W & W 2200 S",
+			"channel": "#pretzel-pings",
+			"link": "https://cachehumane.slack.com/archives/C0CEYTPNQNT/p1794347321135169"
 		},
 		{
 			"d": "11/10",
