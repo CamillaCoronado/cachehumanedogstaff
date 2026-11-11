@@ -61,7 +61,37 @@ const YESTERDAY = /\byesterday\b/i;
 /** Any mention of a bath at all, whether or not one happened. */
 const MENTIONS_BATH = /\bbaths?\b|\bbath(?:ed|ing)\b|\bbathe\b/i;
 
+/** Sentences and lines, so a later "we'll need to address the mats" stays its own clause. */
+const SENTENCE_BREAK = /(?<=[.!?])\s+|\n+/;
+
+/**
+ * Reads the report one sentence at a time. A post often reports the bath and then goes
+ * on about something else — "Titan got a flea and tick bath\nhe had some serious fleas
+ * … We'll need to address the mats" — and that later "need to" says nothing about the
+ * bath. So the not-yet and question checks apply only to the sentences that name a bath,
+ * and a not-yet bath sentence ("Latte needs a bath") doesn't drop a real one beside it.
+ */
 export function parseBathMessage(text: string, knownDogNames: string[] = []): ParsedBathMessage {
+	const empty = { dogNames: [], daysAgo: 0, notYet: false };
+	const sentences = text.split(SENTENCE_BREAK).filter((s) => s.trim());
+	const isBath = (s: string) => MENTIONS_BATH.test(s) && !NOT_A_DOG.test(s);
+	const isNotYet = (s: string) => NOT_YET.test(s) || QUESTION.test(s);
+	const bathSentences = sentences.filter(isBath);
+	if (bathSentences.length === 0) return empty;
+	const happened = bathSentences.filter((s) => !isNotYet(s));
+	if (happened.length === 0) return { ...empty, notYet: true };
+
+	const daysAgo = YESTERDAY.test(text) ? 1 : 0;
+	const parsed = parseClause(happened.join('\n'), knownDogNames);
+	if (parsed.dogNames.length > 0) return { ...parsed, daysAgo };
+	// The dog may be named a sentence earlier — "Titan was so good. He got a bath" — so
+	// fall back to everything up to the last bath sentence, minus the not-yet ones.
+	const last = sentences.lastIndexOf(happened[happened.length - 1]);
+	const lead = sentences.slice(0, last + 1).filter((s) => !(isBath(s) && isNotYet(s)));
+	return { ...parseClause(lead.join('\n'), knownDogNames), daysAgo };
+}
+
+function parseClause(text: string, knownDogNames: string[]): ParsedBathMessage {
 	const empty = { dogNames: [], daysAgo: 0, notYet: false };
 	if (!MENTIONS_BATH.test(text) || NOT_A_DOG.test(text)) return empty;
 
